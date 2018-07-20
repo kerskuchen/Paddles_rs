@@ -1,0 +1,9 @@
+[package]
+name = "pongi"
+version = "0.1.0"
+authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+[dependencies]
+gfx = "0.17"
+gfx_window_glutin = "0.25"
+glutin = "0.17"
