@@ -7,3 +7,4 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 gfx = "0.17"
 gfx_window_glutin = "0.25"
 glutin = "0.17"
+rand = "0.5.4"
