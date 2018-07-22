@@ -80,8 +80,11 @@ fn main() {
     info!("Creating window and drawing context");
     //
     let window_builder = glutin::WindowBuilder::new()
+        .with_resizable(false)
+        // TODO(JaSc): Allow windowed mode when https://github.com/tomaka/winit/issues/574
+        //             is fixed. Grabbing the cursor in windowed mode and ALT-TABBING in and out
+        //             is currently broken.
         .with_fullscreen(Some(monitor))
-        .with_dimensions((1280, 720).into())
         .with_title("Pongi".to_string());
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
@@ -132,10 +135,11 @@ fn main() {
     let mut running = true;
     let mut cursor_pos = (0.0, 0.0);
     let mut window_dimensions: (f32, f32) = (0.0, 0.0);
-    let mut can_grab_mouse = false;
+    let mut window_entered_fullscreen = false;
 
     //
     info!("Entering main event loop");
+    info!("------------------------");
     //
     while running {
         events_loop.poll_events(|event| {
@@ -160,21 +164,15 @@ fn main() {
                     }
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
-                        if can_grab_mouse {
+                        if window_entered_fullscreen {
+                            // NOTE: We need to grab/ungrab mouse cursor when ALT-TABBING in and out
+                            //       or the user cannot use their computer correctly in a
+                            //       multi-monitor setup while running our app.
                             window.grab_cursor(has_focus).unwrap();
                         }
                     }
                     WindowEvent::Resized(new_dim) => {
                         info!("Window resized: {:?}", (new_dim.width, new_dim.height));
-                        if new_dim == monitor_logical_dimensions {
-                            // Our window now has its final size, we can safely grab the cursor now
-                            // NOTE: Due to https://github.com/tomaka/winit/issues/574
-                            //       we need some precautions when grabbing the mouse cursor
-                            // TODO(JaSc): Remove workaround when upstream is fixed
-                            info!("Mouse grabbed");
-                            can_grab_mouse = true;
-                            window.grab_cursor(true).unwrap();
-                        }
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
@@ -182,6 +180,18 @@ fn main() {
                             &mut main_depth,
                         );
                         window_dimensions = (new_dim.width as f32, new_dim.height as f32);
+
+                        // Grab mouse cursor in window
+                        // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
+                        // make sure that our resized window now spans the full screen before we
+                        // allow grabbing the mouse cursor.
+                        // TODO(JaSc): Remove workaround when upstream is fixed
+                        if new_dim == monitor_logical_dimensions {
+                            // Our window now has its final size, we can safely grab the cursor now
+                            info!("Mouse cursor grabbed");
+                            window_entered_fullscreen = true;
+                            window.grab_cursor(true).unwrap();
+                        }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
                         let cursor_x = position.x as f32 / window_dimensions.0;
