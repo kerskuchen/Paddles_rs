@@ -2,18 +2,21 @@
 extern crate gfx;
 extern crate gfx_window_glutin;
 extern crate glutin;
-extern crate rand;
 
-use rand::prelude::*;
+#[macro_use]
+extern crate log;
+extern crate fern;
+extern crate rand;
 
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::{Event, GlContext, KeyboardInput, WindowEvent};
+use rand::prelude::*;
 
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::DepthStencil;
 
-gfx_defines!{
+gfx_defines! {
     vertex Vertex {
         pos: [f32; 2] = "a_Pos",
         color: [f32; 4] = "a_Color",
@@ -26,28 +29,69 @@ gfx_defines!{
 }
 
 fn main() {
-    let mut events_loop = glutin::EventsLoop::new();
-    let monitor = Some(
-        events_loop
-            .get_available_monitors()
-            .nth(1)
-            .expect("No monitor found"),
-    );
-    // NOTE: Uncomment the following line to switch to windowed mode
-    //let monitor = None;
+    //
+    info!("Initializing logger");
+    //
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}-{}: {}",
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Trace)
+        .level_for("gfx_device_gl", log::LevelFilter::Warn)
+        .level_for("winit", log::LevelFilter::Warn)
+        .chain(std::io::stdout())
+        .apply()
+        .expect("Could not initialize logger");
 
-    // Create window and drawing context
+    // ---------------------------------------------------------------------------------------------
+    // Video subsystem initialization
+    //
+
+    //
+    info!("Getting monitor and its properties");
+    //
+    let mut events_loop = glutin::EventsLoop::new();
+    // TODO(JaSc): Make config to choose on which monitor to start the app
+    let monitor_id = 0;
+    let monitor = events_loop
+        .get_available_monitors()
+        .nth(monitor_id)
+        .unwrap_or_else(|| {
+            panic!("No monitor with id {} found", monitor_id);
+        });
+    let monitor_logical_dimensions = monitor
+        .get_dimensions()
+        .to_logical(monitor.get_hidpi_factor());
+    info!(
+        "Found monitor {} with logical dimensions: {:?}",
+        monitor_id,
+        (
+            monitor_logical_dimensions.width,
+            monitor_logical_dimensions.height
+        )
+    );
+
+    //
+    info!("Creating window and drawing context");
+    //
     let window_builder = glutin::WindowBuilder::new()
-        .with_title("Pongi".to_string())
-        .with_fullscreen(monitor)
-        .with_dimensions((1280, 720).into());
+        .with_fullscreen(Some(monitor))
+        .with_dimensions((1280, 720).into())
+        .with_title("Pongi".to_string());
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
         .with_vsync(true);
     let (window, mut device, mut factory, main_color, mut main_depth) =
         gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
-    // Create create command buffer and pipeline state object
+    //
+    info!("Creating command buffer and pipeline state object");
+    //
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
     let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
     let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
@@ -55,13 +99,17 @@ fn main() {
         .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
         .expect("Failed to create a pipeline state object");
 
-    // Create pipeline data with empty vertexbuffer
+    //
+    info!("Creating pipeline data object with empty vertexbuffer");
+    //
     let mut pipeline_data = pipe::Data {
         vbuf: factory.create_vertex_buffer(&[]),
         out: main_color,
     };
 
-    // Create scene
+    //
+    info!("Creating dummy scene");
+    //
     let mut render_context = Rendercontext::new();
     let mut rng = rand::thread_rng();
     for _ in 0..100 {
@@ -76,12 +124,19 @@ fn main() {
         render_context.add_quad(pos, dim, color);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Main loop
+    //
+
     // State variables
     let mut running = true;
     let mut cursor_pos = (0.0, 0.0);
     let mut window_dimensions: (f32, f32) = (0.0, 0.0);
+    let mut can_grab_mouse = false;
 
-    // Begin mainloop
+    //
+    info!("Entering main event loop");
+    //
     while running {
         events_loop.poll_events(|event| {
             if let Event::WindowEvent { event, .. } = event {
@@ -103,7 +158,23 @@ fn main() {
                             _ => (),
                         }
                     }
+                    WindowEvent::Focused(has_focus) => {
+                        info!("Window has focus: {}", has_focus);
+                        if can_grab_mouse {
+                            window.grab_cursor(has_focus).unwrap();
+                        }
+                    }
                     WindowEvent::Resized(new_dim) => {
+                        info!("Window resized: {:?}", (new_dim.width, new_dim.height));
+                        if new_dim == monitor_logical_dimensions {
+                            // Our window now has its final size, we can safely grab the cursor now
+                            // NOTE: Due to https://github.com/tomaka/winit/issues/574
+                            //       we need some precautions when grabbing the mouse cursor
+                            // TODO(JaSc): Remove workaround when upstream is fixed
+                            info!("Mouse grabbed");
+                            can_grab_mouse = true;
+                            window.grab_cursor(true).unwrap();
+                        }
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
@@ -122,15 +193,16 @@ fn main() {
             }
         });
 
+        // Prepare vertex data
         let aspect_ratio = (window_dimensions.0 as f32) / (window_dimensions.1 as f32);
         let (vertices, indices) = render_context.get_vertices_indices(aspect_ratio, cursor_pos);
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&vertices, &*indices);
         pipeline_data.vbuf = vertex_buffer;
 
+        // Draw and refresh
         const BACKGROUND_COLOR: [f32; 4] = [0.7, 0.4, 0.2, 1.0];
         encoder.clear(&pipeline_data.out, BACKGROUND_COLOR);
         encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
-
         encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
         device.cleanup();
