@@ -70,7 +70,7 @@ fn main() {
     info!("Getting monitor and its properties");
     //
     let mut events_loop = glutin::EventsLoop::new();
-    // TODO(JaSc): Make config to choose on which monitor to start the app
+    // TODO(JaSc): Make config to choose on which monitor to start the app on
     let monitor_id = 0;
     let monitor = events_loop
         .get_available_monitors()
@@ -93,16 +93,24 @@ fn main() {
     //
     info!("Creating window and drawing context");
     //
+    let fullscreen_mode = true;
+    let fullscreen_monitor = match fullscreen_mode {
+        true => Some(monitor),
+        false => None,
+    };
+
     let window_builder = glutin::WindowBuilder::new()
-        .with_resizable(false)
-        // TODO(JaSc): Allow windowed mode when https://github.com/tomaka/winit/issues/574
+        .with_resizable(!fullscreen_mode)
+        // TODO(JaSc): Allow cursor grabbing in windowed mode when 
+        //             https://github.com/tomaka/winit/issues/574
         //             is fixed. Grabbing the cursor in windowed mode and ALT-TABBING in and out
         //             is currently broken.
-        .with_fullscreen(Some(monitor))
+        .with_fullscreen(fullscreen_monitor)
         .with_title("Pongi".to_string());
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
         .with_vsync(true);
+
     let (window, mut device, mut factory, frame_buffer, mut main_depth) =
         gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
@@ -110,8 +118,10 @@ fn main() {
     info!("Creating command buffer and pipeline state object");
     //
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
+
     let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
     let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
+
     let pipeline_state_object = factory
         .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
         .expect("Failed to create a pipeline state object");
@@ -192,7 +202,7 @@ fn main() {
                     }
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
-                        if window_entered_fullscreen {
+                        if fullscreen_mode && window_entered_fullscreen {
                             // NOTE: We need to grab/ungrab mouse cursor when ALT-TABBING in and out
                             //       or the user cannot use their computer correctly in a
                             //       multi-monitor setup while running our app.
@@ -211,10 +221,10 @@ fn main() {
 
                         // Grab mouse cursor in window
                         // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
-                        // make sure that our resized window now spans the full screen before we
-                        // allow grabbing the mouse cursor.
+                        //       make sure that our resized window now spans the full screen before
+                        //       we allow grabbing the mouse cursor.
                         // TODO(JaSc): Remove workaround when upstream is fixed
-                        if new_dim == monitor_logical_dimensions {
+                        if fullscreen_mode && new_dim == monitor_logical_dimensions {
                             // Our window now has its final size, we can safely grab the cursor now
                             info!("Mouse cursor grabbed");
                             window_entered_fullscreen = true;
