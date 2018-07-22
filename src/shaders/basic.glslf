@@ -8,6 +8,7 @@ in vec2 v_Uv;
 out vec4 Target0;
 
 void main() {
+    // Transparent parts of a texture will be filled with with the vertex color
     vec4 tex_color = texture(u_Sampler, v_Uv);
     float tex_alpha = tex_color.a;
     vec3 rgb_color = tex_color.rgb * tex_alpha + v_Color.rgb * (1.0 - tex_alpha);

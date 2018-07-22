@@ -1,3 +1,30 @@
+/*
+TODO(JaSc):
+  - Pixel perfect renderer with generalized (pixel independent) coordinate system
+    - Render to offscreen buffer and blit to main screen
+    - Static world camera 
+    - Transformation mouse <-> screen <-> world 
+  - Basic sprite loading and Bitmap font rendering (no sprite atlas yet)
+  - Game input + keyboard/mouse-support
+  - Gamestate + logic + timing
+  - Audio playback
+  - Some nice glowing shader effects
+  - BG music with PHAT BEATSIES
+
+BACKLOG(JaSc):
+  - The following are things to remember to extract out of an old C project
+    x Debug macro to print a variable and it's name quickly
+    - Be able to conveniently do debug printing on screen
+    - Moving camera system
+    - Atlas textures and sprite/quad/line-batching
+    - Atlas and font packer
+    - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
+    - Gamepad input
+    - Mouse zooming
+    - Raycasting and collision detection
+    - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
+*/
+
 #[macro_use]
 extern crate gfx;
 extern crate gfx_window_glutin;
@@ -40,6 +67,42 @@ gfx_defines! {
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
         target: gfx::RenderTarget<ColorFormat> = "Target0",
     }
+}
+
+/// A macro used for debugging which returns a string containing the name and value of a given
+/// variable.
+///
+/// It uses the `stringify` macro internally and requires the input to be an identifier.
+///
+/// # Examples
+///
+/// ```
+/// let name = 5;
+/// assert_eq!(dformat!(name), "name = 5");
+/// ```
+macro_rules! dformat {
+    ($x:ident) => {
+        format!("{} = {:?}", stringify!($x), $x)
+    };
+}
+
+/// A macro used for debugging which prints a string containing the name and value of a given
+/// variable.
+///
+/// It uses the `dformat` macro internally and requires the input to be an identifier.
+/// For more information see the `dformat` macro
+///
+/// # Examples
+///
+/// ```
+/// let name = 5;
+/// dprintln!(name);
+/// // prints: "name = 5"
+/// ```
+macro_rules! dprintln {
+    ($x:ident) => {
+        println!("{}", dformat!($x));
+    };
 }
 
 fn main() {
