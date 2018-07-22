@@ -5,6 +5,6 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
 [dependencies]
 gfx = "0.17"
-gfx_window_glutin = "0.25"
-glutin = "0.17"
+gfx_window_sdl = "0.8.0"
+sdl2 = "0.31.0"
 rand = "0.5.4"
