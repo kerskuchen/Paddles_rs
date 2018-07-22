@@ -5,6 +5,7 @@ extern crate glutin;
 
 #[macro_use]
 extern crate log;
+extern crate cgmath;
 extern crate fern;
 extern crate image;
 extern crate rand;
@@ -13,6 +14,9 @@ use gfx::traits::Factory;
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
+
+use cgmath::prelude::*;
+use cgmath::Matrix4;
 use rand::prelude::*;
 
 pub type ColorFormat = gfx::format::Rgba8;
@@ -25,9 +29,15 @@ gfx_defines! {
         color: [f32; 4] = "a_Color",
     }
 
+    constant Locals {
+        transform: [[f32; 4]; 4] = "u_Transform",
+    }
+
     pipeline pipe {
         vertex_buffer: gfx::VertexBuffer<Vertex> = (),
-        texture: gfx::TextureSampler<[f32; 4]> = "u_sampler",
+        locals: gfx::ConstantBuffer<Locals> = "Locals",
+        transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
+        texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
         target: gfx::RenderTarget<ColorFormat> = "Target0",
     }
 }
@@ -113,9 +123,15 @@ fn main() {
     let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
     let atlas_texture = debug_load_texture(&mut factory);
     let texture_sampler = factory.create_sampler(sampler_info);
+
+    let projection_mat = Matrix4::zero().into();
+    let locals_buffer = factory.create_constant_buffer(1);
+
     let mut pipeline_data = pipe::Data {
         vertex_buffer: factory.create_vertex_buffer(&[]),
         texture: (atlas_texture, texture_sampler),
+        locals: locals_buffer,
+        transform: projection_mat,
         target: frame_buffer,
     };
 
@@ -126,7 +142,8 @@ fn main() {
     let mut rng = rand::thread_rng();
     for _ in 0..100 {
         let pos = (rng.gen_range(-1.0, 1.0), rng.gen_range(-1.0, 1.0));
-        let dim = (rng.gen_range(0.01, 0.3), rng.gen_range(0.01, 0.3));
+        let size = rng.gen_range(0.02, 0.4);
+        let dim = (size, size);
         let color: [f32; 4] = [
             rng.gen_range(0.2, 0.9),
             rng.gen_range(0.2, 0.9),
@@ -135,6 +152,7 @@ fn main() {
         ];
         render_context.add_quad(pos, dim, color);
     }
+    render_context.add_quad((0.0, 0.0), (1.0, 1.0), [1.0, 0.0, 0.0, 1.0]);
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -206,16 +224,38 @@ fn main() {
                     WindowEvent::CursorMoved { position, .. } => {
                         let cursor_x = position.x as f32 / window_dimensions.0;
                         let cursor_y = position.y as f32 / window_dimensions.1;
-                        cursor_pos = (2.0 * cursor_x - 1.0, -2.0 * cursor_y + 1.0);
+                        cursor_pos = (cursor_x - 0.5, -1.0 * cursor_y + 0.5);
                     }
                     _ => (),
                 }
             }
         });
 
-        // Prepare vertex data
+        // Aspect ratio correction for view and cursor
         let aspect_ratio = (window_dimensions.0 as f32) / (window_dimensions.1 as f32);
-        let (vertices, indices) = render_context.get_vertices_indices(aspect_ratio, cursor_pos);
+        let (width, height) = if aspect_ratio > 1.0 {
+            (1.0 * aspect_ratio, 1.0)
+        } else {
+            (1.0, 1.0 / aspect_ratio)
+        };
+        let cursor_pos = if aspect_ratio > 1.0 {
+            (cursor_pos.0 * aspect_ratio, cursor_pos.1)
+        } else {
+            (cursor_pos.0, cursor_pos.1 / aspect_ratio)
+        };
+
+        let projection_mat = cgmath::ortho(
+            -0.5 * width,
+            0.5 * width,
+            -0.5 * height,
+            0.5 * height,
+            -1.0,
+            1.0,
+        ).into();
+        pipeline_data.transform = projection_mat;
+
+        // Prepare vertex data
+        let (vertices, indices) = render_context.get_vertices_indices(cursor_pos);
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&vertices, &*indices);
         pipeline_data.vertex_buffer = vertex_buffer;
 
@@ -258,21 +298,12 @@ impl Rendercontext {
         self.quads.push(Quad { pos, dim, color });
     }
 
-    fn get_vertices_indices(
-        &self,
-        aspect_ratio: f32,
-        cursor_pos: (f32, f32),
-    ) -> (Vec<Vertex>, Vec<u16>) {
+    fn get_vertices_indices(&self, cursor_pos: (f32, f32)) -> (Vec<Vertex>, Vec<u16>) {
         let (mut vertices, mut indices) = (vec![], vec![]);
 
         // Fill vertices and indices arrays with quads
         for (quad_index, quad) in self.quads.iter().enumerate() {
-            quad.append_vertices_indices(
-                (quad_index) as u16,
-                aspect_ratio,
-                &mut vertices,
-                &mut indices,
-            );
+            quad.append_vertices_indices((quad_index) as u16, &mut vertices, &mut indices);
         }
 
         // Add dummy quad for cursor
@@ -282,12 +313,7 @@ impl Rendercontext {
             dim: (0.02, 0.02),
             color: CURSOR_COLOR,
         };
-        cursor_quad.append_vertices_indices(
-            self.quads.len() as u16,
-            aspect_ratio,
-            &mut vertices,
-            &mut indices,
-        );
+        cursor_quad.append_vertices_indices(self.quads.len() as u16, &mut vertices, &mut indices);
 
         (vertices, indices)
     }
@@ -304,36 +330,32 @@ impl Quad {
     fn append_vertices_indices(
         &self,
         quad_index: u16,
-        ratio: f32,
         vertices: &mut Vec<Vertex>,
         indices: &mut Vec<u16>,
     ) {
         let pos = self.pos;
-        let (half_width, half_height) = if ratio > 1.0 {
-            (self.dim.0 / ratio, self.dim.1)
-        } else {
-            (self.dim.0, self.dim.1 * ratio)
-        };
+        let half_width = 0.5 * self.dim.0;
+        let half_height = 0.5 * self.dim.1;
 
         vertices.extend(&[
             Vertex {
-                pos: [pos.0 + half_width, pos.1 - half_height],
-                uv: [1.0, 0.0],
-                color: self.color,
-            },
-            Vertex {
                 pos: [pos.0 - half_width, pos.1 - half_height],
-                uv: [0.0, 0.0],
-                color: self.color,
-            },
-            Vertex {
-                pos: [pos.0 - half_width, pos.1 + half_height],
                 uv: [0.0, 1.0],
                 color: self.color,
             },
             Vertex {
-                pos: [pos.0 + half_width, pos.1 + half_height],
+                pos: [pos.0 + half_width, pos.1 - half_height],
                 uv: [1.0, 1.0],
+                color: self.color,
+            },
+            Vertex {
+                pos: [pos.0 + half_width, pos.1 + half_height],
+                uv: [1.0, 0.0],
+                color: self.color,
+            },
+            Vertex {
+                pos: [pos.0 - half_width, pos.1 + half_height],
+                uv: [0.0, 0.0],
                 color: self.color,
             },
         ]);
