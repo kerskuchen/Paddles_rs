@@ -6,11 +6,13 @@ extern crate glutin;
 #[macro_use]
 extern crate log;
 extern crate fern;
+extern crate image;
 extern crate rand;
 
+use gfx::traits::Factory;
 use gfx::traits::FactoryExt;
 use gfx::Device;
-use glutin::{Event, GlContext, KeyboardInput, WindowEvent};
+use glutin::GlContext;
 use rand::prelude::*;
 
 pub type ColorFormat = gfx::format::Rgba8;
@@ -19,12 +21,14 @@ pub type DepthFormat = gfx::format::DepthStencil;
 gfx_defines! {
     vertex Vertex {
         pos: [f32; 2] = "a_Pos",
+        uv: [f32; 2] = "a_Uv",
         color: [f32; 4] = "a_Color",
     }
 
     pipeline pipe {
-        vbuf: gfx::VertexBuffer<Vertex> = (),
-        out: gfx::RenderTarget<ColorFormat> = "Target0",
+        vertex_buffer: gfx::VertexBuffer<Vertex> = (),
+        texture: gfx::TextureSampler<[f32; 4]> = "u_sampler",
+        target: gfx::RenderTarget<ColorFormat> = "Target0",
     }
 }
 
@@ -89,7 +93,7 @@ fn main() {
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
         .with_vsync(true);
-    let (window, mut device, mut factory, main_color, mut main_depth) =
+    let (window, mut device, mut factory, frame_buffer, mut main_depth) =
         gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
     //
@@ -103,11 +107,16 @@ fn main() {
         .expect("Failed to create a pipeline state object");
 
     //
-    info!("Creating pipeline data object with empty vertexbuffer");
+    info!("Creating pipeline data object with dummy texture and empty vertexbuffer");
     //
+    use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
+    let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
+    let atlas_texture = debug_load_texture(&mut factory);
+    let texture_sampler = factory.create_sampler(sampler_info);
     let mut pipeline_data = pipe::Data {
-        vbuf: factory.create_vertex_buffer(&[]),
-        out: main_color,
+        vertex_buffer: factory.create_vertex_buffer(&[]),
+        texture: (atlas_texture, texture_sampler),
+        target: frame_buffer,
     };
 
     //
@@ -142,6 +151,7 @@ fn main() {
     info!("------------------------");
     //
     while running {
+        use glutin::{Event, KeyboardInput, WindowEvent};
         events_loop.poll_events(|event| {
             if let Event::WindowEvent { event, .. } = event {
                 match event {
@@ -176,7 +186,7 @@ fn main() {
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
-                            &mut pipeline_data.out,
+                            &mut pipeline_data.target,
                             &mut main_depth,
                         );
                         window_dimensions = (new_dim.width as f32, new_dim.height as f32);
@@ -207,16 +217,31 @@ fn main() {
         let aspect_ratio = (window_dimensions.0 as f32) / (window_dimensions.1 as f32);
         let (vertices, indices) = render_context.get_vertices_indices(aspect_ratio, cursor_pos);
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&vertices, &*indices);
-        pipeline_data.vbuf = vertex_buffer;
+        pipeline_data.vertex_buffer = vertex_buffer;
 
         // Draw and refresh
         const BACKGROUND_COLOR: [f32; 4] = [0.7, 0.4, 0.2, 1.0];
-        encoder.clear(&pipeline_data.out, BACKGROUND_COLOR);
+        encoder.clear(&pipeline_data.target, BACKGROUND_COLOR);
         encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
         encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
         device.cleanup();
     }
+}
+
+fn debug_load_texture<F, R>(factory: &mut F) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
+where
+    F: gfx::Factory<R>,
+    R: gfx::Resources,
+{
+    use gfx::format::Rgba8;
+    let img = image::open("resources/dummy.png").unwrap().to_rgba();
+    let (width, height) = img.dimensions();
+    let kind = gfx::texture::Kind::D2(width as u16, height as u16, gfx::texture::AaMode::Single);
+    let (_, view) = factory
+        .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&img])
+        .unwrap();
+    view
 }
 
 #[derive(Debug)]
@@ -293,18 +318,22 @@ impl Quad {
         vertices.extend(&[
             Vertex {
                 pos: [pos.0 + half_width, pos.1 - half_height],
+                uv: [1.0, 0.0],
                 color: self.color,
             },
             Vertex {
                 pos: [pos.0 - half_width, pos.1 - half_height],
+                uv: [0.0, 0.0],
                 color: self.color,
             },
             Vertex {
                 pos: [pos.0 - half_width, pos.1 + half_height],
+                uv: [0.0, 1.0],
                 color: self.color,
             },
             Vertex {
                 pos: [pos.0 + half_width, pos.1 + half_height],
+                uv: [1.0, 1.0],
                 color: self.color,
             },
         ]);
