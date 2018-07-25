@@ -51,21 +51,17 @@ pub type DepthFormat = gfx::format::DepthStencil;
 
 gfx_defines! {
     vertex Vertex {
-        pos: [f32; 2] = "a_Pos",
+        pos: [f32; 4] = "a_Pos",
         uv: [f32; 2] = "a_Uv",
         color: [f32; 4] = "a_Color",
     }
 
-    constant Locals {
-        transform: [[f32; 4]; 4] = "u_Transform",
-    }
-
     pipeline pipe {
         vertex_buffer: gfx::VertexBuffer<Vertex> = (),
-        locals: gfx::ConstantBuffer<Locals> = "Locals",
         transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
-        target: gfx::RenderTarget<ColorFormat> = "Target0",
+        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
+        out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 }
 
@@ -106,8 +102,7 @@ macro_rules! dprintln {
 }
 
 fn main() {
-    //
-    info!("Initializing logger");
+    // Initializing logger
     //
     fern::Dispatch::new()
         .format(|out, message, record| {
@@ -129,24 +124,26 @@ fn main() {
     // Video subsystem initialization
     //
 
+    // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
+    const MONITOR_ID: usize = 0;
+    const FULLSCREEN_MODE: bool = false;
+
     //
     info!("Getting monitor and its properties");
     //
     let mut events_loop = glutin::EventsLoop::new();
-    // TODO(JaSc): Make config to choose on which monitor to start the app on
-    let monitor_id = 0;
     let monitor = events_loop
         .get_available_monitors()
-        .nth(monitor_id)
+        .nth(MONITOR_ID)
         .unwrap_or_else(|| {
-            panic!("No monitor with id {} found", monitor_id);
+            panic!("No monitor with id {} found", MONITOR_ID);
         });
     let monitor_logical_dimensions = monitor
         .get_dimensions()
         .to_logical(monitor.get_hidpi_factor());
     info!(
         "Found monitor {} with logical dimensions: {:?}",
-        monitor_id,
+        MONITOR_ID,
         (
             monitor_logical_dimensions.width,
             monitor_logical_dimensions.height
@@ -156,14 +153,12 @@ fn main() {
     //
     info!("Creating window and drawing context");
     //
-    let fullscreen_mode = true;
-    let fullscreen_monitor = match fullscreen_mode {
+    let fullscreen_monitor = match FULLSCREEN_MODE {
         true => Some(monitor),
         false => None,
     };
-
     let window_builder = glutin::WindowBuilder::new()
-        .with_resizable(!fullscreen_mode)
+        .with_resizable(!FULLSCREEN_MODE)
         // TODO(JaSc): Allow cursor grabbing in windowed mode when 
         //             https://github.com/tomaka/winit/issues/574
         //             is fixed. Grabbing the cursor in windowed mode and ALT-TABBING in and out
@@ -173,8 +168,7 @@ fn main() {
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
         .with_vsync(true);
-
-    let (window, mut device, mut factory, frame_buffer, mut main_depth) =
+    let (window, mut device, mut factory, screen_rendertarget, screen_depth_rendertarget) =
         gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
     //
@@ -184,7 +178,6 @@ fn main() {
 
     let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
     let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
-
     let pipeline_state_object = factory
         .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
         .expect("Failed to create a pipeline state object");
@@ -194,19 +187,26 @@ fn main() {
     //
     use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
     let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
-    let atlas_texture = debug_load_texture(&mut factory);
+    let dummy_texture = debug_load_texture(&mut factory);
     let texture_sampler = factory.create_sampler(sampler_info);
-
-    let projection_mat = Matrix4::zero().into();
-    let locals_buffer = factory.create_constant_buffer(1);
 
     let mut pipeline_data = pipe::Data {
         vertex_buffer: factory.create_vertex_buffer(&[]),
-        texture: (atlas_texture, texture_sampler),
-        locals: locals_buffer,
-        transform: projection_mat,
-        target: frame_buffer,
+        texture: (dummy_texture.clone(), texture_sampler.clone()),
+        transform: Matrix4::identity().into(),
+        out_color: screen_rendertarget.clone(),
+        out_depth: screen_depth_rendertarget.clone(),
     };
+
+    //
+    info!("Creating offscreen render target");
+    //
+    let (_, canvas_shader_resource_view, canvas_render_target_view) = factory
+        .create_render_target::<ColorFormat>(320, 180)
+        .unwrap();
+    let canvas_depth_render_target_view = factory
+        .create_depth_stencil_view_only::<DepthFormat>(320, 180)
+        .unwrap();
 
     //
     info!("Creating dummy scene");
@@ -214,7 +214,7 @@ fn main() {
     let mut render_context = Rendercontext::new();
     let mut rng = rand::thread_rng();
     for _ in 0..100 {
-        let pos = (rng.gen_range(-1.0, 1.0), rng.gen_range(-1.0, 1.0));
+        let pos = (rng.gen_range(-1.0, 1.0), rng.gen_range(-1.0, 1.0), 0.5);
         let size = rng.gen_range(0.02, 0.4);
         let dim = (size, size);
         let color: [f32; 4] = [
@@ -225,7 +225,7 @@ fn main() {
         ];
         render_context.add_quad(pos, dim, color);
     }
-    render_context.add_quad((0.0, 0.0), (1.0, 1.0), [1.0, 0.0, 0.0, 1.0]);
+    //render_context.add_quad((0.0, 0.0), (1.0, 1.0), [1.0, 0.0, 0.0, 1.0]);
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -265,7 +265,7 @@ fn main() {
                     }
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
-                        if fullscreen_mode && window_entered_fullscreen {
+                        if FULLSCREEN_MODE && window_entered_fullscreen {
                             // NOTE: We need to grab/ungrab mouse cursor when ALT-TABBING in and out
                             //       or the user cannot use their computer correctly in a
                             //       multi-monitor setup while running our app.
@@ -277,8 +277,8 @@ fn main() {
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
-                            &mut pipeline_data.target,
-                            &mut main_depth,
+                            &mut pipeline_data.out_color,
+                            &mut pipeline_data.out_depth,
                         );
                         window_dimensions = (new_dim.width as f32, new_dim.height as f32);
 
@@ -287,7 +287,7 @@ fn main() {
                         //       make sure that our resized window now spans the full screen before
                         //       we allow grabbing the mouse cursor.
                         // TODO(JaSc): Remove workaround when upstream is fixed
-                        if fullscreen_mode && new_dim == monitor_logical_dimensions {
+                        if FULLSCREEN_MODE && new_dim == monitor_logical_dimensions {
                             // Our window now has its final size, we can safely grab the cursor now
                             info!("Mouse cursor grabbed");
                             window_entered_fullscreen = true;
@@ -317,6 +317,8 @@ fn main() {
             (cursor_pos.0, cursor_pos.1 / aspect_ratio)
         };
 
+        // Draw canvas
+        // -----------------------------------------------------------------------------------------
         let projection_mat = cgmath::ortho(
             -0.5 * width,
             0.5 * width,
@@ -324,23 +326,118 @@ fn main() {
             0.5 * height,
             -1.0,
             1.0,
-        ).into();
-        pipeline_data.transform = projection_mat;
-
-        // Prepare vertex data
+        );
         let (vertices, indices) = render_context.get_vertices_indices(cursor_pos);
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&vertices, &*indices);
-        pipeline_data.vertex_buffer = vertex_buffer;
 
-        // Draw and refresh
-        const BACKGROUND_COLOR: [f32; 4] = [0.7, 0.4, 0.2, 1.0];
-        encoder.clear(&pipeline_data.target, BACKGROUND_COLOR);
+        pipeline_data.transform = projection_mat.into();
+        pipeline_data.vertex_buffer = vertex_buffer;
+        pipeline_data.texture.0 = dummy_texture.clone();
+        pipeline_data.out_color = canvas_render_target_view.clone();
+        pipeline_data.out_depth = canvas_depth_render_target_view.clone();
+
+        const CANVAS_COLOR: [f32; 4] = [0.7, 0.4, 0.2, 1.0];
+        encoder.clear(&pipeline_data.out_color, CANVAS_COLOR);
+        encoder.clear_depth(&pipeline_data.out_depth, 1.0);
         encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
+
+        // Draw canvas to screen
+        // -----------------------------------------------------------------------------------------
+        const COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+        const SQUARE: &[Vertex] = &[
+            Vertex {
+                pos: [1.0, -1.0, 0.0, 1.0],
+                uv: [1.0, 0.0],
+                color: COLOR,
+            },
+            Vertex {
+                pos: [-1.0, -1.0, 0.0, 1.0],
+                uv: [0.0, 0.0],
+                color: COLOR,
+            },
+            Vertex {
+                pos: [-1.0, 1.0, 0.0, 1.0],
+                uv: [0.0, 1.0],
+                color: COLOR,
+            },
+            Vertex {
+                pos: [1.0, 1.0, 0.0, 1.0],
+                uv: [1.0, 1.0],
+                color: COLOR,
+            },
+        ];
+        const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
+
+        let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(SQUARE, INDICES);
+        let projection_mat = Matrix4::identity();
+
+        pipeline_data.transform = projection_mat.into();
+        pipeline_data.vertex_buffer = vertex_buffer;
+        pipeline_data.texture.0 = canvas_shader_resource_view.clone();
+        pipeline_data.out_color = screen_rendertarget.clone();
+        pipeline_data.out_depth = screen_depth_rendertarget.clone();
+
+        encoder.clear(&pipeline_data.out_color, COLOR);
+        encoder.clear_depth(&pipeline_data.out_depth, 1.0);
+        encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
+
         encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
         device.cleanup();
     }
 }
+
+// fn draw_canvas_to_screen<C, R, F>(
+//     factory: &mut F,
+//     encoder: &mut gfx::Encoder<R, C>,
+//     mut pipeline_data: pipe::Data<R>,
+//     pipeline_state_object: &gfx::PipelineState<R, pipe::Meta>,
+//     screen_rendertarget: gfx::handle::RenderTargetView<R, ColorFormat>,
+//     screen_depth_rendertarget: gfx::handle::DepthStencilView<R, DepthFormat>,
+//     canvas_shader_resource_view: gfx::handle::ShaderResourceView<R, [f32; 4]>,
+// ) where
+//     R: gfx::Resources,
+//     C: gfx::CommandBuffer<R>,
+//     F: gfx::Factory<R>,
+// {
+//     const COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+//     const SQUARE: &[Vertex] = &[
+//         Vertex {
+//             pos: [1.0, -1.0, 0.0, 1.0],
+//             uv: [1.0, 0.0],
+//             color: COLOR,
+//         },
+//         Vertex {
+//             pos: [-1.0, -1.0, 0.0, 1.0],
+//             uv: [0.0, 0.0],
+//             color: COLOR,
+//         },
+//         Vertex {
+//             pos: [-1.0, 1.0, 0.0, 1.0],
+//             uv: [0.0, 1.0],
+//             color: COLOR,
+//         },
+//         Vertex {
+//             pos: [1.0, 1.0, 0.0, 1.0],
+//             uv: [1.0, 1.0],
+//             color: COLOR,
+//         },
+//     ];
+//     const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
+//
+//     let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(SQUARE, INDICES);
+//     let projection_mat = Matrix4::identity().into();
+//
+//     pipeline_data.transform = projection_mat;
+//     pipeline_data.vertex_buffer = vertex_buffer;
+//     pipeline_data.texture.0 = canvas_shader_resource_view;
+//     pipeline_data.out_color = screen_rendertarget;
+//     pipeline_data.out_depth = screen_depth_rendertarget;
+//
+//     encoder.clear(&pipeline_data.out_color, COLOR);
+//     encoder.clear_depth(&pipeline_data.out_depth, 1.0);
+//     encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
+// }
 
 fn debug_load_texture<F, R>(factory: &mut F) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
 where
@@ -367,7 +464,7 @@ impl Rendercontext {
         Rendercontext { quads: vec![] }
     }
 
-    fn add_quad(&mut self, pos: (f32, f32), dim: (f32, f32), color: [f32; 4]) {
+    fn add_quad(&mut self, pos: (f32, f32, f32), dim: (f32, f32), color: [f32; 4]) {
         self.quads.push(Quad { pos, dim, color });
     }
 
@@ -382,7 +479,7 @@ impl Rendercontext {
         // Add dummy quad for cursor
         const CURSOR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
         let cursor_quad = Quad {
-            pos: cursor_pos,
+            pos: (cursor_pos.0, cursor_pos.1, 0.0),
             dim: (0.02, 0.02),
             color: CURSOR_COLOR,
         };
@@ -394,7 +491,7 @@ impl Rendercontext {
 
 #[derive(Debug, Clone, Copy)]
 struct Quad {
-    pos: (f32, f32),
+    pos: (f32, f32, f32),
     dim: (f32, f32),
     color: [f32; 4],
 }
@@ -412,22 +509,22 @@ impl Quad {
 
         vertices.extend(&[
             Vertex {
-                pos: [pos.0 - half_width, pos.1 - half_height],
+                pos: [pos.0 - half_width, pos.1 - half_height, pos.2, 1.0],
                 uv: [0.0, 1.0],
                 color: self.color,
             },
             Vertex {
-                pos: [pos.0 + half_width, pos.1 - half_height],
+                pos: [pos.0 + half_width, pos.1 - half_height, pos.2, 1.0],
                 uv: [1.0, 1.0],
                 color: self.color,
             },
             Vertex {
-                pos: [pos.0 + half_width, pos.1 + half_height],
+                pos: [pos.0 + half_width, pos.1 + half_height, pos.2, 1.0],
                 uv: [1.0, 0.0],
                 color: self.color,
             },
             Vertex {
-                pos: [pos.0 - half_width, pos.1 + half_height],
+                pos: [pos.0 - half_width, pos.1 + half_height, pos.2, 1.0],
                 uv: [0.0, 0.0],
                 color: self.color,
             },
