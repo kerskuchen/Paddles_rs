@@ -56,7 +56,14 @@ gfx_defines! {
         color: [f32; 4] = "a_Color",
     }
 
-    pipeline pipe {
+    pipeline screen_pipe {
+        vertex_buffer: gfx::VertexBuffer<Vertex> = (),
+        transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
+        texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
+        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
+    }
+
+    pipeline canvas_pipe {
         vertex_buffer: gfx::VertexBuffer<Vertex> = (),
         transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
@@ -168,38 +175,26 @@ fn main() {
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2)))
         .with_vsync(true);
-    let (window, mut device, mut factory, screen_rendertarget, screen_depth_rendertarget) =
+    let (window, mut device, mut factory, screen_rendertarget, mut screen_depth_rendertarget) =
         gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
     //
-    info!("Creating command buffer and pipeline state object");
+    info!("Creating command buffer and shaders");
     //
     let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
-
     let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
     let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
-    let pipeline_state_object = factory
-        .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-        .expect("Failed to create a pipeline state object");
 
     //
-    info!("Creating pipeline data object with dummy texture and empty vertexbuffer");
+    info!("Creating dummy texture and sampler");
     //
     use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
     let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
     let dummy_texture = debug_load_texture(&mut factory);
     let texture_sampler = factory.create_sampler(sampler_info);
 
-    let mut pipeline_data = pipe::Data {
-        vertex_buffer: factory.create_vertex_buffer(&[]),
-        texture: (dummy_texture.clone(), texture_sampler.clone()),
-        transform: Matrix4::identity().into(),
-        out_color: screen_rendertarget.clone(),
-        out_depth: screen_depth_rendertarget.clone(),
-    };
-
     //
-    info!("Creating offscreen render target");
+    info!("Creating offscreen render target and pipeline");
     //
     let (_, canvas_shader_resource_view, canvas_render_target_view) = factory
         .create_render_target::<ColorFormat>(320, 180)
@@ -207,6 +202,29 @@ fn main() {
     let canvas_depth_render_target_view = factory
         .create_depth_stencil_view_only::<DepthFormat>(320, 180)
         .unwrap();
+    let canvas_pipeline_state_object = factory
+        .create_pipeline_simple(&vertex_shader, &fragment_shader, canvas_pipe::new())
+        .expect("Failed to create a pipeline state object");
+    let mut canvas_pipeline_data = canvas_pipe::Data {
+        vertex_buffer: factory.create_vertex_buffer(&[]),
+        texture: (dummy_texture, texture_sampler.clone()),
+        transform: Matrix4::identity().into(),
+        out_color: canvas_render_target_view,
+        out_depth: canvas_depth_render_target_view,
+    };
+
+    //
+    info!("Creating screen pipeline");
+    //
+    let screen_pipeline_state_object = factory
+        .create_pipeline_simple(&vertex_shader, &fragment_shader, screen_pipe::new())
+        .expect("Failed to create a pipeline state object");
+    let mut screen_pipeline_data = screen_pipe::Data {
+        vertex_buffer: factory.create_vertex_buffer(&[]),
+        texture: (canvas_shader_resource_view, texture_sampler),
+        transform: Matrix4::identity().into(),
+        out_color: screen_rendertarget,
+    };
 
     //
     info!("Creating dummy scene");
@@ -277,8 +295,8 @@ fn main() {
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
-                            &mut pipeline_data.out_color,
-                            &mut pipeline_data.out_depth,
+                            &mut screen_pipeline_data.out_color,
+                            &mut screen_depth_rendertarget,
                         );
                         window_dimensions = (new_dim.width as f32, new_dim.height as f32);
 
@@ -330,16 +348,13 @@ fn main() {
         let (vertices, indices) = render_context.get_vertices_indices(cursor_pos);
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(&vertices, &*indices);
 
-        pipeline_data.transform = projection_mat.into();
-        pipeline_data.vertex_buffer = vertex_buffer;
-        pipeline_data.texture.0 = dummy_texture.clone();
-        pipeline_data.out_color = canvas_render_target_view.clone();
-        pipeline_data.out_depth = canvas_depth_render_target_view.clone();
+        canvas_pipeline_data.transform = projection_mat.into();
+        canvas_pipeline_data.vertex_buffer = vertex_buffer;
 
         const CANVAS_COLOR: [f32; 4] = [0.7, 0.4, 0.2, 1.0];
-        encoder.clear(&pipeline_data.out_color, CANVAS_COLOR);
-        encoder.clear_depth(&pipeline_data.out_depth, 1.0);
-        encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
+        encoder.clear(&canvas_pipeline_data.out_color, CANVAS_COLOR);
+        encoder.clear_depth(&canvas_pipeline_data.out_depth, 1.0);
+        encoder.draw(&slice, &canvas_pipeline_state_object, &canvas_pipeline_data);
 
         // Draw canvas to screen
         // -----------------------------------------------------------------------------------------
@@ -369,17 +384,11 @@ fn main() {
         const INDICES: &[u16] = &[0, 1, 2, 2, 3, 0];
 
         let (vertex_buffer, slice) = factory.create_vertex_buffer_with_slice(SQUARE, INDICES);
-        let projection_mat = Matrix4::identity();
 
-        pipeline_data.transform = projection_mat.into();
-        pipeline_data.vertex_buffer = vertex_buffer;
-        pipeline_data.texture.0 = canvas_shader_resource_view.clone();
-        pipeline_data.out_color = screen_rendertarget.clone();
-        pipeline_data.out_depth = screen_depth_rendertarget.clone();
+        screen_pipeline_data.vertex_buffer = vertex_buffer;
 
-        encoder.clear(&pipeline_data.out_color, COLOR);
-        encoder.clear_depth(&pipeline_data.out_depth, 1.0);
-        encoder.draw(&slice, &pipeline_state_object, &pipeline_data);
+        encoder.clear(&screen_pipeline_data.out_color, COLOR);
+        encoder.draw(&slice, &screen_pipeline_state_object, &screen_pipeline_data);
 
         encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
