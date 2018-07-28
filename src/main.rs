@@ -48,7 +48,7 @@ use rand::prelude::*;
 
 type ColorFormat = gfx::format::Rgba8;
 type DepthFormat = gfx::format::DepthStencil;
-type Point2 = cgmath::Point2<f32>;
+type Point = cgmath::Point2<f32>;
 type Vec2 = cgmath::Vector2<f32>;
 type Color = cgmath::Vector4<f32>;
 type Mat4 = cgmath::Matrix4<f32>;
@@ -74,6 +74,10 @@ gfx_defines! {
         out_color: gfx::RenderTarget<ColorFormat> = "Target0",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
+}
+
+fn clamp(val: f32, min: f32, max: f32) -> f32 {
+    f32::max(min, f32::min(val, max))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,12 +107,21 @@ impl Rect {
         }
     }
 
-    pub fn from_corners(bottom_left: Point2, top_right: Point2) -> Rect {
+    pub fn from_corners(bottom_left: Point, top_right: Point) -> Rect {
         Rect {
             x: bottom_left.x,
             y: bottom_left.y,
             width: top_right.x - bottom_left.x,
             height: top_right.y - bottom_left.y,
+        }
+    }
+
+    pub fn unit_rect_centered() -> Rect {
+        Rect {
+            x: -0.5,
+            y: -0.5,
+            width: 1.0,
+            height: 1.0,
         }
     }
 
@@ -149,9 +162,8 @@ impl Rect {
             height: self.height,
         }
     }
-
-    pub fn to_pos(&self) -> Point2 {
-        Point2::new(self.x, self.y)
+    pub fn to_pos(&self) -> Point {
+        Point::new(self.x, self.y)
     }
 
     pub fn to_dim(&self) -> Vec2 {
@@ -159,19 +171,27 @@ impl Rect {
     }
 }
 
-/// A macro used for debugging which returns a string containing the name and value of a given
-/// variable.
+fn clamp_point_in_rect(point: Point, rect: Rect) -> Point {
+    Point {
+        x: clamp(point.x, rect.x, rect.x + rect.width),
+        y: clamp(point.y, rect.y, rect.y + rect.height),
+    }
+}
+
+/// A macro for debugging which returns a string representation of an expression and its value
 ///
-/// It uses the `stringify` macro internally and requires the input to be an identifier.
+/// It uses the `stringify` macro internally and requires the input to be an expression.
 ///
 /// # Examples
 ///
 /// ```
 /// let name = 5;
+/// assert_eq!(dformat!(1 + 2), "1 + 2 = 3");
+/// assert_eq!(dformat!(1 + name), "1 + name = 6");
 /// assert_eq!(dformat!(name), "name = 5");
 /// ```
 macro_rules! dformat {
-    ($x:ident) => {
+    ($x:expr) => {
         format!("{} = {:?}", stringify!($x), $x)
     };
 }
@@ -179,18 +199,24 @@ macro_rules! dformat {
 /// A macro used for debugging which prints a string containing the name and value of a given
 /// variable.
 ///
-/// It uses the `dformat` macro internally and requires the input to be an identifier.
+/// It uses the `dformat` macro internally and requires the input to be an expression.
 /// For more information see the `dformat` macro
 ///
 /// # Examples
 ///
 /// ```
+/// dprintln!(1 + 2);
+/// // prints: "1 + 2 = 3"
+///
 /// let name = 5;
 /// dprintln!(name);
 /// // prints: "name = 5"
+///
+/// dprintln!(1 + name);
+/// // prints: "1 + name = 6"
 /// ```
 macro_rules! dprintln {
-    ($x:ident) => {
+    ($x:expr) => {
         println!("{}", dformat!($x));
     };
 }
@@ -330,7 +356,7 @@ fn main() {
 
     // State variables
     let mut running = true;
-    let mut cursor_pos_normalized = Point2::new(0.0, 0.0);
+    let mut cursor_pos_screen = Point::new(0.0, 0.0);
 
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
@@ -394,25 +420,27 @@ fn main() {
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
-                        let cursor_x = position.x as f32 / screen_rect.width;
-                        let cursor_y = position.y as f32 / screen_rect.height;
-                        cursor_pos_normalized = Point2::new(cursor_x - 0.5, -1.0 * cursor_y + 0.5);
+                        let cursor_x = position.x as f32;
+                        let cursor_y = position.y as f32;
+                        cursor_pos_screen = Point::new(cursor_x, screen_rect.height - cursor_y);
                     }
                     _ => (),
                 }
             }
         });
 
+        // Cursor position
+        // -----------------------------------------------------------------------------------------
+
         let blit_rect = canvas_rect
             .stretched_to_fit(screen_rect)
             .centered_in(screen_rect);
 
-        let cursor_pos = Point2::new(
-            canvas_rect.width * cursor_pos_normalized.x,
-            canvas_rect.height * cursor_pos_normalized.y,
+        let cursor_pos_canvas = clamp_point_in_rect(cursor_pos_screen, blit_rect);
+        let cursor_pos_canvas = Point::new(
+            canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width - 0.5),
+            canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height - 0.5),
         );
-        dprintln!(cursor_pos);
-        dprintln!(canvas_rect);
 
         // Draw into canvas
         // -----------------------------------------------------------------------------------------
@@ -432,11 +460,11 @@ fn main() {
         // Add dummy quad for cursor
         let dummy_quad = Quad::new(
             Rect::from_dimension(canvas_rect.height, canvas_rect.height),
-            0.0,
+            -0.7,
             quad_color,
         );
         let cursor_quad = Quad::new(
-            Rect::new(cursor_pos.x, cursor_pos.y, 16.0, 16.0),
+            Rect::new(cursor_pos_canvas.x, cursor_pos_canvas.y, 16.0, 16.0),
             -0.5,
             cursor_color,
         );
@@ -522,10 +550,10 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Quad {
-    rect: Rect,
-    depth: f32,
-    color: Color,
+pub struct Quad {
+    pub rect: Rect,
+    pub depth: f32,
+    pub color: Color,
 }
 
 impl Quad {
