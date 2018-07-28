@@ -77,15 +77,15 @@ gfx_defines! {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Rect {
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 impl Rect {
-    fn new(x: f32, y: f32, width: f32, height: f32) -> Rect {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Rect {
         Rect {
             x,
             y,
@@ -94,7 +94,7 @@ impl Rect {
         }
     }
 
-    fn from_dimension(width: f32, height: f32) -> Rect {
+    pub fn from_dimension(width: f32, height: f32) -> Rect {
         Rect {
             x: 0.0,
             y: 0.0,
@@ -103,7 +103,7 @@ impl Rect {
         }
     }
 
-    fn from_corners(bottom_left: Point2, top_right: Point2) -> Rect {
+    pub fn from_corners(bottom_left: Point2, top_right: Point2) -> Rect {
         Rect {
             x: bottom_left.x,
             y: bottom_left.y,
@@ -112,11 +112,49 @@ impl Rect {
         }
     }
 
-    fn to_pos(&self) -> Point2 {
+    /// Returns the biggest proportionally stretched version of the rectangle that can fit
+    /// into `target`.
+    pub fn stretched_to_fit(self, target: Rect) -> Rect {
+        let source_aspect_ratio = self.width / self.height;
+        let target_aspect_ratio = target.width / target.height;
+
+        let scale_factor = if source_aspect_ratio < target_aspect_ratio {
+            // Target rect is 'wider' than ours -> height is our limit when stretching
+            target.height / self.height
+        } else {
+            // Target rect is 'narrower' than ours -> width is our limit when stretching
+            target.width / self.width
+        };
+
+        let stretched_width = self.width * scale_factor;
+        let stretched_height = self.height * scale_factor;
+
+        Rect {
+            x: self.x,
+            y: self.x,
+            width: stretched_width,
+            height: stretched_height,
+        }
+    }
+
+    /// Returns a version of the rectangle that is centered in `target`.
+    pub fn centered_in(self, target: Rect) -> Rect {
+        let x_offset_centered = target.x + (target.width - self.width) / 2.0;
+        let y_offset_centered = target.y + (target.height - self.height) / 2.0;
+
+        Rect {
+            x: x_offset_centered,
+            y: y_offset_centered,
+            width: self.width,
+            height: self.height,
+        }
+    }
+
+    pub fn to_pos(&self) -> Point2 {
         Point2::new(self.x, self.y)
     }
 
-    fn to_dim(&self) -> Vec2 {
+    pub fn to_dim(&self) -> Vec2 {
         Vec2::new(self.width, self.height)
     }
 }
@@ -183,12 +221,8 @@ fn main() {
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
     const FULLSCREEN_MODE: bool = false;
-    const CANVAS_DIMENSIONS: Rect = Rect {
-        x: 0.0,
-        y: 0.0,
-        width: 320.0,
-        height: 160.0,
-    };
+    const CANVAS_WIDTH: u16 = 320;
+    const CANVAS_HEIGHT: u16 = 180;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
@@ -256,16 +290,14 @@ fn main() {
     //
     info!("Creating offscreen render target and pipeline");
     //
+    let canvas_rect = Rect::from_dimension(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
     let (_, canvas_shader_resource_view, canvas_render_target_view) = factory
-        .create_render_target::<ColorFormat>(
-            CANVAS_DIMENSIONS.width as u16,
-            CANVAS_DIMENSIONS.height as u16,
-        )
+        .create_render_target::<ColorFormat>(canvas_rect.width as u16, canvas_rect.height as u16)
         .unwrap();
     let canvas_depth_render_target_view = factory
         .create_depth_stencil_view_only::<DepthFormat>(
-            CANVAS_DIMENSIONS.width as u16,
-            CANVAS_DIMENSIONS.height as u16,
+            canvas_rect.width as u16,
+            canvas_rect.height as u16,
         )
         .unwrap();
     let canvas_pipeline_state_object = factory
@@ -298,7 +330,7 @@ fn main() {
 
     // State variables
     let mut running = true;
-    let mut cursor_pos = Point2::new(0.0, 0.0);
+    let mut cursor_pos_normalized = Point2::new(0.0, 0.0);
 
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
@@ -364,33 +396,32 @@ fn main() {
                     WindowEvent::CursorMoved { position, .. } => {
                         let cursor_x = position.x as f32 / screen_rect.width;
                         let cursor_y = position.y as f32 / screen_rect.height;
-                        cursor_pos = Point2::new(cursor_x - 0.5, -1.0 * cursor_y + 0.5);
+                        cursor_pos_normalized = Point2::new(cursor_x - 0.5, -1.0 * cursor_y + 0.5);
                     }
                     _ => (),
                 }
             }
         });
 
-        // Aspect ratio correction for view and cursor
-        let aspect_ratio = screen_rect.width / screen_rect.height;
-        let (width, height) = if aspect_ratio > 1.0 {
-            (1.0 * aspect_ratio, 1.0)
-        } else {
-            (1.0, 1.0 / aspect_ratio)
-        };
-        let cursor_pos = if aspect_ratio > 1.0 {
-            Point2::new(cursor_pos.x * aspect_ratio, cursor_pos.y)
-        } else {
-            Point2::new(cursor_pos.x, cursor_pos.y / aspect_ratio)
-        };
+        let blit_rect = canvas_rect
+            .stretched_to_fit(screen_rect)
+            .centered_in(screen_rect);
 
-        // Draw canvas
+        let cursor_pos = Point2::new(
+            canvas_rect.width * cursor_pos_normalized.x,
+            canvas_rect.height * cursor_pos_normalized.y,
+        );
+        dprintln!(cursor_pos);
+        dprintln!(canvas_rect);
+
+        // Draw into canvas
         // -----------------------------------------------------------------------------------------
+
         let projection_mat = cgmath::ortho(
-            -0.5 * width,
-            0.5 * width,
-            -0.5 * height,
-            0.5 * height,
+            -0.5 * canvas_rect.width,
+            0.5 * canvas_rect.width,
+            -0.5 * canvas_rect.height,
+            0.5 * canvas_rect.height,
             -1.0,
             1.0,
         );
@@ -399,9 +430,13 @@ fn main() {
         let cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
 
         // Add dummy quad for cursor
-        let dummy_quad = Quad::new(Rect::from_dimension(1.0, 1.0), 0.0, quad_color);
+        let dummy_quad = Quad::new(
+            Rect::from_dimension(canvas_rect.height, canvas_rect.height),
+            0.0,
+            quad_color,
+        );
         let cursor_quad = Quad::new(
-            Rect::new(cursor_pos.x, cursor_pos.y, 0.02, 0.02),
+            Rect::new(cursor_pos.x, cursor_pos.y, 16.0, 16.0),
             -0.5,
             cursor_color,
         );
@@ -427,17 +462,15 @@ fn main() {
         // Draw canvas to screen
         // -----------------------------------------------------------------------------------------
 
-        let screen_quad = Quad::new(screen_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let (mut screen_vertices, mut screen_indices) = (vec![], vec![]);
-        screen_quad.append_vertices_indices(0, &mut screen_vertices, &mut screen_indices);
+        let screen_quad = Quad::new(blit_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
+        let (screen_vertices, screen_indices) = screen_quad.into_vertices_indices(0);
         let (screen_vertex_buffer, screen_slice) =
-            factory.create_vertex_buffer_with_slice(&screen_vertices, &*screen_indices);
+            factory.create_vertex_buffer_with_slice(&screen_vertices, &screen_indices[..]);
+        screen_pipeline_data.vertex_buffer = screen_vertex_buffer;
 
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
         let screen_projection_mat =
             cgmath::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
-
-        screen_pipeline_data.vertex_buffer = screen_vertex_buffer;
         screen_pipeline_data.transform = screen_projection_mat.into();
 
         let screen_color = Color::new(0.2, 0.4, 0.7, 1.0);
@@ -508,6 +541,7 @@ impl Quad {
         }
     }
 
+    // TODO(JaSc): Create vertex/index-buffer struct and move the `append_..` methods into that
     fn append_vertices_indices(
         &self,
         quad_index: u16,
