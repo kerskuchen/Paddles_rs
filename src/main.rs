@@ -39,13 +39,11 @@ extern crate fern;
 extern crate image;
 extern crate rand;
 
-use gfx::traits::Factory;
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
 
 use cgmath::prelude::*;
-use rand::prelude::*;
 
 type ColorFormat = gfx::format::Rgba8;
 type DepthFormat = gfx::format::DepthStencil;
@@ -296,70 +294,16 @@ fn main() {
         screen_color_render_target_view,
         screen_depth_render_target_view,
     ) = gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
-
-    //
-    info!("Creating command buffer and shaders");
-    //
     let encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
-    let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
-    let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
 
-    //
-    info!("Creating dummy texture and sampler");
-    //
-    use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
-    let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
-    let dummy_texture = debug_load_texture(&mut factory);
-    let texture_sampler = factory.create_sampler(sampler_info);
-
-    //
-    info!("Creating offscreen render target and pipeline");
-    //
-    let canvas_rect = Rect::from_dimension(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
-    let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
-        .create_render_target::<ColorFormat>(canvas_rect.width as u16, canvas_rect.height as u16)
-        .unwrap();
-    let canvas_depth_render_target_view = factory
-        .create_depth_stencil_view_only::<DepthFormat>(
-            canvas_rect.width as u16,
-            canvas_rect.height as u16,
-        )
-        .unwrap();
-    let canvas_pipeline_state_object = factory
-        .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-        .expect("Failed to create a pipeline state object");
-    let canvas_pipeline_data = pipe::Data {
-        vertex_buffer: factory.create_vertex_buffer(&[]),
-        texture: (dummy_texture, texture_sampler.clone()),
-        transform: Mat4::identity().into(),
-        out_color: canvas_color_render_target_view,
-        out_depth: canvas_depth_render_target_view,
-    };
-
-    //
-    info!("Creating screen pipeline");
-    //
-    let screen_pipeline_state_object = factory
-        .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-        .expect("Failed to create a pipeline state object");
-    let screen_pipeline_data = pipe::Data {
-        vertex_buffer: factory.create_vertex_buffer(&[]),
-        texture: (canvas_shader_resource_view, texture_sampler),
-        transform: Mat4::identity().into(),
-        out_color: screen_color_render_target_view,
-        out_depth: screen_depth_render_target_view,
-    };
-
-    let mut rc = RenderingContext {
+    let mut rc = RenderingContext::new(
         factory,
         encoder,
-
-        screen_pipeline_data,
-        screen_pipeline_state_object,
-
-        canvas_pipeline_data,
-        canvas_pipeline_state_object,
-    };
+        screen_color_render_target_view,
+        screen_depth_render_target_view,
+        CANVAS_WIDTH,
+        CANVAS_HEIGHT,
+    );
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -443,6 +387,7 @@ fn main() {
         // Cursor position
         // -----------------------------------------------------------------------------------------
 
+        let canvas_rect = rc.canvas_rect();
         let blit_rect = canvas_rect
             .stretched_to_fit(screen_rect)
             .centered_in(screen_rect);
@@ -547,6 +492,93 @@ where
 
     canvas_pipeline_data: pipe::Data<R>,
     canvas_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
+}
+
+impl<C, R, F> RenderingContext<C, R, F>
+where
+    R: gfx::Resources,
+    C: gfx::CommandBuffer<R>,
+    F: gfx::Factory<R>,
+{
+    fn new(
+        mut factory: F,
+        encoder: gfx::Encoder<R, C>,
+        screen_color_render_target_view: gfx::handle::RenderTargetView<R, ColorFormat>,
+        screen_depth_render_target_view: gfx::handle::DepthStencilView<R, DepthFormat>,
+        canvas_width: u16,
+        canvas_heigth: u16,
+    ) -> RenderingContext<C, R, F> {
+        //
+        info!("Creating command buffer and shaders");
+        //
+        let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
+        let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
+
+        //
+        info!("Creating dummy texture and sampler");
+        //
+        use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
+        let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
+        let dummy_texture = debug_load_texture(&mut factory);
+        let texture_sampler = factory.create_sampler(sampler_info);
+
+        //
+        info!("Creating offscreen render target and pipeline");
+        //
+        let canvas_rect = Rect::from_dimension(canvas_width as f32, canvas_heigth as f32);
+        let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
+            .create_render_target::<ColorFormat>(
+                canvas_rect.width as u16,
+                canvas_rect.height as u16,
+            )
+            .unwrap();
+        let canvas_depth_render_target_view = factory
+            .create_depth_stencil_view_only::<DepthFormat>(
+                canvas_rect.width as u16,
+                canvas_rect.height as u16,
+            )
+            .unwrap();
+        let canvas_pipeline_state_object = factory
+            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
+            .expect("Failed to create a pipeline state object");
+        let canvas_pipeline_data = pipe::Data {
+            vertex_buffer: factory.create_vertex_buffer(&[]),
+            texture: (dummy_texture, texture_sampler.clone()),
+            transform: Mat4::identity().into(),
+            out_color: canvas_color_render_target_view,
+            out_depth: canvas_depth_render_target_view,
+        };
+
+        //
+        info!("Creating screen pipeline");
+        //
+        let screen_pipeline_state_object = factory
+            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
+            .expect("Failed to create a pipeline state object");
+        let screen_pipeline_data = pipe::Data {
+            vertex_buffer: factory.create_vertex_buffer(&[]),
+            texture: (canvas_shader_resource_view, texture_sampler),
+            transform: Mat4::identity().into(),
+            out_color: screen_color_render_target_view,
+            out_depth: screen_depth_render_target_view,
+        };
+
+        RenderingContext {
+            factory,
+            encoder,
+
+            screen_pipeline_data,
+            screen_pipeline_state_object,
+
+            canvas_pipeline_data,
+            canvas_pipeline_state_object,
+        }
+    }
+
+    fn canvas_rect(&self) -> Rect {
+        let (width, height, _, _) = self.canvas_pipeline_data.out_color.get_dimensions();
+        Rect::from_dimension(width as f32, height as f32)
+    }
 }
 
 fn debug_load_texture<F, R>(factory: &mut F) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
