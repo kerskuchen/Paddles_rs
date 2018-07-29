@@ -12,7 +12,7 @@ TODO(JaSc):
   - BG music with PHAT BEATSIES
 
 BACKLOG(JaSc):
-  - The following are things to remember to extract out of an old C project
+  - The following are things to remember to extract out of an old C project in the long term
     x Debug macro to print a variable and it's name quickly
     - Be able to conveniently do debug printing on screen
     - Moving camera system
@@ -24,6 +24,7 @@ BACKLOG(JaSc):
     - Mouse zooming
     - Raycasting and collision detection
     - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
+    - Live looped input playback and recording
 */
 
 #[macro_use]
@@ -60,14 +61,7 @@ gfx_defines! {
         color: [f32; 4] = "a_Color",
     }
 
-    pipeline screen_pipe {
-        vertex_buffer: gfx::VertexBuffer<Vertex> = (),
-        transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
-        texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
-        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
-    }
-
-    pipeline canvas_pipe {
+    pipeline pipe {
         vertex_buffer: gfx::VertexBuffer<Vertex> = (),
         transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
@@ -295,13 +289,18 @@ fn main() {
             (GL_VERSION_MAJOR, GL_VERSION_MINOR),
         ))
         .with_vsync(true);
-    let (window, mut device, mut factory, screen_rendertarget, mut screen_depth_rendertarget) =
-        gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
+    let (
+        window,
+        mut device,
+        mut factory,
+        screen_color_render_target_view,
+        screen_depth_render_target_view,
+    ) = gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
 
     //
     info!("Creating command buffer and shaders");
     //
-    let mut encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
+    let encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
     let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
     let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
 
@@ -317,7 +316,7 @@ fn main() {
     info!("Creating offscreen render target and pipeline");
     //
     let canvas_rect = Rect::from_dimension(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
-    let (_, canvas_shader_resource_view, canvas_render_target_view) = factory
+    let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
         .create_render_target::<ColorFormat>(canvas_rect.width as u16, canvas_rect.height as u16)
         .unwrap();
     let canvas_depth_render_target_view = factory
@@ -327,13 +326,13 @@ fn main() {
         )
         .unwrap();
     let canvas_pipeline_state_object = factory
-        .create_pipeline_simple(&vertex_shader, &fragment_shader, canvas_pipe::new())
+        .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
         .expect("Failed to create a pipeline state object");
-    let mut canvas_pipeline_data = canvas_pipe::Data {
+    let canvas_pipeline_data = pipe::Data {
         vertex_buffer: factory.create_vertex_buffer(&[]),
         texture: (dummy_texture, texture_sampler.clone()),
         transform: Mat4::identity().into(),
-        out_color: canvas_render_target_view,
+        out_color: canvas_color_render_target_view,
         out_depth: canvas_depth_render_target_view,
     };
 
@@ -341,13 +340,25 @@ fn main() {
     info!("Creating screen pipeline");
     //
     let screen_pipeline_state_object = factory
-        .create_pipeline_simple(&vertex_shader, &fragment_shader, screen_pipe::new())
+        .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
         .expect("Failed to create a pipeline state object");
-    let mut screen_pipeline_data = screen_pipe::Data {
+    let screen_pipeline_data = pipe::Data {
         vertex_buffer: factory.create_vertex_buffer(&[]),
         texture: (canvas_shader_resource_view, texture_sampler),
         transform: Mat4::identity().into(),
-        out_color: screen_rendertarget,
+        out_color: screen_color_render_target_view,
+        out_depth: screen_depth_render_target_view,
+    };
+
+    let mut rc = RenderingContext {
+        factory,
+        encoder,
+
+        screen_pipeline_data,
+        screen_pipeline_state_object,
+
+        canvas_pipeline_data,
+        canvas_pipeline_state_object,
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -401,8 +412,8 @@ fn main() {
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
-                            &mut screen_pipeline_data.out_color,
-                            &mut screen_depth_rendertarget,
+                            &mut rc.screen_pipeline_data.out_color,
+                            &mut rc.screen_pipeline_data.out_depth,
                         );
                         screen_rect =
                             Rect::from_dimension(new_dim.width as f32, new_dim.height as f32);
@@ -472,19 +483,22 @@ fn main() {
         let (mut canvas_vertices, mut canvas_indices) = (vec![], vec![]);
         dummy_quad.append_vertices_indices_centered(0, &mut canvas_vertices, &mut canvas_indices);
         cursor_quad.append_vertices_indices_centered(1, &mut canvas_vertices, &mut canvas_indices);
-        let (canvas_vertex_buffer, canvas_slice) =
-            factory.create_vertex_buffer_with_slice(&canvas_vertices, &*canvas_indices);
+        let (canvas_vertex_buffer, canvas_slice) = rc
+            .factory
+            .create_vertex_buffer_with_slice(&canvas_vertices, &*canvas_indices);
 
-        canvas_pipeline_data.transform = projection_mat.into();
-        canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
+        rc.canvas_pipeline_data.transform = projection_mat.into();
+        rc.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
 
         let canvas_color = Color::new(0.7, 0.4, 0.2, 1.0);
-        encoder.clear(&canvas_pipeline_data.out_color, canvas_color.into());
-        encoder.clear_depth(&canvas_pipeline_data.out_depth, 1.0);
-        encoder.draw(
+        rc.encoder
+            .clear(&rc.canvas_pipeline_data.out_color, canvas_color.into());
+        rc.encoder
+            .clear_depth(&rc.canvas_pipeline_data.out_depth, 1.0);
+        rc.encoder.draw(
             &canvas_slice,
-            &canvas_pipeline_state_object,
-            &canvas_pipeline_data,
+            &rc.canvas_pipeline_state_object,
+            &rc.canvas_pipeline_data,
         );
 
         // Draw canvas to screen
@@ -492,47 +506,48 @@ fn main() {
 
         let screen_quad = Quad::new(blit_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
         let (screen_vertices, screen_indices) = screen_quad.into_vertices_indices(0);
-        let (screen_vertex_buffer, screen_slice) =
-            factory.create_vertex_buffer_with_slice(&screen_vertices, &screen_indices[..]);
-        screen_pipeline_data.vertex_buffer = screen_vertex_buffer;
+        let (screen_vertex_buffer, screen_slice) = rc
+            .factory
+            .create_vertex_buffer_with_slice(&screen_vertices, &screen_indices[..]);
+        rc.screen_pipeline_data.vertex_buffer = screen_vertex_buffer;
 
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
         let screen_projection_mat =
             cgmath::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
-        screen_pipeline_data.transform = screen_projection_mat.into();
+        rc.screen_pipeline_data.transform = screen_projection_mat.into();
 
-        let screen_color = Color::new(0.2, 0.4, 0.7, 1.0);
-        encoder.clear(&screen_pipeline_data.out_color, screen_color.into());
-        encoder.draw(
+        let screen_color = Color::new(1.0, 0.4, 0.7, 1.0);
+        rc.encoder
+            .clear(&rc.screen_pipeline_data.out_color, screen_color.into());
+        rc.encoder
+            .clear_depth(&rc.screen_pipeline_data.out_depth, 1.0);
+        rc.encoder.draw(
             &screen_slice,
-            &screen_pipeline_state_object,
-            &screen_pipeline_data,
+            &rc.screen_pipeline_state_object,
+            &rc.screen_pipeline_data,
         );
 
-        encoder.flush(&mut device);
+        rc.encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
         device.cleanup();
     }
 }
 
-// struct Context<C, R, F>
-// where
-//     R: gfx::Resources,
-//     C: gfx::CommandBuffer<R>,
-//     F: gfx::Factory<R>,
-// {
-//     factory: F,
-//     encoder: gfx::Encoder<R, C>,
-//
-//     screen_pipeline_data: screen_pipe::Data<R>,
-//     screen_pipeline_state_object: gfx::PipelineState<R, screen_pipe::Meta>,
-//     screen_rendertarget: gfx::handle::RenderTargetView<R, ColorFormat>,
-//
-//     canvas_pipeline_data: canvas_pipe::Data<R>,
-//     canvas_pipeline_state_object: gfx::PipelineState<R, canvas_pipe::Meta>,
-//     canvas_shader_resource_view: gfx::handle::ShaderResourceView<R, [f32; 4]>,
-//     canvas_depth_rendertarget: gfx::handle::DepthStencilView<R, DepthFormat>,
-// }
+struct RenderingContext<C, R, F>
+where
+    R: gfx::Resources,
+    C: gfx::CommandBuffer<R>,
+    F: gfx::Factory<R>,
+{
+    factory: F,
+    encoder: gfx::Encoder<R, C>,
+
+    screen_pipeline_data: pipe::Data<R>,
+    screen_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
+
+    canvas_pipeline_data: pipe::Data<R>,
+    canvas_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
+}
 
 fn debug_load_texture<F, R>(factory: &mut F) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
 where
