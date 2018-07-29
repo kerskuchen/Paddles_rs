@@ -51,6 +51,7 @@ type Point = cgmath::Point2<f32>;
 type Vec2 = cgmath::Vector2<f32>;
 type Color = cgmath::Vector4<f32>;
 type Mat4 = cgmath::Matrix4<f32>;
+type VertexIndex = u16;
 
 gfx_defines! {
     vertex Vertex {
@@ -182,6 +183,7 @@ fn clamp_point_in_rect(point: Point, rect: Rect) -> Point {
 /// assert_eq!(dformat!(1 + name), "1 + name = 6");
 /// assert_eq!(dformat!(name), "name = 5");
 /// ```
+#[allow(unused_macros)]
 macro_rules! dformat {
     ($x:expr) => {
         format!("{} = {:?}", stringify!($x), $x)
@@ -207,6 +209,7 @@ macro_rules! dformat {
 /// dprintln!(1 + name);
 /// // prints: "1 + name = 6"
 /// ```
+#[allow(unused_macros)]
 macro_rules! dprintln {
     ($x:expr) => {
         println!("{}", dformat!($x));
@@ -254,9 +257,11 @@ fn main() {
         .unwrap_or_else(|| {
             panic!("No monitor with id {} found", MONITOR_ID);
         });
+
     let monitor_logical_dimensions = monitor
         .get_dimensions()
         .to_logical(monitor.get_hidpi_factor());
+
     info!(
         "Found monitor {} with logical dimensions: {:?}",
         MONITOR_ID,
@@ -269,10 +274,7 @@ fn main() {
     //
     info!("Creating window and drawing context");
     //
-    let fullscreen_monitor = match FULLSCREEN_MODE {
-        true => Some(monitor),
-        false => None,
-    };
+    let fullscreen_monitor = if FULLSCREEN_MODE { Some(monitor) } else { None };
     let window_builder = glutin::WindowBuilder::new()
         .with_resizable(!FULLSCREEN_MODE)
         // TODO(JaSc): Allow cursor grabbing in windowed mode when 
@@ -281,12 +283,14 @@ fn main() {
         //             is currently broken.
         .with_fullscreen(fullscreen_monitor)
         .with_title("Pongi".to_string());
+
     let context = glutin::ContextBuilder::new()
         .with_gl(glutin::GlRequest::Specific(
             glutin::Api::OpenGl,
             (GL_VERSION_MAJOR, GL_VERSION_MINOR),
         ))
         .with_vsync(true);
+
     let (
         window,
         mut device,
@@ -294,6 +298,7 @@ fn main() {
         screen_color_render_target_view,
         screen_depth_render_target_view,
     ) = gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
+
     let encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
     let mut rc = RenderingContext::new(
@@ -400,7 +405,6 @@ fn main() {
 
         // Draw into canvas
         // -----------------------------------------------------------------------------------------
-
         let projection_mat = cgmath::ortho(
             -0.5 * canvas_rect.width,
             0.5 * canvas_rect.width,
@@ -425,53 +429,18 @@ fn main() {
             cursor_color,
         );
 
-        let (mut canvas_vertices, mut canvas_indices) = (vec![], vec![]);
-        dummy_quad.append_vertices_indices_centered(0, &mut canvas_vertices, &mut canvas_indices);
-        cursor_quad.append_vertices_indices_centered(1, &mut canvas_vertices, &mut canvas_indices);
-        let (canvas_vertex_buffer, canvas_slice) = rc
-            .factory
-            .create_vertex_buffer_with_slice(&canvas_vertices, &*canvas_indices);
+        let (mut vertices, mut indices) = (vec![], vec![]);
+        dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
+        cursor_quad.append_vertices_indices_centered(1, &mut vertices, &mut indices);
 
-        rc.canvas_pipeline_data.transform = projection_mat.into();
-        rc.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
+        let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
+        rc.clear_canvas(clear_color);
+        rc.draw_to_canvas(projection_mat, &vertices, &indices);
 
-        let canvas_color = Color::new(0.7, 0.4, 0.2, 1.0);
-        rc.encoder
-            .clear(&rc.canvas_pipeline_data.out_color, canvas_color.into());
-        rc.encoder
-            .clear_depth(&rc.canvas_pipeline_data.out_depth, 1.0);
-        rc.encoder.draw(
-            &canvas_slice,
-            &rc.canvas_pipeline_state_object,
-            &rc.canvas_pipeline_data,
-        );
-
-        // Draw canvas to screen
+        // Draw to screen and flip
         // -----------------------------------------------------------------------------------------
-
-        let screen_quad = Quad::new(blit_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let (screen_vertices, screen_indices) = screen_quad.into_vertices_indices(0);
-        let (screen_vertex_buffer, screen_slice) = rc
-            .factory
-            .create_vertex_buffer_with_slice(&screen_vertices, &screen_indices[..]);
-        rc.screen_pipeline_data.vertex_buffer = screen_vertex_buffer;
-
-        // NOTE: The projection matrix is upside-down for correct rendering of the canvas
-        let screen_projection_mat =
-            cgmath::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
-        rc.screen_pipeline_data.transform = screen_projection_mat.into();
-
-        let screen_color = Color::new(1.0, 0.4, 0.7, 1.0);
-        rc.encoder
-            .clear(&rc.screen_pipeline_data.out_color, screen_color.into());
-        rc.encoder
-            .clear_depth(&rc.screen_pipeline_data.out_depth, 1.0);
-        rc.encoder.draw(
-            &screen_slice,
-            &rc.screen_pipeline_state_object,
-            &rc.screen_pipeline_data,
-        );
-
+        let letterbox_color = Color::new(1.0, 0.4, 0.7, 1.0);
+        rc.blit_canvas_to_screen(letterbox_color);
         rc.encoder.flush(&mut device);
         window.swap_buffers().expect("Failed to swap framebuffers");
         device.cleanup();
@@ -509,10 +478,33 @@ where
         canvas_heigth: u16,
     ) -> RenderingContext<C, R, F> {
         //
-        info!("Creating command buffer and shaders");
+        info!("Creating screen and canvas pipelines");
         //
         let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
         let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
+        let screen_pipeline_state_object = factory
+            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
+            .expect("Failed to create a pipeline state object");
+        let canvas_pipeline_state_object = factory
+            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
+            .expect("Failed to create a pipeline state object");
+
+        //
+        info!("Creating offscreen render targets");
+        //
+        let canvas_rect = Rect::from_dimension(f32::from(canvas_width), f32::from(canvas_heigth));
+        let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
+            .create_render_target::<ColorFormat>(
+                canvas_rect.width as u16,
+                canvas_rect.height as u16,
+            )
+            .expect("Failed to create a canvas color render target");
+        let canvas_depth_render_target_view = factory
+            .create_depth_stencil_view_only::<DepthFormat>(
+                canvas_rect.width as u16,
+                canvas_rect.height as u16,
+            )
+            .expect("Failed to create a canvas depth render target");
 
         //
         info!("Creating dummy texture and sampler");
@@ -523,24 +515,8 @@ where
         let texture_sampler = factory.create_sampler(sampler_info);
 
         //
-        info!("Creating offscreen render target and pipeline");
+        info!("Creating screen and canvas pipeline data");
         //
-        let canvas_rect = Rect::from_dimension(canvas_width as f32, canvas_heigth as f32);
-        let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
-            .create_render_target::<ColorFormat>(
-                canvas_rect.width as u16,
-                canvas_rect.height as u16,
-            )
-            .unwrap();
-        let canvas_depth_render_target_view = factory
-            .create_depth_stencil_view_only::<DepthFormat>(
-                canvas_rect.width as u16,
-                canvas_rect.height as u16,
-            )
-            .unwrap();
-        let canvas_pipeline_state_object = factory
-            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-            .expect("Failed to create a pipeline state object");
         let canvas_pipeline_data = pipe::Data {
             vertex_buffer: factory.create_vertex_buffer(&[]),
             texture: (dummy_texture, texture_sampler.clone()),
@@ -548,13 +524,6 @@ where
             out_color: canvas_color_render_target_view,
             out_depth: canvas_depth_render_target_view,
         };
-
-        //
-        info!("Creating screen pipeline");
-        //
-        let screen_pipeline_state_object = factory
-            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-            .expect("Failed to create a pipeline state object");
         let screen_pipeline_data = pipe::Data {
             vertex_buffer: factory.create_vertex_buffer(&[]),
             texture: (canvas_shader_resource_view, texture_sampler),
@@ -566,18 +535,75 @@ where
         RenderingContext {
             factory,
             encoder,
-
             screen_pipeline_data,
-            screen_pipeline_state_object,
-
             canvas_pipeline_data,
+            screen_pipeline_state_object,
             canvas_pipeline_state_object,
         }
     }
 
     fn canvas_rect(&self) -> Rect {
         let (width, height, _, _) = self.canvas_pipeline_data.out_color.get_dimensions();
-        Rect::from_dimension(width as f32, height as f32)
+        Rect::from_dimension(f32::from(width), f32::from(height))
+    }
+
+    fn screen_rect(&self) -> Rect {
+        let (width, height, _, _) = self.screen_pipeline_data.out_color.get_dimensions();
+        Rect::from_dimension(f32::from(width), f32::from(height))
+    }
+
+    fn canvas_blit_rect(&self) -> Rect {
+        let screen_rect = self.screen_rect();
+        self.canvas_rect()
+            .stretched_to_fit(screen_rect)
+            .centered_in(screen_rect)
+    }
+
+    fn clear_canvas(&mut self, clear_color: Color) {
+        self.encoder
+            .clear(&self.canvas_pipeline_data.out_color, clear_color.into());
+        self.encoder
+            .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
+    }
+
+    fn draw_to_canvas(&mut self, projection: Mat4, vertices: &[Vertex], indices: &[VertexIndex]) {
+        let (canvas_vertex_buffer, canvas_slice) = self
+            .factory
+            .create_vertex_buffer_with_slice(&vertices, &*indices);
+
+        self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
+        self.canvas_pipeline_data.transform = projection.into();
+
+        self.encoder.draw(
+            &canvas_slice,
+            &self.canvas_pipeline_state_object,
+            &self.canvas_pipeline_data,
+        );
+    }
+
+    fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
+        let quad = Quad::new(self.canvas_blit_rect(), 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
+        let (vertices, indices) = quad.into_vertices_indices(0);
+        let (vertex_buffer, slice) = self
+            .factory
+            .create_vertex_buffer_with_slice(&vertices, &indices[..]);
+        self.screen_pipeline_data.vertex_buffer = vertex_buffer;
+
+        // NOTE: The projection matrix is upside-down for correct rendering of the canvas
+        let screen_rect = self.screen_rect();
+        let projection_mat =
+            cgmath::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
+        self.screen_pipeline_data.transform = projection_mat.into();
+
+        self.encoder
+            .clear(&self.screen_pipeline_data.out_color, letterbox_color.into());
+        self.encoder
+            .clear_depth(&self.screen_pipeline_data.out_depth, 1.0);
+        self.encoder.draw(
+            &slice,
+            &self.screen_pipeline_state_object,
+            &self.screen_pipeline_data,
+        );
     }
 }
 
@@ -604,11 +630,11 @@ pub struct Quad {
 }
 
 impl Quad {
-    fn new(rect: Rect, depth: f32, color: Color) -> Quad {
+    pub fn new(rect: Rect, depth: f32, color: Color) -> Quad {
         Quad { rect, depth, color }
     }
 
-    fn unit_quad(depth: f32, color: Color) -> Quad {
+    pub fn unit_quad(depth: f32, color: Color) -> Quad {
         Quad {
             rect: Rect::from_dimension(1.0, 1.0),
             depth,
@@ -617,29 +643,29 @@ impl Quad {
     }
 
     // TODO(JaSc): Create vertex/index-buffer struct and move the `append_..` methods into that
-    fn append_vertices_indices(
+    pub fn append_vertices_indices(
         &self,
-        quad_index: u16,
+        quad_index: VertexIndex,
         vertices: &mut Vec<Vertex>,
-        indices: &mut Vec<u16>,
+        indices: &mut Vec<VertexIndex>,
     ) {
         let (self_vertices, self_indices) = self.into_vertices_indices(quad_index);
         vertices.extend(&self_vertices);
         indices.extend(&self_indices);
     }
 
-    fn append_vertices_indices_centered(
+    pub fn append_vertices_indices_centered(
         &self,
-        quad_index: u16,
+        quad_index: VertexIndex,
         vertices: &mut Vec<Vertex>,
-        indices: &mut Vec<u16>,
+        indices: &mut Vec<VertexIndex>,
     ) {
         let (self_vertices, self_indices) = self.into_vertices_indices_centered(quad_index);
         vertices.extend(&self_vertices);
         indices.extend(&self_indices);
     }
 
-    fn into_vertices_indices(&self, quad_index: u16) -> ([Vertex; 4], [u16; 6]) {
+    pub fn into_vertices_indices(self, quad_index: VertexIndex) -> ([Vertex; 4], [VertexIndex; 6]) {
         let pos = self.rect.to_pos();
         let dim = self.rect.to_dim();
         let color = self.color.into();
@@ -669,7 +695,7 @@ impl Quad {
             },
         ];
 
-        let indices: [u16; 6] = [
+        let indices: [VertexIndex; 6] = [
             4 * quad_index,
             4 * quad_index + 1,
             4 * quad_index + 2,
@@ -681,7 +707,10 @@ impl Quad {
         (vertices, indices)
     }
 
-    fn into_vertices_indices_centered(&self, quad_index: u16) -> ([Vertex; 4], [u16; 6]) {
+    pub fn into_vertices_indices_centered(
+        self,
+        quad_index: VertexIndex,
+    ) -> ([Vertex; 4], [VertexIndex; 6]) {
         let pos = self.rect.to_pos();
         let half_dim = 0.5 * self.rect.to_dim();
         let color = self.color.into();
@@ -711,7 +740,7 @@ impl Quad {
             },
         ];
 
-        let indices: [u16; 6] = [
+        let indices: [VertexIndex; 6] = [
             4 * quad_index,
             4 * quad_index + 1,
             4 * quad_index + 2,
