@@ -43,6 +43,8 @@ use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
 
+use std::collections::HashMap;
+
 use cgmath::prelude::*;
 
 type ColorFormat = gfx::format::Rgba8;
@@ -241,7 +243,7 @@ fn main() {
 
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
-    const FULLSCREEN_MODE: bool = false;
+    const FULLSCREEN_MODE: bool = true;
     const CANVAS_WIDTH: u16 = 320;
     const CANVAS_HEIGHT: u16 = 180;
     const GL_VERSION_MAJOR: u8 = 3;
@@ -380,31 +382,44 @@ fn main() {
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
-                        let cursor_x = position.x as f32;
-                        let cursor_y = position.y as f32;
-                        cursor_pos_screen = Point::new(cursor_x, screen_rect.height - cursor_y);
+                        // NOTE: cursor_pos_screen is in the following interval:
+                        //       [0 .. screen_rect.width - 1] x [0 .. screen_rect.height - 1]
+                        //       where (0,0) is the bottom left of the screen
+                        cursor_pos_screen = Point::new(
+                            position.x as f32,
+                            (screen_rect.height - 1.0) - position.y as f32,
+                        );
                     }
                     _ => (),
                 }
             }
         });
 
-        // Cursor position
+        // Calculate cursor position in canvas coordinates
         // -----------------------------------------------------------------------------------------
 
+        // NOTE: cursor_pos_canvas is in the following interval:
+        //       [0 .. canvas_rect.width - 1] x [0 .. canvas_rect.height - 1]
+        //       where (0,0) is the bottom left of the screen
         let canvas_rect = rc.canvas_rect();
-        let blit_rect = canvas_rect
-            .stretched_to_fit(screen_rect)
-            .centered_in(screen_rect);
+        let blit_rect = rc.canvas_blit_rect();
 
+        // FIXME(JaSc): Clamping the point should use integer arithmetic and so that
+        //              x != canvas.rect.width and y != canvas.rect.height
         let cursor_pos_canvas = clamp_point_in_rect(cursor_pos_screen, blit_rect);
         let cursor_pos_canvas = Point::new(
-            canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width - 0.5),
-            canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height - 0.5),
+            f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
+            f32::floor(
+                canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height),
+            ),
         );
 
         // Draw into canvas
         // -----------------------------------------------------------------------------------------
+
+        let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
+        rc.clear_canvas(clear_color);
+
         let projection_mat = cgmath::ortho(
             -0.5 * canvas_rect.width,
             0.5 * canvas_rect.width,
@@ -414,28 +429,45 @@ fn main() {
             1.0,
         );
 
-        let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
-        let cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
+        dprintln!(cursor_pos_canvas);
 
-        // Add dummy quad for cursor
+        // Cursor
+        let (mut vertices, mut indices) = (vec![], vec![]);
+        let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
+        let dummy_quad = Quad::new(
+            Rect::new(
+                f32::floor(cursor_pos_canvas.x - 0.5 * canvas_rect.width),
+                f32::floor(cursor_pos_canvas.y - 0.5 * canvas_rect.height),
+                1.0,
+                1.0,
+            ),
+            -0.1,
+            quad_color,
+        );
+        dummy_quad.append_vertices_indices(0, &mut vertices, &mut indices);
+        rc.draw_to_canvas(projection_mat, "another_dummy", &vertices, &indices);
+
+        //
+        let (mut vertices, mut indices) = (vec![], vec![]);
+        let quad_color = Color::new(0.4, 0.7, 0.2, 1.0);
         let dummy_quad = Quad::new(
             Rect::from_dimension(canvas_rect.height, canvas_rect.height),
             -0.7,
             quad_color,
         );
-        let cursor_quad = Quad::new(
-            Rect::new(cursor_pos_canvas.x, cursor_pos_canvas.y, 16.0, 16.0),
-            -0.5,
-            cursor_color,
-        );
-
-        let (mut vertices, mut indices) = (vec![], vec![]);
         dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
-        cursor_quad.append_vertices_indices_centered(1, &mut vertices, &mut indices);
+        rc.draw_to_canvas(projection_mat, "dummy", &vertices, &indices);
 
-        let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
-        rc.clear_canvas(clear_color);
-        rc.draw_to_canvas(projection_mat, &vertices, &indices);
+        //
+        let (mut vertices, mut indices) = (vec![], vec![]);
+        let quad_color = Color::new(0.9, 0.7, 0.2, 1.0);
+        let dummy_quad = Quad::new(
+            Rect::from_dimension(canvas_rect.height / 2.0, canvas_rect.height / 2.0),
+            -0.2,
+            quad_color,
+        );
+        dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
+        rc.draw_to_canvas(projection_mat, "another_dummy", &vertices, &indices);
 
         // Draw to screen and flip
         // -----------------------------------------------------------------------------------------
@@ -461,6 +493,8 @@ where
 
     canvas_pipeline_data: pipe::Data<R>,
     canvas_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
+
+    textures: HashMap<String, gfx::handle::ShaderResourceView<R, [f32; 4]>>,
 }
 
 impl<C, R, F> RenderingContext<C, R, F>
@@ -507,19 +541,28 @@ where
             .expect("Failed to create a canvas depth render target");
 
         //
-        info!("Creating dummy texture and sampler");
+        info!("Creating dummy textures and sampler");
         //
         use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
         let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
-        let dummy_texture = debug_load_texture(&mut factory);
         let texture_sampler = factory.create_sampler(sampler_info);
+
+        let mut textures = HashMap::new();
+        textures.insert(
+            "dummy".to_string(),
+            debug_load_texture(&mut factory, "resources/dummy.png"),
+        );
+        textures.insert(
+            "another_dummy".to_string(),
+            debug_load_texture(&mut factory, "resources/another_dummy.png"),
+        );
 
         //
         info!("Creating screen and canvas pipeline data");
         //
         let canvas_pipeline_data = pipe::Data {
             vertex_buffer: factory.create_vertex_buffer(&[]),
-            texture: (dummy_texture, texture_sampler.clone()),
+            texture: (textures["dummy"].clone(), texture_sampler.clone()),
             transform: Mat4::identity().into(),
             out_color: canvas_color_render_target_view,
             out_depth: canvas_depth_render_target_view,
@@ -539,6 +582,7 @@ where
             canvas_pipeline_data,
             screen_pipeline_state_object,
             canvas_pipeline_state_object,
+            textures,
         }
     }
 
@@ -566,11 +610,18 @@ where
             .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
     }
 
-    fn draw_to_canvas(&mut self, projection: Mat4, vertices: &[Vertex], indices: &[VertexIndex]) {
+    fn draw_to_canvas(
+        &mut self,
+        projection: Mat4,
+        texture_name: &str,
+        vertices: &[Vertex],
+        indices: &[VertexIndex],
+    ) {
         let (canvas_vertex_buffer, canvas_slice) = self
             .factory
             .create_vertex_buffer_with_slice(&vertices, &*indices);
 
+        self.canvas_pipeline_data.texture.0 = self.textures[texture_name].clone();
         self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
         self.canvas_pipeline_data.transform = projection.into();
 
@@ -607,13 +658,16 @@ where
     }
 }
 
-fn debug_load_texture<F, R>(factory: &mut F) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
+fn debug_load_texture<F, R>(
+    factory: &mut F,
+    file_name: &str,
+) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
 where
     F: gfx::Factory<R>,
     R: gfx::Resources,
 {
     use gfx::format::Rgba8;
-    let img = image::open("resources/dummy.png").unwrap().to_rgba();
+    let img = image::open(file_name).unwrap().to_rgba();
     let (width, height) = img.dimensions();
     let kind = gfx::texture::Kind::D2(width as u16, height as u16, gfx::texture::AaMode::Single);
     let (_, view) = factory
