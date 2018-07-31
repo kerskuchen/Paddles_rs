@@ -1,0 +1,9 @@
+name = "pongi"
+version = "0.1.0"
+authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+[workspace]
+members = [
+    "game_runtime",
+    "game_lib",
+]

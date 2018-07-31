@@ -32,6 +32,7 @@ BACKLOG(JaSc):
 extern crate gfx;
 extern crate gfx_window_glutin;
 extern crate glutin;
+extern crate libloading;
 
 #[macro_use]
 extern crate log;
@@ -43,10 +44,11 @@ extern crate rand;
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
-
-use std::collections::HashMap;
+use libloading::Library;
 
 use cgmath::prelude::*;
+
+use std::collections::HashMap;
 
 type ColorFormat = gfx::format::Rgba8;
 type DepthFormat = gfx::format::DepthStencil;
@@ -325,11 +327,18 @@ fn main() {
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
 
+    let mut game_lib = GameLib::new("target/debug/", "game_lib");
     //
     info!("Entering main event loop");
     info!("------------------------");
     //
     while running {
+        // Testing library hotreloading
+        if game_lib.needs_reloading() {
+            game_lib = game_lib.reload();
+        }
+        println!("message: {}", game_lib.get_message());
+
         use glutin::{Event, KeyboardInput, WindowEvent};
         events_loop.poll_events(|event| {
             if let Event::WindowEvent { event, .. } = event {
@@ -805,5 +814,144 @@ impl Quad {
         ];
 
         (vertices, indices)
+    }
+}
+
+pub struct GameLib {
+    pub lib: Library,
+    lib_path: String,
+    lib_name: String,
+    last_modified_time: std::time::SystemTime,
+    copy_counter: usize,
+}
+
+impl GameLib {
+    pub fn get_message(&self) -> &'static str {
+        unsafe {
+            let f = self
+                .lib
+                .get::<fn() -> &'static str>(b"get_message\0")
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Could not load `get_message` function from GameLib: {}",
+                        error
+                    )
+                });
+            f()
+        }
+    }
+
+    pub fn new(lib_path: &str, lib_name: &str) -> GameLib {
+        GameLib::load(0, lib_path, lib_name)
+    }
+
+    pub fn needs_reloading(&mut self) -> bool {
+        let (file_path, _, _) =
+            GameLib::construct_paths(self.copy_counter, &self.lib_path, &self.lib_name);
+
+        if let Ok(Ok(last_modified_time)) =
+            std::fs::metadata(&file_path).map(|metadata| metadata.modified())
+        {
+            // NOTE: We do not set `self.last_modified_time` here because we might call this
+            //       function multiple times and want the same result everytime;
+            last_modified_time > self.last_modified_time
+        } else {
+            false
+        }
+    }
+
+    pub fn reload(self) -> GameLib {
+        let lib_path = self.lib_path.clone();
+        let lib_name = self.lib_name.clone();
+        let mut copy_counter = self.copy_counter;
+
+        if GameLib::copy_lib(copy_counter, &lib_path, &lib_name).is_err() {
+            // NOTE: It can hapen (even multiple times) that we fail to copy the library while
+            //       it is being recompiled/updated. This is OK as we can just retry the next time.
+            return self;
+        }
+
+        copy_counter += 1;
+        drop(self);
+        GameLib::load(copy_counter, &lib_path, &lib_name)
+    }
+
+    fn load(mut copy_counter: usize, lib_path: &str, lib_name: &str) -> GameLib {
+        GameLib::copy_lib(copy_counter, lib_path, lib_name)
+            .unwrap_or_else(|error| panic!("Error while copying: {}", error));
+        let (file_path, _, copy_file_path) =
+            GameLib::construct_paths(copy_counter, lib_path, lib_name);
+        copy_counter += 1;
+
+        // NOTE: Loading from a copy is necessary on MS Windows due to write protection issues
+        let lib = Library::new(&copy_file_path).unwrap_or_else(|error| {
+            panic!("Failed to load library {} : {}", copy_file_path, error)
+        });
+
+        let last_modified_time = std::fs::metadata(&file_path)
+            .unwrap_or_else(|error| {
+                panic!("Cannot open file {} to read metadata: {}", file_path, error)
+            })
+            .modified()
+            .unwrap_or_else(|error| {
+                panic!("Cannot read metadata of file {}: {}", file_path, error)
+            });
+
+        info!("Game lib reloaded");
+        GameLib {
+            lib,
+            lib_path: String::from(lib_path),
+            lib_name: String::from(lib_name),
+            last_modified_time,
+            copy_counter,
+        }
+    }
+
+    /// Creates temp folder (if necessary) and copies our lib into it
+    fn copy_lib(
+        copy_counter: usize,
+        lib_path: &str,
+        lib_name: &str,
+    ) -> Result<u64, std::io::Error> {
+        // Construct necessary the file paths
+        let (file_path, copy_path, copy_file_path) =
+            GameLib::construct_paths(copy_counter, lib_path, lib_name);
+
+        std::fs::create_dir_all(&copy_path)
+            .unwrap_or_else(|error| panic!("Cannot create dir {}: {}", copy_path, error));
+
+        // NOTE: Copy may fail while the library being rebuild
+        let copy_result = std::fs::copy(&file_path, &copy_file_path);
+        if let Err(ref error) = copy_result {
+            warn!(
+                "Cannot copy file {} to {}: {}",
+                file_path, copy_file_path, error
+            )
+        }
+        copy_result
+    }
+
+    fn construct_paths(
+        copy_counter: usize,
+        lib_path: &str,
+        lib_name: &str,
+    ) -> (String, String, String) {
+        let file_path = String::from(lib_path) + &GameLib::lib_name_to_file_name(lib_name);
+        let copy_path = String::from(lib_path) + "libcopies/";
+        let copy_file_path = copy_path.clone()
+            + &GameLib::lib_name_to_file_name(
+                &(String::from(lib_name) + &copy_counter.to_string()),
+            );
+
+        (file_path, copy_path, copy_file_path)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn lib_name_to_file_name(lib_name: &str) -> String {
+        format!("{}.dll", lib_name)
+    }
+    #[cfg(target_os = "linux")]
+    fn lib_name_to_file_name(lib_name: &str) -> String {
+        format!("lib{}.so", lib_name)
     }
 }
