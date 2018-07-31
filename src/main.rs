@@ -12,7 +12,7 @@ TODO(JaSc):
   - BG music with PHAT BEATSIES
 
 BACKLOG(JaSc):
-  - The following are things to remember to extract out of an old C project in the long term
+  - The following are things to remember to extract out of the old C project in the long term
     x Debug macro to print a variable and it's name quickly
     - Be able to conveniently do debug printing on screen
     - Moving camera system
@@ -25,6 +25,7 @@ BACKLOG(JaSc):
     - Raycasting and collision detection
     - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
     - Live looped input playback and recording
+    - Hot reloading of game code
 */
 
 #[macro_use]
@@ -157,6 +158,7 @@ impl Rect {
             height: self.height,
         }
     }
+
     pub fn to_pos(&self) -> Point {
         Point::new(self.x, self.y)
     }
@@ -395,7 +397,7 @@ fn main() {
             }
         });
 
-        // Calculate cursor position in canvas coordinates
+        // Transform cursor screen coordinates into canvas coordinates
         // -----------------------------------------------------------------------------------------
 
         // NOTE: cursor_pos_canvas is in the following interval:
@@ -404,8 +406,9 @@ fn main() {
         let canvas_rect = rc.canvas_rect();
         let blit_rect = rc.canvas_blit_rect();
 
-        // FIXME(JaSc): Clamping the point should use integer arithmetic and so that
+        // FIXME(JaSc): Clamping the point should use integer arithmetic so that
         //              x != canvas.rect.width and y != canvas.rect.height
+        //              Right now this is not true in windowed mode
         let cursor_pos_canvas = clamp_point_in_rect(cursor_pos_screen, blit_rect);
         let cursor_pos_canvas = Point::new(
             f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
@@ -429,8 +432,6 @@ fn main() {
             1.0,
         );
 
-        dprintln!(cursor_pos_canvas);
-
         // Cursor
         let (mut vertices, mut indices) = (vec![], vec![]);
         let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
@@ -445,9 +446,9 @@ fn main() {
             quad_color,
         );
         dummy_quad.append_vertices_indices(0, &mut vertices, &mut indices);
-        rc.draw_to_canvas(projection_mat, "another_dummy", &vertices, &indices);
+        rc.draw_into_canvas(projection_mat, "another_dummy", &vertices, &indices);
 
-        //
+        // Dummyquad 1
         let (mut vertices, mut indices) = (vec![], vec![]);
         let quad_color = Color::new(0.4, 0.7, 0.2, 1.0);
         let dummy_quad = Quad::new(
@@ -456,9 +457,9 @@ fn main() {
             quad_color,
         );
         dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
-        rc.draw_to_canvas(projection_mat, "dummy", &vertices, &indices);
+        rc.draw_into_canvas(projection_mat, "dummy", &vertices, &indices);
 
-        //
+        // Dummyquad 2
         let (mut vertices, mut indices) = (vec![], vec![]);
         let quad_color = Color::new(0.9, 0.7, 0.2, 1.0);
         let dummy_quad = Quad::new(
@@ -467,7 +468,7 @@ fn main() {
             quad_color,
         );
         dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
-        rc.draw_to_canvas(projection_mat, "another_dummy", &vertices, &indices);
+        rc.draw_into_canvas(projection_mat, "another_dummy", &vertices, &indices);
 
         // Draw to screen and flip
         // -----------------------------------------------------------------------------------------
@@ -610,7 +611,7 @@ where
             .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
     }
 
-    fn draw_to_canvas(
+    fn draw_into_canvas(
         &mut self,
         projection: Mat4,
         texture_name: &str,
