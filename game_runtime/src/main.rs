@@ -42,7 +42,7 @@ extern crate rand;
 
 #[macro_use]
 extern crate game_lib;
-use game_lib::{Color, Mat4, Point, Rect, SquareMatrix, Vertex, VertexIndex};
+use game_lib::{Color, Mat4, Point, Quad, Rect, SquareMatrix, Vertex, VertexIndex};
 
 use gfx::traits::FactoryExt;
 use gfx::Device;
@@ -502,39 +502,11 @@ where
     }
 
     pub fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
-        let blit_rect = self.canvas_blit_rect();
-        let vertices: [VertexGFX; 4] = [
-            VertexGFX {
-                pos: [blit_rect.x, blit_rect.y, 0.0, 1.0],
-                uv: [0.0, 1.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-            },
-            VertexGFX {
-                pos: [blit_rect.x + blit_rect.width, blit_rect.y, 0.0, 1.0],
-                uv: [1.0, 1.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-            },
-            VertexGFX {
-                pos: [
-                    blit_rect.x + blit_rect.width,
-                    blit_rect.y + blit_rect.height,
-                    0.0,
-                    1.0,
-                ],
-                uv: [1.0, 0.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-            },
-            VertexGFX {
-                pos: [blit_rect.x, blit_rect.y + blit_rect.height, 0.0, 1.0],
-                uv: [0.0, 0.0],
-                color: [1.0, 1.0, 1.0, 1.0],
-            },
-        ];
-        let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
-
+        let blit_quad = Quad::new(self.canvas_blit_rect(), 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
+        let (vertices, indices) = blit_quad.into_vertices_indices(0);
         let (vertex_buffer, slice) = self
             .factory
-            .create_vertex_buffer_with_slice(&vertices, &indices[..]);
+            .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &indices[..]);
         self.screen_pipeline_data.vertex_buffer = vertex_buffer;
 
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
