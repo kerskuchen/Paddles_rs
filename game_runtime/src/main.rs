@@ -25,7 +25,7 @@ BACKLOG(JaSc):
     - Raycasting and collision detection
     - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
     - Live looped input playback and recording
-    - Hot reloading of game code
+    x Hot reloading of game code
 */
 
 #[macro_use]
@@ -40,6 +40,7 @@ extern crate fern;
 extern crate image;
 extern crate rand;
 
+#[macro_use]
 extern crate game_lib;
 use game_lib::{Color, Mat4, Point, Rect, SquareMatrix, Vertex, VertexIndex};
 
@@ -69,7 +70,10 @@ gfx_defines! {
     }
 }
 
-fn vertex_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
+/// Converts a slice of [`Vertex`] into a slice of [`VertexGFX`] for gfx to consume.
+///
+/// Note that both types are memory-equivalent so the conversion is just a transmutation
+pub fn convert_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
     unsafe { std::mem::transmute(vertices) }
 }
 
@@ -173,10 +177,11 @@ fn main() {
 
     // State variables
     let mut running = true;
-    let mut cursor_pos_screen = Point::new(0.0, 0.0);
-
+    let mut screen_cursor_pos = Point::new(0.0, 0.0);
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
+
+    let mut input = game_lib::GameInput::new();
 
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     //
@@ -246,7 +251,7 @@ fn main() {
                         // NOTE: cursor_pos_screen is in the following interval:
                         //       [0 .. screen_rect.width - 1] x [0 .. screen_rect.height - 1]
                         //       where (0,0) is the bottom left of the screen
-                        cursor_pos_screen = Point::new(
+                        screen_cursor_pos = Point::new(
                             position.x as f32,
                             (screen_rect.height - 1.0) - position.y as f32,
                         );
@@ -256,25 +261,25 @@ fn main() {
             }
         });
 
-        // Transform cursor screen coordinates into canvas coordinates
+        // Prepare input
         // -----------------------------------------------------------------------------------------
 
         // NOTE: cursor_pos_canvas is in the following interval:
         //       [0 .. canvas_rect.width - 1] x [0 .. canvas_rect.height - 1]
-        //       where (0,0) is the bottom left of the screen
+        //       where (0,0) is the bottom left of the screen.
         let canvas_rect = rc.canvas_rect();
-        let blit_rect = rc.canvas_blit_rect();
-
-        // FIXME(JaSc): Clamping the point should use integer arithmetic so that
-        //              x != canvas.rect.width and y != canvas.rect.height
-        //              Right now this is not true in windowed mode
-        let cursor_pos_canvas = game_lib::clamp_point_in_rect(cursor_pos_screen, blit_rect);
-        let cursor_pos_canvas = Point::new(
-            f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
-            f32::floor(
-                canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height),
-            ),
+        let canvas_cursor_pos = screen_cursor_pos_to_canvas_cursor_pos(
+            screen_cursor_pos,
+            canvas_rect,
+            rc.canvas_blit_rect(),
         );
+
+        input.canvas_width = canvas_rect.width as i32;
+        input.canvas_height = canvas_rect.height as i32;
+        input.cursor_pos_x = canvas_cursor_pos.x as i32;
+        input.cursor_pos_y = canvas_cursor_pos.y as i32;
+
+        let draw_commands = game_lib.update_and_draw(&input);
 
         // Draw into canvas
         // -----------------------------------------------------------------------------------------
@@ -282,12 +287,11 @@ fn main() {
         let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
         rc.clear_canvas(clear_color);
 
-        let draw_commands = game_lib.update_and_draw(cursor_pos_canvas, canvas_rect);
         for draw_command in draw_commands {
             rc.draw_into_canvas(
                 draw_command.projection,
                 &draw_command.texture,
-                vertex_to_gfx_format(&draw_command.vertices),
+                convert_to_gfx_format(&draw_command.vertices),
                 &draw_command.indices,
             );
         }
@@ -302,7 +306,39 @@ fn main() {
     }
 }
 
-struct RenderingContext<C, R, F>
+/// Clamps a given `screen_cursor_pos` to the area where the canvas is blitted to and converts
+/// the result into a canvas-cursor-position in the following interval:
+/// \[0 .. `canvas_rect.width` - 1\] x \[0 .. `canvas_rect.height` - 1\]
+/// where (0,0) is the bottom left of the canvas.
+///
+/// Note that the screen-area where the canvas is blitted to may be smaller than the actual screen
+/// area. This can be due to letter-/columnboxing effects.
+pub fn screen_cursor_pos_to_canvas_cursor_pos(
+    screen_cursor_pos: Point,
+    canvas_rect: Rect,
+    mut blit_rect: Rect,
+) -> Point {
+    // NOTE: Clamping the point needs to use integer arithmetic such that
+    //          x != canvas.rect.width and y != canvas.rect.height
+    //       holds. We therefore need to subtract one from the blit_rect's dimension and then add
+    //       one again after clamping to achieve the desired effect.
+    // TODO(JaSc): Maybe make this more easier to understand via integer rectangles
+    blit_rect.width -= 1.0;
+    blit_rect.height -= 1.0;
+    let cursor_pos_canvas = game_lib::clamp_point_in_rect(screen_cursor_pos, blit_rect);
+    blit_rect.width += 1.0;
+    blit_rect.height += 1.0;
+
+    Point::new(
+        f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
+        f32::floor(canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height)),
+    )
+}
+
+//==================================================================================================
+// RenderingContext
+//
+pub struct RenderingContext<C, R, F>
 where
     R: gfx::Resources,
     C: gfx::CommandBuffer<R>,
@@ -326,7 +362,7 @@ where
     C: gfx::CommandBuffer<R>,
     F: gfx::Factory<R>,
 {
-    fn new(
+    pub fn new(
         mut factory: F,
         encoder: gfx::Encoder<R, C>,
         screen_color_render_target_view: gfx::handle::RenderTargetView<R, ColorFormat>,
@@ -409,31 +445,41 @@ where
         }
     }
 
-    fn canvas_rect(&self) -> Rect {
+    /// Returns the dimensions of the canvas in pixels as rectangle
+    pub fn canvas_rect(&self) -> Rect {
         let (width, height, _, _) = self.canvas_pipeline_data.out_color.get_dimensions();
         Rect::from_dimension(f32::from(width), f32::from(height))
     }
 
-    fn screen_rect(&self) -> Rect {
+    /// Returns the dimensions of the screen in pixels as rectangle
+    pub fn screen_rect(&self) -> Rect {
         let (width, height, _, _) = self.screen_pipeline_data.out_color.get_dimensions();
         Rect::from_dimension(f32::from(width), f32::from(height))
     }
 
-    fn canvas_blit_rect(&self) -> Rect {
+    /// Returns the dimensions of the `blit-rectangle` of the canvas in pixels.
+    /// The `blit-rectange` is the area of the screen where the content of the canvas is drawn onto.
+    /// It is as big as a canvas that is proportionally stretched and centered to fill the whole
+    /// screen.
+    ///
+    /// It may or may not be smaller than the full screen size, depending on the aspect
+    /// ratio of both the screen and the canvas but is guaranteed to be either have the same height
+    /// or the same width as the screen (or both).
+    pub fn canvas_blit_rect(&self) -> Rect {
         let screen_rect = self.screen_rect();
         self.canvas_rect()
             .stretched_to_fit(screen_rect)
             .centered_in(screen_rect)
     }
 
-    fn clear_canvas(&mut self, clear_color: Color) {
+    pub fn clear_canvas(&mut self, clear_color: Color) {
         self.encoder
             .clear(&self.canvas_pipeline_data.out_color, clear_color.into());
         self.encoder
             .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
     }
 
-    fn draw_into_canvas(
+    pub fn draw_into_canvas(
         &mut self,
         projection: Mat4,
         texture_name: &str,
@@ -455,7 +501,7 @@ where
         );
     }
 
-    fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
+    pub fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
         let blit_rect = self.canvas_blit_rect();
         let vertices: [VertexGFX; 4] = [
             VertexGFX {
@@ -527,6 +573,9 @@ where
     view
 }
 
+//==================================================================================================
+// GameLib
+//
 pub struct GameLib {
     pub lib: Library,
     lib_path: String,
@@ -536,22 +585,18 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    pub fn update_and_draw(
-        &self,
-        cursor_pos_canvas: Point,
-        canvas_rect: Rect,
-    ) -> Vec<game_lib::DrawCommand> {
+    pub fn update_and_draw(&self, input: &game_lib::GameInput) -> Vec<game_lib::DrawCommand> {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(Point, Rect) -> Vec<game_lib::DrawCommand>>(b"update_and_draw\0")
+                .get::<fn(&game_lib::GameInput) -> Vec<game_lib::DrawCommand>>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
                         "Could not load `update_and_draw` function from GameLib: {}",
                         error
                     )
                 });
-            f(cursor_pos_canvas, canvas_rect)
+            f(input)
         }
     }
 

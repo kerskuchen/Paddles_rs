@@ -33,7 +33,7 @@
         },
         {
             "type": "shell",
-            "label": "rebuild dll",
+            "label": "make dll",
             "command": "cargo",
             "args": [
                 "build",

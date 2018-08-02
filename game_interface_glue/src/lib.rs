@@ -39,10 +39,10 @@
 //! static [`game_lib`] use its functions directly and just never load this crates dynamic lib.
 //!
 extern crate game_lib;
-use game_lib::{DrawCommand, Point, Rect};
+use game_lib::{DrawCommand, GameInput};
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]
-pub fn update_and_draw(cursor_pos_canvas: Point, canvas_rect: Rect) -> Vec<DrawCommand> {
-    game_lib::update_and_draw(cursor_pos_canvas, canvas_rect)
+pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
+    game_lib::update_and_draw(input)
 }
