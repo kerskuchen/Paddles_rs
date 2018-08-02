@@ -1,7 +1,7 @@
 /*
 TODO(JaSc):
   - Pixel perfect renderer with generalized (pixel independent) coordinate system
-    - Render to offscreen buffer and blit to main screen
+    x Render to offscreen buffer and blit to main screen
     - Static world camera 
     - Transformation mouse <-> screen <-> world 
   - Basic sprite loading and Bitmap font rendering (no sprite atlas yet)
@@ -29,27 +29,30 @@ BACKLOG(JaSc):
 */
 
 #[macro_use]
-extern crate gfx;
-extern crate gfx_window_glutin;
-extern crate glutin;
-extern crate libloading;
-
-#[macro_use]
 extern crate log;
 extern crate fern;
 extern crate image;
 extern crate rand;
 
-#[macro_use]
+use libloading::Library;
+use std::collections::HashMap;
+
 extern crate game_lib;
 use game_lib::{Color, Mat4, Point, Quad, Rect, SquareMatrix, Vertex, VertexIndex};
+
+//==================================================================================================
+// GFX-RS stuff
+//==================================================================================================
+//
+#[macro_use]
+extern crate gfx;
+extern crate gfx_window_glutin;
+extern crate glutin;
+extern crate libloading;
 
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
-use libloading::Library;
-
-use std::collections::HashMap;
 
 type ColorFormat = gfx::format::Rgba8;
 type DepthFormat = gfx::format::DepthStencil;
@@ -77,6 +80,10 @@ pub fn convert_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
     unsafe { std::mem::transmute(vertices) }
 }
 
+//==================================================================================================
+// Mainloop
+//==================================================================================================
+//
 fn main() {
     // Initializing logger
     //
@@ -261,19 +268,14 @@ fn main() {
             }
         });
 
-        // Prepare input
+        // Prepare input and update game
         // -----------------------------------------------------------------------------------------
 
         // NOTE: cursor_pos_canvas is in the following interval:
         //       [0 .. canvas_rect.width - 1] x [0 .. canvas_rect.height - 1]
         //       where (0,0) is the bottom left of the screen.
+        let canvas_cursor_pos = rc.screen_coord_to_canvas_coord(screen_cursor_pos);
         let canvas_rect = rc.canvas_rect();
-        let canvas_cursor_pos = screen_cursor_pos_to_canvas_cursor_pos(
-            screen_cursor_pos,
-            canvas_rect,
-            rc.canvas_blit_rect(),
-        );
-
         input.canvas_width = canvas_rect.width as i32;
         input.canvas_height = canvas_rect.height as i32;
         input.cursor_pos_x = canvas_cursor_pos.x as i32;
@@ -306,37 +308,9 @@ fn main() {
     }
 }
 
-/// Clamps a given `screen_cursor_pos` to the area where the canvas is blitted to and converts
-/// the result into a canvas-cursor-position in the following interval:
-/// \[0 .. `canvas_rect.width` - 1\] x \[0 .. `canvas_rect.height` - 1\]
-/// where (0,0) is the bottom left of the canvas.
-///
-/// Note that the screen-area where the canvas is blitted to may be smaller than the actual screen
-/// area. This can be due to letter-/columnboxing effects.
-pub fn screen_cursor_pos_to_canvas_cursor_pos(
-    screen_cursor_pos: Point,
-    canvas_rect: Rect,
-    mut blit_rect: Rect,
-) -> Point {
-    // NOTE: Clamping the point needs to use integer arithmetic such that
-    //          x != canvas.rect.width and y != canvas.rect.height
-    //       holds. We therefore need to subtract one from the blit_rect's dimension and then add
-    //       one again after clamping to achieve the desired effect.
-    // TODO(JaSc): Maybe make this more easier to understand via integer rectangles
-    blit_rect.width -= 1.0;
-    blit_rect.height -= 1.0;
-    let cursor_pos_canvas = game_lib::clamp_point_in_rect(screen_cursor_pos, blit_rect);
-    blit_rect.width += 1.0;
-    blit_rect.height += 1.0;
-
-    Point::new(
-        f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
-        f32::floor(canvas_rect.height * ((cursor_pos_canvas.y - blit_rect.y) / blit_rect.height)),
-    )
-}
-
 //==================================================================================================
 // RenderingContext
+//==================================================================================================
 //
 pub struct RenderingContext<C, R, F>
 where
@@ -457,19 +431,45 @@ where
         Rect::from_dimension(f32::from(width), f32::from(height))
     }
 
-    /// Returns the dimensions of the `blit-rectangle` of the canvas in pixels.
+    /// Returns the dimensions of the `blit_rectangle` of the canvas in pixels.
     /// The `blit-rectange` is the area of the screen where the content of the canvas is drawn onto.
     /// It is as big as a canvas that is proportionally stretched and centered to fill the whole
     /// screen.
     ///
-    /// It may or may not be smaller than the full screen size, depending on the aspect
-    /// ratio of both the screen and the canvas but is guaranteed to be either have the same height
-    /// or the same width as the screen (or both).
+    /// It may or may not be smaller than the full screen size depending on the aspect
+    /// ratio of both the screen and the canvas. The `blit_rectange` is guaranteed to either have
+    /// the same width a as the screen (with letterboxing if needed) or the same height as the
+    /// screen (with columnboxing if needed) or completely fill the screen.
     pub fn canvas_blit_rect(&self) -> Rect {
         let screen_rect = self.screen_rect();
         self.canvas_rect()
             .stretched_to_fit(screen_rect)
             .centered_in(screen_rect)
+    }
+
+    /// Clamps a given `screen_point` to the area of the
+    /// [`canvas_blit_rect`](#method.canvas_blit_rect) and converts the result into
+    /// a canvas-position in the following interval:
+    /// `[0..canvas_rect.width-1]x[0..canvas_rect.height-1]`
+    /// where `(0,0)` is the bottom left of the canvas.
+    pub fn screen_coord_to_canvas_coord(&self, screen_point: Point) -> Point {
+        // NOTE: Clamping the point needs to use integer arithmetic such that
+        //          x != canvas.rect.width and y != canvas.rect.height
+        //       holds. We therefore need to subtract one from the blit_rect's dimension and then
+        //       add one again after clamping to achieve the desired effect.
+        // TODO(JaSc): Maybe make this more self documenting via integer rectangles
+        let mut blit_rect = self.canvas_blit_rect();
+        blit_rect.width -= 1.0;
+        blit_rect.height -= 1.0;
+        let blit_rect_point = game_lib::clamp_point_in_rect(screen_point, blit_rect);
+        blit_rect.width += 1.0;
+        blit_rect.height += 1.0;
+
+        let canvas_rect = self.canvas_rect();
+        Point::new(
+            f32::floor(canvas_rect.width * ((blit_rect_point.x - blit_rect.x) / blit_rect.width)),
+            f32::floor(canvas_rect.height * ((blit_rect_point.y - blit_rect.y) / blit_rect.height)),
+        )
     }
 
     pub fn clear_canvas(&mut self, clear_color: Color) {
@@ -547,6 +547,7 @@ where
 
 //==================================================================================================
 // GameLib
+//==================================================================================================
 //
 pub struct GameLib {
     pub lib: Library,
@@ -584,7 +585,7 @@ impl GameLib {
             std::fs::metadata(&file_path).map(|metadata| metadata.modified())
         {
             // NOTE: We do not set `self.last_modified_time` here because we might call this
-            //       function multiple times and want the same result everytime;
+            //       function multiple times and want the same result everytime until we reload
             last_modified_time > self.last_modified_time
         } else {
             false
@@ -597,7 +598,7 @@ impl GameLib {
         let mut copy_counter = self.copy_counter;
 
         if GameLib::copy_lib(copy_counter, &lib_path, &lib_name).is_err() {
-            // NOTE: It can hapen (even multiple times) that we fail to copy the library while
+            // NOTE: It can happen (even multiple times) that we fail to copy the library while
             //       it is being recompiled/updated. This is OK as we can just retry the next time.
             return self;
         }
