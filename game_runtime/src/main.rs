@@ -40,8 +40,8 @@ extern crate fern;
 extern crate image;
 extern crate rand;
 
-extern crate game_datatypes;
-use game_datatypes::{Color, Mat4, Point, Rect, SquareMatrix, Vertex, VertexIndex};
+extern crate game_lib;
+use game_lib::{Color, Mat4, Point, Rect, SquareMatrix, Vertex, VertexIndex};
 
 use gfx::traits::FactoryExt;
 use gfx::Device;
@@ -178,7 +178,7 @@ fn main() {
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
 
-    let mut game_lib = GameLib::new("target/debug/", "game_lib");
+    let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     //
     info!("Entering main event loop");
     info!("------------------------");
@@ -268,7 +268,7 @@ fn main() {
         // FIXME(JaSc): Clamping the point should use integer arithmetic so that
         //              x != canvas.rect.width and y != canvas.rect.height
         //              Right now this is not true in windowed mode
-        let cursor_pos_canvas = game_datatypes::clamp_point_in_rect(cursor_pos_screen, blit_rect);
+        let cursor_pos_canvas = game_lib::clamp_point_in_rect(cursor_pos_screen, blit_rect);
         let cursor_pos_canvas = Point::new(
             f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
             f32::floor(
@@ -494,7 +494,7 @@ where
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
         let screen_rect = self.screen_rect();
         let projection_mat =
-            game_datatypes::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
+            game_lib::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
         self.screen_pipeline_data.transform = projection_mat.into();
 
         self.encoder
@@ -540,11 +540,11 @@ impl GameLib {
         &self,
         cursor_pos_canvas: Point,
         canvas_rect: Rect,
-    ) -> Vec<game_datatypes::DrawCommand> {
+    ) -> Vec<game_lib::DrawCommand> {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(Point, Rect) -> Vec<game_datatypes::DrawCommand>>(b"update_and_draw\0")
+                .get::<fn(Point, Rect) -> Vec<game_lib::DrawCommand>>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
                         "Could not load `update_and_draw` function from GameLib: {}",

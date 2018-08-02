@@ -1,0 +1,12 @@
+[package]
+name = "game_interface_glue"
+version = "0.1.0"
+authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+[dependencies]
+
+[dependencies.game_lib]
+path = "../game_lib"
+
+[lib]
+crate-type = ["dylib"]

@@ -6,5 +6,5 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 members = [
     "game_runtime",
     "game_lib",
-    "game_datatypes",
+    "game_interface_glue",
 ]

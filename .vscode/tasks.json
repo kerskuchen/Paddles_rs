@@ -22,26 +22,38 @@
             "command": "cargo",
             "args": [
                 "watch",
+                "-d",
+                "0.0",
                 "-x",
-                "build"
+                "build -p game_lib -p game_interface_glue",
             ],
-            "options": {
-                "cwd": "${workspaceFolder}/game_lib"
-            },
             "problemMatcher": [
                 "$rustc"
             ]
         },
         {
             "type": "shell",
-            "label": "build lib",
+            "label": "rebuild dll",
             "command": "cargo",
             "args": [
                 "build",
+                "-p",
+                "game_lib",
+                "-p",
+                "game_interface_glue",
             ],
-            "options": {
-                "cwd": "${workspaceFolder}/game_lib"
-            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "type": "shell",
+            "label": "cargo doc",
+            "command": "cargo",
+            "args": [
+                "doc",
+                "--no-deps",
+            ],
             "problemMatcher": [
                 "$rustc"
             ]
