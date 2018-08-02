@@ -5,5 +5,8 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
 [dependencies]
 
+[dependencies.game_datatypes]
+path = "../game_datatypes"
+
 [lib]
 crate-type = ["dylib"]

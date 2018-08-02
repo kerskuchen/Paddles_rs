@@ -36,37 +36,32 @@ extern crate libloading;
 
 #[macro_use]
 extern crate log;
-extern crate cgmath;
 extern crate fern;
 extern crate image;
 extern crate rand;
+
+extern crate game_datatypes;
+use game_datatypes::{Color, Mat4, Point, Rect, SquareMatrix, Vertex, VertexIndex};
 
 use gfx::traits::FactoryExt;
 use gfx::Device;
 use glutin::GlContext;
 use libloading::Library;
 
-use cgmath::prelude::*;
-
 use std::collections::HashMap;
 
 type ColorFormat = gfx::format::Rgba8;
 type DepthFormat = gfx::format::DepthStencil;
-type Point = cgmath::Point2<f32>;
-type Vec2 = cgmath::Vector2<f32>;
-type Color = cgmath::Vector4<f32>;
-type Mat4 = cgmath::Matrix4<f32>;
-type VertexIndex = u16;
 
 gfx_defines! {
-    vertex Vertex {
+    vertex VertexGFX {
         pos: [f32; 4] = "a_Pos",
         uv: [f32; 2] = "a_Uv",
         color: [f32; 4] = "a_Color",
     }
 
     pipeline pipe {
-        vertex_buffer: gfx::VertexBuffer<Vertex> = (),
+        vertex_buffer: gfx::VertexBuffer<VertexGFX> = (),
         transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
         out_color: gfx::RenderTarget<ColorFormat> = "Target0",
@@ -74,152 +69,8 @@ gfx_defines! {
     }
 }
 
-fn clamp(val: f32, min: f32, max: f32) -> f32 {
-    f32::max(min, f32::min(val, max))
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Rect {
-        Rect {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    pub fn from_dimension(width: f32, height: f32) -> Rect {
-        Rect {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
-        }
-    }
-
-    pub fn from_corners(bottom_left: Point, top_right: Point) -> Rect {
-        Rect {
-            x: bottom_left.x,
-            y: bottom_left.y,
-            width: top_right.x - bottom_left.x,
-            height: top_right.y - bottom_left.y,
-        }
-    }
-
-    pub fn unit_rect_centered() -> Rect {
-        Rect {
-            x: -0.5,
-            y: -0.5,
-            width: 1.0,
-            height: 1.0,
-        }
-    }
-
-    /// Returns the biggest proportionally stretched version of the rectangle that can fit
-    /// into `target`.
-    pub fn stretched_to_fit(self, target: Rect) -> Rect {
-        let source_aspect_ratio = self.width / self.height;
-        let target_aspect_ratio = target.width / target.height;
-
-        let scale_factor = if source_aspect_ratio < target_aspect_ratio {
-            // Target rect is 'wider' than ours -> height is our limit when stretching
-            target.height / self.height
-        } else {
-            // Target rect is 'narrower' than ours -> width is our limit when stretching
-            target.width / self.width
-        };
-
-        let stretched_width = self.width * scale_factor;
-        let stretched_height = self.height * scale_factor;
-
-        Rect {
-            x: self.x,
-            y: self.x,
-            width: stretched_width,
-            height: stretched_height,
-        }
-    }
-
-    /// Returns a version of the rectangle that is centered in `target`.
-    pub fn centered_in(self, target: Rect) -> Rect {
-        let x_offset_centered = target.x + (target.width - self.width) / 2.0;
-        let y_offset_centered = target.y + (target.height - self.height) / 2.0;
-
-        Rect {
-            x: x_offset_centered,
-            y: y_offset_centered,
-            width: self.width,
-            height: self.height,
-        }
-    }
-
-    pub fn to_pos(&self) -> Point {
-        Point::new(self.x, self.y)
-    }
-
-    pub fn to_dim(&self) -> Vec2 {
-        Vec2::new(self.width, self.height)
-    }
-}
-
-fn clamp_point_in_rect(point: Point, rect: Rect) -> Point {
-    Point {
-        x: clamp(point.x, rect.x, rect.x + rect.width),
-        y: clamp(point.y, rect.y, rect.y + rect.height),
-    }
-}
-
-/// A macro for debugging which returns a string representation of an expression and its value
-///
-/// It uses the `stringify` macro internally and requires the input to be an expression.
-///
-/// # Examples
-///
-/// ```
-/// let name = 5;
-/// assert_eq!(dformat!(1 + 2), "1 + 2 = 3");
-/// assert_eq!(dformat!(1 + name), "1 + name = 6");
-/// assert_eq!(dformat!(name), "name = 5");
-/// ```
-#[allow(unused_macros)]
-macro_rules! dformat {
-    ($x:expr) => {
-        format!("{} = {:?}", stringify!($x), $x)
-    };
-}
-
-/// A macro used for debugging which prints a string containing the name and value of a given
-/// variable.
-///
-/// It uses the `dformat` macro internally and requires the input to be an expression.
-/// For more information see the `dformat` macro
-///
-/// # Examples
-///
-/// ```
-/// dprintln!(1 + 2);
-/// // prints: "1 + 2 = 3"
-///
-/// let name = 5;
-/// dprintln!(name);
-/// // prints: "name = 5"
-///
-/// dprintln!(1 + name);
-/// // prints: "1 + name = 6"
-/// ```
-#[allow(unused_macros)]
-macro_rules! dprintln {
-    ($x:expr) => {
-        println!("{}", dformat!($x));
-    };
+fn vertex_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
+    unsafe { std::mem::transmute(vertices) }
 }
 
 fn main() {
@@ -337,7 +188,6 @@ fn main() {
         if game_lib.needs_reloading() {
             game_lib = game_lib.reload();
         }
-        println!("message: {}", game_lib.get_message());
 
         use glutin::{Event, KeyboardInput, WindowEvent};
         events_loop.poll_events(|event| {
@@ -418,7 +268,7 @@ fn main() {
         // FIXME(JaSc): Clamping the point should use integer arithmetic so that
         //              x != canvas.rect.width and y != canvas.rect.height
         //              Right now this is not true in windowed mode
-        let cursor_pos_canvas = clamp_point_in_rect(cursor_pos_screen, blit_rect);
+        let cursor_pos_canvas = game_datatypes::clamp_point_in_rect(cursor_pos_screen, blit_rect);
         let cursor_pos_canvas = Point::new(
             f32::floor(canvas_rect.width * ((cursor_pos_canvas.x - blit_rect.x) / blit_rect.width)),
             f32::floor(
@@ -432,52 +282,15 @@ fn main() {
         let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
         rc.clear_canvas(clear_color);
 
-        let projection_mat = cgmath::ortho(
-            -0.5 * canvas_rect.width,
-            0.5 * canvas_rect.width,
-            -0.5 * canvas_rect.height,
-            0.5 * canvas_rect.height,
-            -1.0,
-            1.0,
-        );
-
-        // Cursor
-        let (mut vertices, mut indices) = (vec![], vec![]);
-        let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
-        let dummy_quad = Quad::new(
-            Rect::new(
-                f32::floor(cursor_pos_canvas.x - 0.5 * canvas_rect.width),
-                f32::floor(cursor_pos_canvas.y - 0.5 * canvas_rect.height),
-                1.0,
-                1.0,
-            ),
-            -0.1,
-            quad_color,
-        );
-        dummy_quad.append_vertices_indices(0, &mut vertices, &mut indices);
-        rc.draw_into_canvas(projection_mat, "another_dummy", &vertices, &indices);
-
-        // Dummyquad 1
-        let (mut vertices, mut indices) = (vec![], vec![]);
-        let quad_color = Color::new(0.4, 0.7, 0.2, 1.0);
-        let dummy_quad = Quad::new(
-            Rect::from_dimension(canvas_rect.height, canvas_rect.height),
-            -0.7,
-            quad_color,
-        );
-        dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
-        rc.draw_into_canvas(projection_mat, "dummy", &vertices, &indices);
-
-        // Dummyquad 2
-        let (mut vertices, mut indices) = (vec![], vec![]);
-        let quad_color = Color::new(0.9, 0.7, 0.2, 1.0);
-        let dummy_quad = Quad::new(
-            Rect::from_dimension(canvas_rect.height / 2.0, canvas_rect.height / 2.0),
-            -0.2,
-            quad_color,
-        );
-        dummy_quad.append_vertices_indices_centered(0, &mut vertices, &mut indices);
-        rc.draw_into_canvas(projection_mat, "another_dummy", &vertices, &indices);
+        let draw_commands = game_lib.update_and_draw(cursor_pos_canvas, canvas_rect);
+        for draw_command in draw_commands {
+            rc.draw_into_canvas(
+                draw_command.projection,
+                &draw_command.texture,
+                vertex_to_gfx_format(&draw_command.vertices),
+                &draw_command.indices,
+            );
+        }
 
         // Draw to screen and flip
         // -----------------------------------------------------------------------------------------
@@ -624,7 +437,7 @@ where
         &mut self,
         projection: Mat4,
         texture_name: &str,
-        vertices: &[Vertex],
+        vertices: &[VertexGFX],
         indices: &[VertexIndex],
     ) {
         let (canvas_vertex_buffer, canvas_slice) = self
@@ -643,8 +456,36 @@ where
     }
 
     fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
-        let quad = Quad::new(self.canvas_blit_rect(), 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let (vertices, indices) = quad.into_vertices_indices(0);
+        let blit_rect = self.canvas_blit_rect();
+        let vertices: [VertexGFX; 4] = [
+            VertexGFX {
+                pos: [blit_rect.x, blit_rect.y, 0.0, 1.0],
+                uv: [0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+            VertexGFX {
+                pos: [blit_rect.x + blit_rect.width, blit_rect.y, 0.0, 1.0],
+                uv: [1.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+            VertexGFX {
+                pos: [
+                    blit_rect.x + blit_rect.width,
+                    blit_rect.y + blit_rect.height,
+                    0.0,
+                    1.0,
+                ],
+                uv: [1.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+            VertexGFX {
+                pos: [blit_rect.x, blit_rect.y + blit_rect.height, 0.0, 1.0],
+                uv: [0.0, 0.0],
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+        ];
+        let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
+
         let (vertex_buffer, slice) = self
             .factory
             .create_vertex_buffer_with_slice(&vertices, &indices[..]);
@@ -653,7 +494,7 @@ where
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
         let screen_rect = self.screen_rect();
         let projection_mat =
-            cgmath::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
+            game_datatypes::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
         self.screen_pipeline_data.transform = projection_mat.into();
 
         self.encoder
@@ -686,137 +527,6 @@ where
     view
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Quad {
-    pub rect: Rect,
-    pub depth: f32,
-    pub color: Color,
-}
-
-impl Quad {
-    pub fn new(rect: Rect, depth: f32, color: Color) -> Quad {
-        Quad { rect, depth, color }
-    }
-
-    pub fn unit_quad(depth: f32, color: Color) -> Quad {
-        Quad {
-            rect: Rect::from_dimension(1.0, 1.0),
-            depth,
-            color,
-        }
-    }
-
-    // TODO(JaSc): Create vertex/index-buffer struct and move the `append_..` methods into that
-    pub fn append_vertices_indices(
-        &self,
-        quad_index: VertexIndex,
-        vertices: &mut Vec<Vertex>,
-        indices: &mut Vec<VertexIndex>,
-    ) {
-        let (self_vertices, self_indices) = self.into_vertices_indices(quad_index);
-        vertices.extend(&self_vertices);
-        indices.extend(&self_indices);
-    }
-
-    pub fn append_vertices_indices_centered(
-        &self,
-        quad_index: VertexIndex,
-        vertices: &mut Vec<Vertex>,
-        indices: &mut Vec<VertexIndex>,
-    ) {
-        let (self_vertices, self_indices) = self.into_vertices_indices_centered(quad_index);
-        vertices.extend(&self_vertices);
-        indices.extend(&self_indices);
-    }
-
-    pub fn into_vertices_indices(self, quad_index: VertexIndex) -> ([Vertex; 4], [VertexIndex; 6]) {
-        let pos = self.rect.to_pos();
-        let dim = self.rect.to_dim();
-        let color = self.color.into();
-        let depth = self.depth;
-
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        let vertices: [Vertex; 4] = [
-            Vertex {
-                pos: [pos.x, pos.y, depth, 1.0],
-                uv: [0.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x + dim.x, pos.y, depth, 1.0],
-                uv: [1.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x + dim.x, pos.y + dim.y, depth, 1.0],
-                uv: [1.0, 0.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x, pos.y + dim.y, depth, 1.0],
-                uv: [0.0, 0.0],
-                color,
-            },
-        ];
-
-        let indices: [VertexIndex; 6] = [
-            4 * quad_index,
-            4 * quad_index + 1,
-            4 * quad_index + 2,
-            4 * quad_index + 2,
-            4 * quad_index + 3,
-            4 * quad_index,
-        ];
-
-        (vertices, indices)
-    }
-
-    pub fn into_vertices_indices_centered(
-        self,
-        quad_index: VertexIndex,
-    ) -> ([Vertex; 4], [VertexIndex; 6]) {
-        let pos = self.rect.to_pos();
-        let half_dim = 0.5 * self.rect.to_dim();
-        let color = self.color.into();
-        let depth = self.depth;
-
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        let vertices: [Vertex; 4] = [
-            Vertex {
-                pos: [pos.x - half_dim.x, pos.y - half_dim.y, depth, 1.0],
-                uv: [0.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x + half_dim.x, pos.y - half_dim.y, depth, 1.0],
-                uv: [1.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x + half_dim.x, pos.y + half_dim.y, depth, 1.0],
-                uv: [1.0, 0.0],
-                color,
-            },
-            Vertex {
-                pos: [pos.x - half_dim.x, pos.y + half_dim.y, depth, 1.0],
-                uv: [0.0, 0.0],
-                color,
-            },
-        ];
-
-        let indices: [VertexIndex; 6] = [
-            4 * quad_index,
-            4 * quad_index + 1,
-            4 * quad_index + 2,
-            4 * quad_index + 2,
-            4 * quad_index + 3,
-            4 * quad_index,
-        ];
-
-        (vertices, indices)
-    }
-}
-
 pub struct GameLib {
     pub lib: Library,
     lib_path: String,
@@ -826,18 +536,22 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    pub fn get_message(&self) -> &'static str {
+    pub fn update_and_draw(
+        &self,
+        cursor_pos_canvas: Point,
+        canvas_rect: Rect,
+    ) -> Vec<game_datatypes::DrawCommand> {
         unsafe {
             let f = self
                 .lib
-                .get::<fn() -> &'static str>(b"get_message\0")
+                .get::<fn(Point, Rect) -> Vec<game_datatypes::DrawCommand>>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
-                        "Could not load `get_message` function from GameLib: {}",
+                        "Could not load `update_and_draw` function from GameLib: {}",
                         error
                     )
                 });
-            f()
+            f(cursor_pos_canvas, canvas_rect)
         }
     }
 

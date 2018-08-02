@@ -23,6 +23,20 @@
             "args": [
                 "watch",
                 "-x",
+                "build"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/game_lib"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
+        {
+            "type": "shell",
+            "label": "build lib",
+            "command": "cargo",
+            "args": [
                 "build",
             ],
             "options": {
@@ -31,6 +45,6 @@
             "problemMatcher": [
                 "$rustc"
             ]
-        }
+        },
     ]
 }

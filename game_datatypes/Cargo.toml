@@ -1,0 +1,7 @@
+[package]
+name = "game_datatypes"
+version = "0.1.0"
+authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+[dependencies]
+cgmath = "0.16"
