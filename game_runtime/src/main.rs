@@ -26,6 +26,7 @@ BACKLOG(JaSc):
     - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
     - Live looped input playback and recording
     x Hot reloading of game code
+    - Disable hot reloading when making a publish build
 */
 
 #[macro_use]

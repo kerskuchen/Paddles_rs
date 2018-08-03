@@ -35,8 +35,8 @@
 //! hotreloading won't work.
 //!
 //! As hot-reloading is mainly used for developing/debugging, it is ok to keep two copies of
-//! [`game_lib`] in the runtimes process memory. In release mode the runtime can link to the
-//! static [`game_lib`] use its functions directly and just never load this crates dynamic lib.
+//! [`game_lib`] in the runtimes process memory. When publishing the game, the runtime can link to
+//! the static [`game_lib`] use its functions directly and just never load this crates dynamic lib.
 //!
 extern crate game_lib;
 use game_lib::{DrawCommand, GameInput};
