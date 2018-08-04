@@ -15,6 +15,10 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
+//==================================================================================================
+// Quad
+//==================================================================================================
+//
 #[derive(Debug, Clone, Copy)]
 pub struct Quad {
     pub rect: Rect,
@@ -29,7 +33,7 @@ impl Quad {
 
     pub fn unit_quad(depth: f32, color: Color) -> Quad {
         Quad {
-            rect: Rect::from_dimension(1.0, 1.0),
+            rect: Rect::from_width_height(1.0, 1.0),
             depth,
             color,
         }
@@ -59,8 +63,8 @@ impl Quad {
     }
 
     pub fn into_vertices_indices(self, quad_index: VertexIndex) -> ([Vertex; 4], [VertexIndex; 6]) {
-        let pos = self.rect.to_pos();
-        let dim = self.rect.to_dim();
+        let pos = self.rect.pos;
+        let dim = self.rect.dim;
         let color = self.color.into();
         let depth = self.depth;
 
@@ -104,8 +108,8 @@ impl Quad {
         self,
         quad_index: VertexIndex,
     ) -> ([Vertex; 4], [VertexIndex; 6]) {
-        let pos = self.rect.to_pos();
-        let half_dim = 0.5 * self.rect.to_dim();
+        let pos = self.rect.pos;
+        let half_dim = 0.5 * self.rect.dim;
         let color = self.color.into();
         let depth = self.depth;
 

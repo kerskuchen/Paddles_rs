@@ -2,10 +2,16 @@ pub use cgmath;
 pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
-pub type Point = cgmath::Point2<f32>;
-pub type Vec2 = cgmath::Vector2<f32>;
+pub type Point = Vec2;
+pub type WorldPoint = Vec2;
+pub type ScreenPoint = Vec2;
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
+
+//==================================================================================================
+// Clamping
+//==================================================================================================
+//
 
 /// Clamps a given f32 `val` into interval \[`min`, `max`\]
 pub fn clamp(val: f32, min: f32, max: f32) -> f32 {
@@ -19,110 +25,418 @@ pub fn clamp_integer(val: i32, min: i32, max: i32) -> i32 {
     i32::max(min, i32::min(val, max))
 }
 
+impl Point {
+    /// Clamps a points x and y coordinates to the boundaries of a given rectangle
+    ///
+    /// # Examples
+    /// ```
+    /// let point = Point::new(1.0, 2.5);
+    /// let rect = Rect::new(0.0, 0.0, 1.5, 1.5);
+    /// assert_eq!(Point::new(1.0, 1.5), clamp_point_in_rect(point, rect));
+    ///
+    /// ```
+    pub fn clamped_in_rect(self, rect: Rect) -> Point {
+        Point::new(
+            clamp(self.x, rect.pos.x, rect.pos.x + rect.dim.x),
+            clamp(self.y, rect.pos.y, rect.pos.y + rect.dim.x),
+        )
+    }
+}
+
+//==================================================================================================
+// Vectors
+//==================================================================================================
+//
+
+use std::ops::Add;
+use std::ops::AddAssign;
+use std::ops::Div;
+use std::ops::Mul;
+use std::ops::Sub;
+use std::ops::SubAssign;
+
 #[derive(Debug, Clone, Copy)]
-pub struct Rect {
+pub struct Vec2 {
     pub x: f32,
     pub y: f32,
-    pub width: f32,
-    pub height: f32,
+}
+
+impl Vec2 {
+    pub fn zero() -> Vec2 {
+        Vec2 { x: 0.0, y: 0.0 }
+    }
+    pub fn new(x: f32, y: f32) -> Vec2 {
+        Vec2 { x, y }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Element-wise addition
+//
+impl Add<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+impl Add<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, scalar: f32) -> Vec2 {
+        Vec2 {
+            x: self.x + scalar,
+            y: self.y + scalar,
+        }
+    }
+}
+impl Add<Vec2> for f32 {
+    type Output = Vec2;
+
+    fn add(self, vec: Vec2) -> Vec2 {
+        Vec2 {
+            x: vec.x + self,
+            y: vec.y + self,
+        }
+    }
+}
+
+impl AddAssign<Vec2> for Vec2 {
+    fn add_assign(&mut self, other: Vec2) {
+        *self = Vec2 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+impl AddAssign<f32> for Vec2 {
+    fn add_assign(&mut self, scalar: f32) {
+        *self = Vec2 {
+            x: self.x + scalar,
+            y: self.y + scalar,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Element-wise subtraction
+//
+impl Sub<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+impl Sub<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, scalar: f32) -> Vec2 {
+        Vec2 {
+            x: self.x - scalar,
+            y: self.y - scalar,
+        }
+    }
+}
+
+impl SubAssign<Vec2> for Vec2 {
+    fn sub_assign(&mut self, other: Vec2) {
+        *self = Vec2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+impl SubAssign<f32> for Vec2 {
+    fn sub_assign(&mut self, scalar: f32) {
+        *self = Vec2 {
+            x: self.x - scalar,
+            y: self.y - scalar,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Element-wise multiplication
+//
+impl Mul<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x * other.x,
+            y: self.y * other.y,
+        }
+    }
+}
+impl Mul<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, scalar: f32) -> Vec2 {
+        Vec2 {
+            x: self.x * scalar,
+            y: self.y * scalar,
+        }
+    }
+}
+impl Mul<Vec2> for f32 {
+    type Output = Vec2;
+
+    fn mul(self, vec: Vec2) -> Vec2 {
+        Vec2 {
+            x: vec.x * self,
+            y: vec.y * self,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Element-wise division
+//
+impl Div<Vec2> for Vec2 {
+    type Output = Vec2;
+
+    fn div(self, other: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x / other.x,
+            y: self.y / other.y,
+        }
+    }
+}
+impl Div<f32> for Vec2 {
+    type Output = Vec2;
+
+    fn div(self, scalar: f32) -> Vec2 {
+        Vec2 {
+            x: self.x / scalar,
+            y: self.y / scalar,
+        }
+    }
+}
+//==================================================================================================
+// Matrices
+//==================================================================================================
+//
+
+pub trait Mat4Helper {
+    fn ortho_centered(width: f32, height: f32, near: f32, far: f32) -> Self;
+    fn ortho_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self;
+    fn ortho_bottom_left_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self;
+}
+
+impl Mat4Helper for Mat4 {
+    fn ortho_centered(width: f32, height: f32, near: f32, far: f32) -> Self {
+        cgmath::ortho(
+            -0.5 * width,
+            0.5 * width,
+            -0.5 * height,
+            0.5 * height,
+            near,
+            far,
+        )
+    }
+
+    fn ortho_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self {
+        cgmath::ortho(0.0, width, 0.0, height, near, far)
+    }
+
+    fn ortho_bottom_left_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self {
+        cgmath::ortho(0.0, width, height, 0.0, near, far)
+    }
+}
+
+//==================================================================================================
+// Rect
+//==================================================================================================
+//
+#[derive(Debug, Clone, Copy)]
+pub struct Rect {
+    pub pos: Point,
+    pub dim: Vec2,
 }
 
 impl Rect {
+    pub fn zero() -> Rect {
+        Rect {
+            pos: Point::zero(),
+            dim: Vec2::zero(),
+        }
+    }
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Rect {
         Rect {
-            x,
-            y,
-            width,
-            height,
+            pos: Point::new(x, y),
+            dim: Vec2::new(width, height),
         }
     }
 
-    pub fn from_dimension(width: f32, height: f32) -> Rect {
+    pub fn from_width_height(width: f32, height: f32) -> Rect {
         Rect {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
+            pos: Point::zero(),
+            dim: Vec2::new(width, height),
         }
+    }
+
+    pub fn from_point(pos: Point, width: f32, height: f32) -> Rect {
+        Rect {
+            pos,
+            dim: Vec2::new(width, height),
+        }
+    }
+
+    pub fn from_dimension(dim: Vec2) -> Rect {
+        Rect {
+            pos: Point::zero(),
+            dim: dim,
+        }
+    }
+
+    pub fn from_point_dimension(pos: Point, dim: Vec2) -> Rect {
+        Rect { pos, dim }
     }
 
     pub fn from_corners(bottom_left: Point, top_right: Point) -> Rect {
         Rect {
-            x: bottom_left.x,
-            y: bottom_left.y,
-            width: top_right.x - bottom_left.x,
-            height: top_right.y - bottom_left.y,
+            pos: Point {
+                x: bottom_left.x,
+                y: bottom_left.y,
+            },
+            dim: Vec2 {
+                x: top_right.x - bottom_left.x,
+                y: top_right.y - bottom_left.y,
+            },
         }
     }
 
     pub fn unit_rect_centered() -> Rect {
         Rect {
-            x: -0.5,
-            y: -0.5,
-            width: 1.0,
-            height: 1.0,
+            pos: Point { x: -0.5, y: -0.5 },
+            dim: Vec2 { x: 1.0, y: 1.0 },
         }
+    }
+
+    pub fn width(&self) -> f32 {
+        self.dim.x
+    }
+
+    pub fn height(&self) -> f32 {
+        self.dim.y
     }
 
     /// Returns the biggest proportionally stretched version of the rectangle that can fit
     /// into `target`.
     pub fn stretched_to_fit(self, target: Rect) -> Rect {
-        let source_aspect_ratio = self.width / self.height;
-        let target_aspect_ratio = target.width / target.height;
+        let source_aspect_ratio = self.width() / self.height();
+        let target_aspect_ratio = target.width() / target.height();
 
         let scale_factor = if source_aspect_ratio < target_aspect_ratio {
             // Target rect is 'wider' than ours -> height is our limit when stretching
-            target.height / self.height
+            target.height() / self.height()
         } else {
             // Target rect is 'narrower' than ours -> width is our limit when stretching
-            target.width / self.width
+            target.width() / self.width()
         };
 
-        let stretched_width = self.width * scale_factor;
-        let stretched_height = self.height * scale_factor;
+        let stretched_width = self.width() * scale_factor;
+        let stretched_height = self.height() * scale_factor;
 
-        Rect {
-            x: self.x,
-            y: self.x,
-            width: stretched_width,
-            height: stretched_height,
-        }
+        Rect::from_point(self.pos, stretched_width, stretched_height)
     }
 
     /// Returns a version of the rectangle that is centered in `target`.
     pub fn centered_in(self, target: Rect) -> Rect {
-        let x_offset_centered = target.x + (target.width - self.width) / 2.0;
-        let y_offset_centered = target.y + (target.height - self.height) / 2.0;
+        let offset_centered = target.pos + (target.dim - self.dim) / 2.0;
 
-        Rect {
-            x: x_offset_centered,
-            y: y_offset_centered,
-            width: self.width,
-            height: self.height,
-        }
-    }
-
-    pub fn to_pos(&self) -> Point {
-        Point::new(self.x, self.y)
-    }
-
-    pub fn to_dim(&self) -> Vec2 {
-        Vec2::new(self.width, self.height)
+        Rect::from_point_dimension(offset_centered, self.dim)
     }
 }
 
-/// Clamps a points x and y coordinates to the boundaries of a given rectangle
-///
-/// # Examples
-/// ```
-/// let point = Point::new(1.0, 2.5);
-/// let rect = Rect::new(0.0, 0.0, 1.5, 1.5);
-/// assert_eq!(Point::new(1.0, 1.5), clamp_point_in_rect(point, rect));
-///
-/// ```
-pub fn clamp_point_in_rect(point: Point, rect: Rect) -> Point {
-    Point::new(
-        clamp(point.x, rect.x, rect.x + rect.width),
-        clamp(point.y, rect.y, rect.y + rect.height),
-    )
+//==================================================================================================
+// Camera and coordinate systems
+//==================================================================================================
+//
+
+pub const PIXELS_PER_UNIT: f32 = 16 as f32;
+pub const PIXEL_SIZE: f32 = 1.0 / PIXELS_PER_UNIT;
+
+impl WorldPoint {
+    /// For a given [`WorldPoint`] returns the nearest [`WorldPoint`] that is aligned to the
+    /// screen's pixel grid when drawn.
+    ///
+    /// Pixel-snapping the cameras position for example before drawing prevents pixel-jittering
+    /// artifacts on visible objects if the camera is moving at sub-pixel distances.
+    pub fn pixel_snapped(self) -> WorldPoint {
+        // NOTE: Because OpenGL pixels are drawn from the bottom left we need to floor here
+        //       to correctly transform world coordinates to pixels.
+        WorldPoint {
+            x: f32::floor(PIXELS_PER_UNIT * self.x) / PIXELS_PER_UNIT,
+            y: f32::floor(PIXELS_PER_UNIT * self.y) / PIXELS_PER_UNIT,
+        }
+    }
+}
+
+/// NOTE: Camera position is the center of the screen
+/// It has the following bounds in world coordinates
+/// [pos.x - 0.5*dim.w, pos.x + 0.5*dim.w] x [pos.y - 0.5*dim.h, pos.y + 0.5*dim.h]
+/// with:
+/// dim = dimBase / zoom
+/// zoom > 1.0f -> zooming in
+/// zoom < 1.0f -> zooming out
+pub struct Camera {
+    world_rect_centered: Rect,
+    zoom_level: f32,
+    z_near: f32,
+    z_far: f32,
+}
+
+impl Camera {
+    pub fn new(
+        pos: WorldPoint,
+        zoom_level: f32,
+        screen_width: i32,
+        screen_height: i32,
+        z_near: f32,
+        z_far: f32,
+    ) -> Camera {
+        Camera {
+            world_rect_centered: Rect::new(
+                pos.x,
+                pos.y,
+                screen_width as f32 / PIXELS_PER_UNIT,
+                screen_height as f32 / PIXELS_PER_UNIT,
+            ),
+            zoom_level,
+            z_near,
+            z_far,
+        }
+    }
+
+    /// Converts normalized screen coordinates which are given in the half-open inteval
+    /// `[0, 1[ x [0, 1[` to world coordinates.
+    pub fn screen_to_world(&self, point: ScreenPoint) -> WorldPoint {
+        (point - 0.5) * self.world_rect_centered.dim + self.world_rect_centered.pos.pixel_snapped()
+    }
+
+    /// Converts world coordinates to normalized screen coordinates which are given in the
+    /// half-open inteval `[0, 1[ x [0, 1[`.
+    pub fn world_to_screen(&self, point: WorldPoint) -> ScreenPoint {
+        (point - self.world_rect_centered.pos.pixel_snapped()) * self.world_rect_centered.dim + 0.5
+    }
+
+    /// Zooms the camera to or away from a given world point.
+    ///
+    /// * `new_zoom_level > 1.0` -> magnify
+    /// * `new_zoom_level < 1.0` -> minify
+    pub fn zoom_to_world_point(&mut self, world_point: WorldPoint, new_zoom_level: f32) {
+        let old_zoom_level = self.zoom_level;
+        self.zoom_level = new_zoom_level;
+        self.world_rect_centered.pos = (self.world_rect_centered.pos - world_point)
+            * (old_zoom_level / new_zoom_level)
+            + world_point;
+    }
 }

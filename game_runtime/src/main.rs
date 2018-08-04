@@ -41,7 +41,8 @@ use std::collections::HashMap;
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, Mat4, Point, Quad, Rect, SquareMatrix, Vertex, VertexIndex,
+    Color, DrawCommand, GameInput, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix, Vertex,
+    VertexIndex,
 };
 
 //==================================================================================================
@@ -189,11 +190,10 @@ fn main() {
     // State variables
     let mut running = true;
     let mut screen_cursor_pos = Point::new(0.0, 0.0);
-    let mut screen_rect = Rect::from_dimension(0.0, 0.0);
+    let mut screen_rect = Rect::zero();
     let mut window_entered_fullscreen = false;
 
     let mut input = GameInput::new();
-
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     //
     info!("Entering main event loop");
@@ -236,7 +236,6 @@ fn main() {
                         }
                     }
                     WindowEvent::Resized(new_dim) => {
-                        info!("Window resized: {:?}", (new_dim.width, new_dim.height));
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
@@ -244,7 +243,34 @@ fn main() {
                             &mut rc.screen_pipeline_data.out_depth,
                         );
                         screen_rect =
-                            Rect::from_dimension(new_dim.width as f32, new_dim.height as f32);
+                            Rect::from_width_height(new_dim.width as f32, new_dim.height as f32);
+
+                        info!("=====================");
+                        info!(
+                            "Window resized: {} x {}",
+                            rc.screen_rect().width(),
+                            rc.screen_rect().height()
+                        );
+                        info!(
+                            "Canvas size: {} x {}",
+                            rc.canvas_rect().width(),
+                            rc.canvas_rect().height()
+                        );
+                        info!("Blit-rect: {:?}", rc.canvas_blit_rect());
+                        info!(
+                            "Pixel scale factor: {} ",
+                            if rc.canvas_blit_rect().pos.x == 0.0 {
+                                rc.screen_rect().width() / rc.canvas_rect().width()
+                            } else {
+                                rc.screen_rect().height() / rc.canvas_rect().height()
+                            }
+                        );
+                        info!(
+                            "Pixel waste: {} x {}",
+                            rc.screen_rect().width() - rc.canvas_blit_rect().width(),
+                            rc.screen_rect().height() - rc.canvas_blit_rect().height(),
+                        );
+                        info!("=====================");
 
                         // Grab mouse cursor in window
                         // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
@@ -264,7 +290,7 @@ fn main() {
                         //       where (0,0) is the bottom left of the screen
                         screen_cursor_pos = Point::new(
                             position.x as f32,
-                            (screen_rect.height - 1.0) - position.y as f32,
+                            (screen_rect.height() - 1.0) - position.y as f32,
                         );
                     }
                     _ => (),
@@ -280,8 +306,8 @@ fn main() {
         //       where (0,0) is the bottom left of the screen.
         let canvas_cursor_pos = rc.screen_coord_to_canvas_coord(screen_cursor_pos);
         let canvas_rect = rc.canvas_rect();
-        input.canvas_width = canvas_rect.width as i32;
-        input.canvas_height = canvas_rect.height as i32;
+        input.canvas_width = canvas_rect.width() as i32;
+        input.canvas_height = canvas_rect.height() as i32;
         input.cursor_pos_x = canvas_cursor_pos.x as i32;
         input.cursor_pos_y = canvas_cursor_pos.y as i32;
 
@@ -363,17 +389,18 @@ where
         //
         info!("Creating offscreen render targets");
         //
-        let canvas_rect = Rect::from_dimension(f32::from(canvas_width), f32::from(canvas_heigth));
+        let canvas_rect =
+            Rect::from_width_height(f32::from(canvas_width), f32::from(canvas_heigth));
         let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
             .create_render_target::<ColorFormat>(
-                canvas_rect.width as u16,
-                canvas_rect.height as u16,
+                canvas_rect.width() as u16,
+                canvas_rect.height() as u16,
             )
             .expect("Failed to create a canvas color render target");
         let canvas_depth_render_target_view = factory
             .create_depth_stencil_view_only::<DepthFormat>(
-                canvas_rect.width as u16,
-                canvas_rect.height as u16,
+                canvas_rect.width() as u16,
+                canvas_rect.height() as u16,
             )
             .expect("Failed to create a canvas depth render target");
 
@@ -426,13 +453,13 @@ where
     /// Returns the dimensions of the canvas in pixels as rectangle
     pub fn canvas_rect(&self) -> Rect {
         let (width, height, _, _) = self.canvas_pipeline_data.out_color.get_dimensions();
-        Rect::from_dimension(f32::from(width), f32::from(height))
+        Rect::from_width_height(f32::from(width), f32::from(height))
     }
 
     /// Returns the dimensions of the screen in pixels as rectangle
     pub fn screen_rect(&self) -> Rect {
         let (width, height, _, _) = self.screen_pipeline_data.out_color.get_dimensions();
-        Rect::from_dimension(f32::from(width), f32::from(height))
+        Rect::from_width_height(f32::from(width), f32::from(height))
     }
 
     /// Returns the dimensions of the `blit_rectangle` of the canvas in pixels.
@@ -463,17 +490,12 @@ where
         //       add one again after clamping to achieve the desired effect.
         // TODO(JaSc): Maybe make this more self documenting via integer rectangles
         let mut blit_rect = self.canvas_blit_rect();
-        blit_rect.width -= 1.0;
-        blit_rect.height -= 1.0;
-        let blit_rect_point = game_lib::math::clamp_point_in_rect(screen_point, blit_rect);
-        blit_rect.width += 1.0;
-        blit_rect.height += 1.0;
+        blit_rect.dim -= 1.0;
+        let clamped_point = screen_point.clamped_in_rect(blit_rect);
+        blit_rect.dim += 1.0;
 
-        let canvas_rect = self.canvas_rect();
-        Point::new(
-            f32::floor(canvas_rect.width * ((blit_rect_point.x - blit_rect.x) / blit_rect.width)),
-            f32::floor(canvas_rect.height * ((blit_rect_point.y - blit_rect.y) / blit_rect.height)),
-        )
+        let result = self.canvas_rect().dim * ((clamped_point - blit_rect.pos) / blit_rect.dim);
+        Point::new(f32::floor(result.x), f32::floor(result.y))
     }
 
     pub fn clear_canvas(&mut self, clear_color: Color) {
@@ -513,10 +535,10 @@ where
             .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &indices[..]);
         self.screen_pipeline_data.vertex_buffer = vertex_buffer;
 
-        // NOTE: The projection matrix is upside-down for correct rendering of the canvas
+        // NOTE: The projection matrix is flipped upside-down for correct rendering of the canvas
         let screen_rect = self.screen_rect();
         let projection_mat =
-            game_lib::math::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
+            Mat4::ortho_bottom_left_flipped_y(screen_rect.width(), screen_rect.height(), -1.0, 1.0);
         self.screen_pipeline_data.transform = projection_mat.into();
 
         self.encoder

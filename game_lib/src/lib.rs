@@ -5,7 +5,7 @@ pub mod math;
 pub mod utility;
 
 pub use draw::{DrawCommand, Quad, Vertex, VertexIndex};
-pub use math::{Color, Mat4, Point, Rect, SquareMatrix};
+pub use math::{Color, Mat4, Mat4Helper, Point, Rect, SquareMatrix};
 
 pub struct GameInput {
     pub canvas_width: i32,
@@ -27,6 +27,18 @@ impl GameInput {
             cursor_pos_y: 0,
         }
     }
+
+    /// Returns the current cursor position in normalized screen coordinates which are given as the
+    /// following half open interval:
+    ///
+    /// `[0 .. 1[ x [0 .. 1[`
+    /// where `(0,0)` represents the bottom left of the screen.
+    pub fn relative_cursor_pos(&self) -> Point {
+        Point::new(
+            self.cursor_pos_x as f32 / self.canvas_width as f32,
+            self.cursor_pos_y as f32 / self.canvas_height as f32,
+        )
+    }
 }
 
 pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
@@ -34,17 +46,11 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
         x: input.cursor_pos_x as f32,
         y: input.cursor_pos_y as f32,
     };
-    let canvas_rect = Rect::from_dimension(input.canvas_width as f32, input.canvas_height as f32);
+    let canvas_rect =
+        Rect::from_width_height(input.canvas_width as f32, input.canvas_height as f32);
 
     let mut draw_commands = Vec::new();
-    let projection_mat = cgmath::ortho(
-        -0.5 * canvas_rect.width,
-        0.5 * canvas_rect.width,
-        -0.5 * canvas_rect.height,
-        0.5 * canvas_rect.height,
-        -1.0,
-        1.0,
-    );
+    let projection_mat = Mat4::ortho_centered(canvas_rect.width(), canvas_rect.height(), -1.0, 1.0);
 
     let mut draw_command = DrawCommand {
         projection: projection_mat.clone().into(),
@@ -63,8 +69,8 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
     let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
     let dummy_quad = Quad::new(
         Rect::new(
-            f32::floor(canvas_cursor_pos.x - 0.5 * canvas_rect.width),
-            f32::floor(canvas_cursor_pos.y - 0.5 * canvas_rect.height),
+            f32::floor(canvas_cursor_pos.x - 0.5 * canvas_rect.width()),
+            f32::floor(canvas_cursor_pos.y - 0.5 * canvas_rect.height()),
             1.0,
             1.0,
         ),
@@ -80,7 +86,7 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
     // Dummyquad 1
     let quad_color = Color::new(0.4, 0.7, 0.2, 1.0);
     let dummy_quad = Quad::new(
-        Rect::from_dimension(canvas_rect.height, canvas_rect.height),
+        Rect::from_width_height(canvas_rect.height(), canvas_rect.height()),
         -0.7,
         quad_color,
     );
@@ -93,7 +99,7 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
     // Dummyquad 2
     let quad_color = Color::new(0.9, 0.7, 0.2, 1.0);
     let dummy_quad = Quad::new(
-        Rect::from_dimension(canvas_rect.height / 2.0, canvas_rect.height / 2.0),
+        Rect::from_width_height(canvas_rect.height() / 2.0, canvas_rect.height() / 2.0),
         -0.2,
         quad_color,
     );
