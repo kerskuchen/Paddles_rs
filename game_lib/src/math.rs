@@ -4,6 +4,8 @@ pub use cgmath::prelude::*;
 
 use cgmath::Vector3;
 
+pub const EPSILON: f32 = 0.000001;
+
 pub type Point = Vec2;
 
 pub type WorldPoint = Vec2;
@@ -15,11 +17,14 @@ pub type ScreenPoint = Vec2;
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
 
+pub fn is_zero(a: f32, b: f32) -> bool {
+    f32::abs(a - b) < EPSILON
+}
+
 //==================================================================================================
 // Clamping
 //==================================================================================================
 //
-
 /// Clamps a given f32 `val` into interval \[`min`, `max`\]
 pub fn clamp(val: f32, min: f32, max: f32) -> f32 {
     debug_assert!(min <= max);
@@ -56,7 +61,6 @@ impl Point {
 // Vectors
 //==================================================================================================
 //
-
 use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::Div;
@@ -75,8 +79,21 @@ impl Vec2 {
     pub fn zero() -> Vec2 {
         Vec2 { x: 0.0, y: 0.0 }
     }
+
     pub fn new(x: f32, y: f32) -> Vec2 {
         Vec2 { x, y }
+    }
+
+    pub fn distance_squared(a: Vec2, b: Vec2) -> f32 {
+        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
+    }
+
+    pub fn distance(a: Vec2, b: Vec2) -> f32 {
+        f32::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y))
+    }
+
+    pub fn dot(a: Vec2, b: Vec2) -> f32 {
+        a.x * b.x + a.y * b.y
     }
 }
 
@@ -244,11 +261,11 @@ impl Div<f32> for Vec2 {
         }
     }
 }
+
 //==================================================================================================
 // Matrices
 //==================================================================================================
 //
-
 pub trait Mat4Helper {
     fn ortho_centered(width: f32, height: f32, near: f32, far: f32) -> Self;
     fn ortho_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self;
@@ -411,7 +428,6 @@ impl Rect {
 // Camera and coordinate systems
 //==================================================================================================
 //
-
 pub const PIXELS_PER_UNIT: f32 = 16 as f32;
 pub const PIXEL_SIZE: f32 = 1.0 / PIXELS_PER_UNIT;
 
@@ -502,13 +518,13 @@ impl Camera {
     /// Converts normalized screen coordinates (`[0, 1[x[0, 1[` - bottom-left to top-right)
     /// to world coordinates.
     pub fn screen_to_world(&self, point: ScreenPoint) -> WorldPoint {
-        (point - 0.5) * self.dim_zoomed() + self.world_rect.pos.pixel_snapped()
+        (point - 0.5) * self.dim_zoomed() + self.pos().pixel_snapped()
     }
 
     /// Converts world coordinates to normalized screen coordinates
     /// (`[0, 1[x[0, 1[` - bottom-left to top-right)
     pub fn world_to_screen(&self, point: WorldPoint) -> ScreenPoint {
-        (point - self.world_rect.pos.pixel_snapped()) * self.dim_zoomed() + 0.5
+        (point - self.pos().pixel_snapped()) / self.dim_zoomed() + 0.5
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -547,5 +563,31 @@ impl Camera {
     pub fn bounds_worldspace(&self) -> Bounds {
         let world_rect_zoomed = Rect::from_point_dimension(self.world_rect.pos, self.dim_zoomed());
         world_rect_zoomed.bounds_centered()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converting_between_screen_and_world_coordinates() {
+        let cam = Camera::new(100, 100, -1.0, 1.0);
+
+        let screen_point = ScreenPoint::new(0.75, -0.23);
+        assert!(
+            ScreenPoint::distance(
+                screen_point,
+                cam.world_to_screen(cam.screen_to_world(screen_point))
+            ) < EPSILON
+        );
+
+        let world_point = WorldPoint::new(-12.3, 134.0);
+        assert!(
+            WorldPoint::distance(
+                world_point,
+                cam.screen_to_world(cam.world_to_screen(world_point))
+            ) < EPSILON
+        );
     }
 }

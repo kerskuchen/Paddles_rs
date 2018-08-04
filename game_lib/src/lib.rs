@@ -88,9 +88,14 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     game_state.mouse_pos_screen = new_mouse_pos_screen;
 
     // World mouse position
-    let new_mouse_pos_world = game_state.cam.screen_to_world(input.mouse_pos_screen);
+    let new_mouse_pos_world = game_state.cam.screen_to_world(new_mouse_pos_screen);
     let _mouse_delta_world = new_mouse_pos_world - game_state.mouse_pos_world;
     game_state.mouse_pos_world = new_mouse_pos_world;
+
+    let orig = new_mouse_pos_screen;
+    let conv = game_state.cam.world_to_screen(new_mouse_pos_world);
+    dprintln!(orig);
+    dprintln!(conv);
 
     if input.mouse_button_right.is_pressed {
         game_state.cam.pan(mouse_delta_screen);
@@ -134,6 +139,16 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
         Rect::from_point(new_mouse_pos_world, math::PIXEL_SIZE, math::PIXEL_SIZE),
         -0.1,
         cursor_color,
+    );
+    plain_batch.push_quad(cursor_quad);
+    let cursor_quad = Quad::new(
+        Rect::from_point(
+            new_mouse_pos_world.pixel_snapped(),
+            math::PIXEL_SIZE,
+            math::PIXEL_SIZE,
+        ),
+        -0.1,
+        Color::new(1.0, 1.0, 1.0, 1.0),
     );
     plain_batch.push_quad(cursor_quad);
 
