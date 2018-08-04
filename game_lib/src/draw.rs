@@ -22,7 +22,7 @@ pub struct DrawCommand {
 }
 
 impl DrawCommand {
-    pub fn new(transform: Mat4, texture_name: &str, batch: DrawBatch) -> DrawCommand {
+    pub fn new(transform: Mat4, texture_name: &str, batch: QuadBatch) -> DrawCommand {
         let (vertices, indices) = batch.into_vertices_indices();
         DrawCommand {
             transform,
@@ -37,48 +37,47 @@ impl DrawCommand {
 // DrawBatch
 //==================================================================================================
 //
-
-pub enum DrawMode {
-    Lines,
-    Quads,
-}
-
-pub struct DrawBatch {
-    vertices_per_elem: VertexIndex,
+pub struct QuadBatch {
     vertices: Vec<Vertex>,
-    indices: Vec<VertexIndex>,
 }
 
-impl DrawBatch {
-    pub fn new(draw_mode: DrawMode) -> DrawBatch {
-        DrawBatch {
-            vertices_per_elem: match draw_mode {
-                DrawMode::Lines => 2,
-                DrawMode::Quads => 4,
-            },
+impl QuadBatch {
+    const VERTICES_PER_QUAD: usize = 4;
+    const INDICES_PER_QUAD: usize = 6;
+
+    pub fn new() -> QuadBatch {
+        QuadBatch {
             vertices: Vec::new(),
-            indices: Vec::new(),
         }
     }
 
     pub fn push_quad(&mut self, quad: Quad) {
-        let quad_num = self.vertices.len() as VertexIndex / self.vertices_per_elem;
-        let (self_vertices, self_indices) = quad.into_vertices_indices(quad_num);
-
-        self.vertices.extend_from_slice(&self_vertices);
-        self.indices.extend(&self_indices);
+        self.vertices.extend_from_slice(&quad.into_vertices());
     }
 
     pub fn push_quad_centered(&mut self, quad: Quad) {
-        let quad_num = self.vertices.len() as VertexIndex / self.vertices_per_elem;
-        let (self_vertices, self_indices) = quad.into_vertices_indices_centered(quad_num);
-
-        self.vertices.extend_from_slice(&self_vertices);
-        self.indices.extend(&self_indices);
+        self.vertices
+            .extend_from_slice(&quad.into_vertices_centered());
     }
 
     pub fn into_vertices_indices(self) -> (Vec<Vertex>, Vec<VertexIndex>) {
-        (self.vertices, self.indices)
+        let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
+        let num_indices = num_quads * QuadBatch::INDICES_PER_QUAD;
+        let mut indices = Vec::with_capacity(num_indices);
+
+        for quad_index in 0..(num_indices as VertexIndex) {
+            let quad_indices: [VertexIndex; 6] = [
+                4 * quad_index,
+                4 * quad_index + 1,
+                4 * quad_index + 2,
+                4 * quad_index + 2,
+                4 * quad_index + 3,
+                4 * quad_index,
+            ];
+            indices.extend(&quad_indices);
+        }
+
+        (self.vertices, indices)
     }
 }
 
@@ -98,21 +97,13 @@ impl Quad {
         Quad { rect, depth, color }
     }
 
-    pub fn unit_quad(depth: f32, color: Color) -> Quad {
-        Quad {
-            rect: Rect::from_width_height(1.0, 1.0),
-            depth,
-            color,
-        }
-    }
-
-    pub fn into_vertices_indices(self, quad_index: VertexIndex) -> ([Vertex; 4], [VertexIndex; 6]) {
+    pub fn into_vertices(self) -> [Vertex; 4] {
         let bounds = self.rect.bounds();
         let color = self.color.into();
         let depth = self.depth;
 
         // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        let vertices: [Vertex; 4] = [
+        [
             Vertex {
                 pos: [bounds.left, bounds.bottom, depth, 1.0],
                 uv: [0.0, 1.0],
@@ -133,30 +124,16 @@ impl Quad {
                 uv: [0.0, 0.0],
                 color,
             },
-        ];
-
-        let indices: [VertexIndex; 6] = [
-            4 * quad_index,
-            4 * quad_index + 1,
-            4 * quad_index + 2,
-            4 * quad_index + 2,
-            4 * quad_index + 3,
-            4 * quad_index,
-        ];
-
-        (vertices, indices)
+        ]
     }
 
-    pub fn into_vertices_indices_centered(
-        self,
-        quad_index: VertexIndex,
-    ) -> ([Vertex; 4], [VertexIndex; 6]) {
+    pub fn into_vertices_centered(self) -> [Vertex; 4] {
         let bounds = self.rect.bounds_centered();
         let color = self.color.into();
         let depth = self.depth;
 
         // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        let vertices: [Vertex; 4] = [
+        [
             Vertex {
                 pos: [bounds.left, bounds.bottom, depth, 1.0],
                 uv: [0.0, 1.0],
@@ -177,17 +154,6 @@ impl Quad {
                 uv: [0.0, 0.0],
                 color,
             },
-        ];
-
-        let indices: [VertexIndex; 6] = [
-            4 * quad_index,
-            4 * quad_index + 1,
-            4 * quad_index + 2,
-            4 * quad_index + 2,
-            4 * quad_index + 3,
-            4 * quad_index,
-        ];
-
-        (vertices, indices)
+        ]
     }
 }

@@ -529,7 +529,8 @@ where
 
     pub fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
         let blit_quad = Quad::new(self.canvas_blit_rect(), 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let (vertices, indices) = blit_quad.into_vertices_indices(0);
+        let vertices = blit_quad.into_vertices();
+        let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
         let (vertex_buffer, slice) = self
             .factory
             .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &indices[..]);

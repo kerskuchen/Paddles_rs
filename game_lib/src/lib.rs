@@ -5,7 +5,7 @@ pub mod math;
 #[macro_use]
 pub mod utility;
 
-pub use draw::{DrawBatch, DrawCommand, DrawMode, Quad, Vertex, VertexIndex};
+pub use draw::{DrawCommand, Quad, QuadBatch, Vertex, VertexIndex};
 pub use math::{Camera, Color, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2};
 
 pub struct GameInput {
@@ -56,10 +56,10 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
     let world_cursor_pos = cam.screen_to_world(normalized_screen_cursor_pos);
 
     // ---------------------------------------------------------------------------------------------
-    // Generate vertices
+    // Generate quads
     //
-    let mut plain_batch = DrawBatch::new(DrawMode::Quads);
-    let mut textured_batch = DrawBatch::new(DrawMode::Quads);
+    let mut plain_batch = QuadBatch::new();
+    let mut textured_batch = QuadBatch::new();
 
     // Cursor
     let cursor_color = Color::new(1.0, 0.0, 0.0, 1.0);
