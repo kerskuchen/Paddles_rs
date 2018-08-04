@@ -426,10 +426,10 @@ impl WorldPoint {
     }
 }
 
-/// Camera position with its position in the center of its view-rect.
+/// Camera with its position in the center of its view-rect.
 ///
-/// zoom_level > 1.0f -> zoomed in
-/// zoom_level < 1.0f -> zoomed out
+/// * `zoom_level > 1.0` : zoomed in
+/// * `zoom_level < 1.0` : zoomed out
 ///
 /// # Example: Camera bounds
 /// ```

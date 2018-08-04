@@ -14,6 +14,9 @@
             ],
             "problemMatcher": [
                 "$rustc"
+            ],
+            "dependsOn": [
+                "Rust: cargo build",
             ]
         },
         {

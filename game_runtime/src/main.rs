@@ -321,7 +321,7 @@ fn main() {
 
         for draw_command in draw_commands {
             rc.draw_into_canvas(
-                draw_command.projection,
+                draw_command.transform,
                 &draw_command.texture,
                 convert_to_gfx_format(&draw_command.vertices),
                 &draw_command.indices,
@@ -538,7 +538,7 @@ where
         // NOTE: The projection matrix is flipped upside-down for correct rendering of the canvas
         let screen_rect = self.screen_rect();
         let projection_mat =
-            Mat4::ortho_bottom_left_flipped_y(screen_rect.width(), screen_rect.height(), -1.0, 1.0);
+            Mat4::ortho_bottom_left_flipped_y(screen_rect.width(), screen_rect.height(), 0.0, 1.0);
         self.screen_pipeline_data.transform = projection_mat.into();
 
         self.encoder

@@ -2,10 +2,11 @@ pub extern crate cgmath;
 
 pub mod draw;
 pub mod math;
+#[macro_use]
 pub mod utility;
 
-pub use draw::{DrawCommand, Quad, Vertex, VertexIndex};
-pub use math::{Color, Mat4, Mat4Helper, Point, Rect, SquareMatrix};
+pub use draw::{DrawBatch, DrawCommand, DrawMode, Quad, Vertex, VertexIndex};
+pub use math::{Camera, Color, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2};
 
 pub struct GameInput {
     pub canvas_width: i32,
@@ -49,68 +50,51 @@ pub fn update_and_draw(input: &GameInput) -> Vec<DrawCommand> {
     let canvas_rect =
         Rect::from_width_height(input.canvas_width as f32, input.canvas_height as f32);
 
-    let mut draw_commands = Vec::new();
-    let projection_mat = Mat4::ortho_centered(canvas_rect.width(), canvas_rect.height(), -1.0, 1.0);
+    // TODO(JaSc): Fix and standardize z_near/z_far
+    let cam = Camera::new(input.canvas_width, input.canvas_height, -1.0, 1.0);
+    let normalized_screen_cursor_pos = canvas_cursor_pos / canvas_rect.dim;
+    let world_cursor_pos = cam.screen_to_world(normalized_screen_cursor_pos);
 
-    let mut draw_command = DrawCommand {
-        projection: projection_mat.clone().into(),
-        vertices: Vec::new(),
-        indices: Vec::new(),
-        texture: String::from("dummy"),
-    };
-    let mut another_draw_command = DrawCommand {
-        projection: projection_mat.clone().into(),
-        vertices: Vec::new(),
-        indices: Vec::new(),
-        texture: String::from("another_dummy"),
-    };
+    // ---------------------------------------------------------------------------------------------
+    // Generate vertices
+    //
+    let mut plain_batch = DrawBatch::new(DrawMode::Quads);
+    let mut textured_batch = DrawBatch::new(DrawMode::Quads);
 
     // Cursor
-    let quad_color = Color::new(1.0, 0.0, 0.0, 1.0);
-    let dummy_quad = Quad::new(
-        Rect::new(
-            f32::floor(canvas_cursor_pos.x - 0.5 * canvas_rect.width()),
-            f32::floor(canvas_cursor_pos.y - 0.5 * canvas_rect.height()),
-            1.0,
-            1.0,
-        ),
+    let cursor_color = Color::new(1.0, 0.0, 0.0, 1.0);
+    let cursor_quad = Quad::new(
+        Rect::from_point(world_cursor_pos, math::PIXEL_SIZE, math::PIXEL_SIZE),
         -0.1,
-        quad_color,
+        cursor_color,
     );
-    dummy_quad.append_vertices_indices(
-        0,
-        &mut another_draw_command.vertices,
-        &mut another_draw_command.indices,
-    );
+    plain_batch.push_quad(cursor_quad);
 
-    // Dummyquad 1
-    let quad_color = Color::new(0.4, 0.7, 0.2, 1.0);
-    let dummy_quad = Quad::new(
-        Rect::from_width_height(canvas_rect.height(), canvas_rect.height()),
-        -0.7,
-        quad_color,
-    );
-    dummy_quad.append_vertices_indices_centered(
-        0,
-        &mut draw_command.vertices,
-        &mut draw_command.indices,
-    );
+    // Grid
+    let grid_dark = Color::new(0.5, 0.3, 0.0, 1.0);
+    let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
+    let rect_dim = Vec2::new(1.0, 1.0);
+    for x in -10..10 {
+        for dia in -10..10 {
+            let pos = Point::new((x + dia) as f32, dia as f32);
+            if x % 2 == 0 {
+                textured_batch.push_quad(Quad::new(
+                    Rect::from_point_dimension(pos, rect_dim),
+                    -0.2,
+                    grid_dark,
+                ));
+            } else {
+                plain_batch.push_quad(Quad::new(
+                    Rect::from_point_dimension(pos, rect_dim),
+                    -0.2,
+                    grid_light,
+                ));
+            }
+        }
+    }
 
-    // Dummyquad 2
-    let quad_color = Color::new(0.9, 0.7, 0.2, 1.0);
-    let dummy_quad = Quad::new(
-        Rect::from_width_height(canvas_rect.height() / 2.0, canvas_rect.height() / 2.0),
-        -0.2,
-        quad_color,
-    );
-    dummy_quad.append_vertices_indices_centered(
-        1,
-        &mut another_draw_command.vertices,
-        &mut another_draw_command.indices,
-    );
-
-    draw_commands.push(draw_command);
-    draw_commands.push(another_draw_command);
-
-    draw_commands
+    vec![
+        DrawCommand::new(cam.proj_view_matrix(), "dummy", textured_batch),
+        DrawCommand::new(cam.proj_view_matrix(), "another_dummy", plain_batch),
+    ]
 }
