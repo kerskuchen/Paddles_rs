@@ -41,8 +41,8 @@ use std::collections::HashMap;
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix, Vertex,
-    VertexIndex,
+    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix,
+    Vertex, VertexIndex,
 };
 
 //==================================================================================================
@@ -115,8 +115,8 @@ fn main() {
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
     const FULLSCREEN_MODE: bool = true;
-    const CANVAS_WIDTH: u16 = 320;
-    const CANVAS_HEIGHT: u16 = 180;
+    const CANVAS_WIDTH: u16 = 480;
+    const CANVAS_HEIGHT: u16 = 270;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
@@ -195,6 +195,9 @@ fn main() {
 
     let mut input = GameInput::new();
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
+
+    let mut game_state = game_lib.initialize(CANVAS_WIDTH as i32, CANVAS_HEIGHT as i32);
+
     //
     info!("Entering main event loop");
     info!("------------------------");
@@ -204,6 +207,8 @@ fn main() {
         if game_lib.needs_reloading() {
             game_lib = game_lib.reload();
         }
+
+        input.clear_button_transitions();
 
         use glutin::{Event, KeyboardInput, WindowEvent};
         events_loop.poll_events(|event| {
@@ -293,6 +298,27 @@ fn main() {
                             (screen_rect.height() - 1.0) - position.y as f32,
                         );
                     }
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        input.mouse_wheel_delta += match delta {
+                            glutin::MouseScrollDelta::LineDelta(_, y) => y as i32,
+                            glutin::MouseScrollDelta::PixelDelta(pos) => pos.y as i32,
+                        };
+                    }
+                    WindowEvent::MouseInput { state, button, .. } => {
+                        use glutin::ElementState;
+                        use glutin::MouseButton;
+
+                        let is_pressed = match state {
+                            ElementState::Pressed => true,
+                            ElementState::Released => false,
+                        };
+                        match button {
+                            MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
+                            MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
+                            MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
+                            _ => {}
+                        }
+                    }
                     _ => (),
                 }
             }
@@ -301,17 +327,12 @@ fn main() {
         // Prepare input and update game
         // -----------------------------------------------------------------------------------------
 
-        // NOTE: cursor_pos_canvas is in the following interval:
-        //       [0 .. canvas_rect.width - 1] x [0 .. canvas_rect.height - 1]
-        //       where (0,0) is the bottom left of the screen.
+        // Get current mouse position relative to canvas
         let canvas_cursor_pos = rc.screen_coord_to_canvas_coord(screen_cursor_pos);
-        let canvas_rect = rc.canvas_rect();
-        input.canvas_width = canvas_rect.width() as i32;
-        input.canvas_height = canvas_rect.height() as i32;
-        input.cursor_pos_x = canvas_cursor_pos.x as i32;
-        input.cursor_pos_y = canvas_cursor_pos.y as i32;
+        let canvas_cursor_pos_relative = canvas_cursor_pos / rc.canvas_rect().dim;
+        input.mouse_pos_screen = canvas_cursor_pos_relative;
 
-        let draw_commands = game_lib.update_and_draw(&input);
+        let draw_commands = game_lib.update_and_draw(&input, &mut game_state);
 
         // Draw into canvas
         // -----------------------------------------------------------------------------------------
@@ -585,18 +606,36 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    pub fn update_and_draw(&self, input: &GameInput) -> Vec<DrawCommand> {
+    pub fn initialize(&self, canvas_width: i32, canvas_heigth: i32) -> GameState {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(&GameInput) -> Vec<DrawCommand>>(b"update_and_draw\0")
+                .get::<fn(i32, i32) -> GameState>(b"initialize\0")
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Could not load `initialize` function from GameLib: {}",
+                        error
+                    )
+                });
+            f(canvas_width, canvas_heigth)
+        }
+    }
+    pub fn update_and_draw(
+        &self,
+        input: &GameInput,
+        game_state: &mut GameState,
+    ) -> Vec<DrawCommand> {
+        unsafe {
+            let f = self
+                .lib
+                .get::<fn(&GameInput, &mut GameState) -> Vec<DrawCommand>>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
                         "Could not load `update_and_draw` function from GameLib: {}",
                         error
                     )
                 });
-            f(input)
+            f(input, game_state)
         }
     }
 

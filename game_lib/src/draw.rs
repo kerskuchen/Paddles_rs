@@ -63,8 +63,8 @@ impl QuadBatch {
     pub fn into_vertices_indices(self) -> (Vec<Vertex>, Vec<VertexIndex>) {
         let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
         let num_indices = num_quads * QuadBatch::INDICES_PER_QUAD;
-        let mut indices = Vec::with_capacity(num_indices);
 
+        let mut indices = Vec::with_capacity(num_indices);
         for quad_index in 0..(num_indices as VertexIndex) {
             let quad_indices: [VertexIndex; 6] = [
                 4 * quad_index,

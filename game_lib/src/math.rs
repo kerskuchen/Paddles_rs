@@ -5,8 +5,13 @@ pub use cgmath::prelude::*;
 use cgmath::Vector3;
 
 pub type Point = Vec2;
+
 pub type WorldPoint = Vec2;
+
+/// Normalized screen coordinate given in the range `[0, 1[x[0, 1[`
+/// where `(0,0) is the bottom-left corner
 pub type ScreenPoint = Vec2;
+
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
 
@@ -484,6 +489,10 @@ impl Camera {
             z_near,
             z_far,
         }
+    }
+
+    pub fn pos(&self) -> WorldPoint {
+        self.world_rect.pos
     }
 
     pub fn dim_zoomed(&self) -> Vec2 {
