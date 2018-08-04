@@ -2,6 +2,8 @@ pub use cgmath;
 pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
+use cgmath::Vector3;
+
 pub type Point = Vec2;
 pub type WorldPoint = Vec2;
 pub type ScreenPoint = Vec2;
@@ -30,9 +32,11 @@ impl Point {
     ///
     /// # Examples
     /// ```
+    /// # use game_lib::math::*;
+    ///
     /// let point = Point::new(1.0, 2.5);
     /// let rect = Rect::new(0.0, 0.0, 1.5, 1.5);
-    /// assert_eq!(Point::new(1.0, 1.5), clamp_point_in_rect(point, rect));
+    /// assert_eq!(Point::new(1.0, 1.5), point.clamped_in_rect(rect));
     ///
     /// ```
     pub fn clamped_in_rect(self, rect: Rect) -> Point {
@@ -52,10 +56,11 @@ use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::Div;
 use std::ops::Mul;
+use std::ops::Neg;
 use std::ops::Sub;
 use std::ops::SubAssign;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
@@ -67,6 +72,21 @@ impl Vec2 {
     }
     pub fn new(x: f32, y: f32) -> Vec2 {
         Vec2 { x, y }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Negation
+//
+
+impl Neg for Vec2 {
+    type Output = Vec2;
+
+    fn neg(self) -> Vec2 {
+        Vec2 {
+            x: -self.x,
+            y: -self.y,
+        }
     }
 }
 
@@ -261,6 +281,14 @@ pub struct Rect {
     pub dim: Vec2,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Bounds {
+    pub left: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub top: f32,
+}
+
 impl Rect {
     pub fn zero() -> Rect {
         Rect {
@@ -354,6 +382,24 @@ impl Rect {
 
         Rect::from_point_dimension(offset_centered, self.dim)
     }
+
+    pub fn bounds(&self) -> Bounds {
+        Bounds {
+            left: self.pos.x,
+            right: self.pos.x + self.dim.x,
+            bottom: self.pos.y,
+            top: self.pos.y + self.dim.y,
+        }
+    }
+
+    pub fn bounds_centered(&self) -> Bounds {
+        Bounds {
+            left: self.pos.x - 0.5 * self.dim.x,
+            right: self.pos.x + 0.5 * self.dim.x,
+            bottom: self.pos.y - 0.5 * self.dim.y,
+            top: self.pos.y + 0.5 * self.dim.y,
+        }
+    }
 }
 
 //==================================================================================================
@@ -380,52 +426,80 @@ impl WorldPoint {
     }
 }
 
-/// NOTE: Camera position is the center of the screen
-/// It has the following bounds in world coordinates
-/// [pos.x - 0.5*dim.w, pos.x + 0.5*dim.w] x [pos.y - 0.5*dim.h, pos.y + 0.5*dim.h]
-/// with:
-/// dim = dimBase / zoom
-/// zoom > 1.0f -> zooming in
-/// zoom < 1.0f -> zooming out
+/// Camera position with its position in the center of its view-rect.
+///
+/// zoom_level > 1.0f -> zoomed in
+/// zoom_level < 1.0f -> zoomed out
+///
+/// # Example: Camera bounds
+/// ```
+/// # use game_lib::math::*;
+///
+/// let cam = Camera::new(320, 180, -1.0, 1.0);
+///
+/// let pos = cam.world_rect.pos;
+/// let dim = cam.world_rect.dim / cam.zoom_level;
+/// assert_eq!(dim, cam.dim_zoomed());
+///
+/// let left =   pos.x - 0.5 * dim.x;
+/// let right =  pos.x + 0.5 * dim.x;
+/// let bottom = pos.y - 0.5 * dim.y;
+/// let top =    pos.y + 0.5 * dim.y;
+///
+/// let bounds = cam.bounds_worldspace();
+/// assert_eq!(bounds.left, left);
+/// assert_eq!(bounds.right, right);
+/// assert_eq!(bounds.bottom, bottom);
+/// assert_eq!(bounds.top, top);
+/// ```
+///
+/// TODO(JaSc): Copy example from old project
 pub struct Camera {
-    world_rect_centered: Rect,
-    zoom_level: f32,
-    z_near: f32,
-    z_far: f32,
+    pub world_rect: Rect,
+    pub zoom_level: f32,
+    pub z_near: f32,
+    pub z_far: f32,
 }
 
 impl Camera {
-    pub fn new(
+    pub fn new(screen_width: i32, screen_height: i32, z_near: f32, z_far: f32) -> Camera {
+        Camera::with_position(Point::zero(), screen_width, screen_height, z_near, z_far)
+    }
+
+    pub fn with_position(
         pos: WorldPoint,
-        zoom_level: f32,
         screen_width: i32,
         screen_height: i32,
         z_near: f32,
         z_far: f32,
     ) -> Camera {
         Camera {
-            world_rect_centered: Rect::new(
+            world_rect: Rect::new(
                 pos.x,
                 pos.y,
                 screen_width as f32 / PIXELS_PER_UNIT,
                 screen_height as f32 / PIXELS_PER_UNIT,
             ),
-            zoom_level,
+            zoom_level: 1.0,
             z_near,
             z_far,
         }
     }
 
-    /// Converts normalized screen coordinates which are given in the half-open inteval
-    /// `[0, 1[ x [0, 1[` to world coordinates.
-    pub fn screen_to_world(&self, point: ScreenPoint) -> WorldPoint {
-        (point - 0.5) * self.world_rect_centered.dim + self.world_rect_centered.pos.pixel_snapped()
+    pub fn dim_zoomed(&self) -> Vec2 {
+        self.world_rect.dim / self.zoom_level
     }
 
-    /// Converts world coordinates to normalized screen coordinates which are given in the
-    /// half-open inteval `[0, 1[ x [0, 1[`.
+    /// Converts normalized screen coordinates (`[0, 1[x[0, 1[` - bottom-left to top-right)
+    /// to world coordinates.
+    pub fn screen_to_world(&self, point: ScreenPoint) -> WorldPoint {
+        (point - 0.5) * self.dim_zoomed() + self.world_rect.pos.pixel_snapped()
+    }
+
+    /// Converts world coordinates to normalized screen coordinates
+    /// (`[0, 1[x[0, 1[` - bottom-left to top-right)
     pub fn world_to_screen(&self, point: WorldPoint) -> ScreenPoint {
-        (point - self.world_rect_centered.pos.pixel_snapped()) * self.world_rect_centered.dim + 0.5
+        (point - self.world_rect.pos.pixel_snapped()) * self.dim_zoomed() + 0.5
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -435,8 +509,34 @@ impl Camera {
     pub fn zoom_to_world_point(&mut self, world_point: WorldPoint, new_zoom_level: f32) {
         let old_zoom_level = self.zoom_level;
         self.zoom_level = new_zoom_level;
-        self.world_rect_centered.pos = (self.world_rect_centered.pos - world_point)
-            * (old_zoom_level / new_zoom_level)
-            + world_point;
+        self.world_rect.pos =
+            (self.world_rect.pos - world_point) * (old_zoom_level / new_zoom_level) + world_point;
+    }
+
+    /// Pans the camera using cursor movement distance which is given in normalized screen
+    /// coordinates (`[0, 1[x[0, 1[` - bottom-left to top-right)
+    pub fn pan(&mut self, screen_move_distance: ScreenPoint) {
+        self.world_rect.pos -= screen_move_distance * self.dim_zoomed();
+    }
+
+    /// Returns a project-view-matrix that can transform vertices into camera-view-space
+    pub fn proj_view_matrix(&self) -> Mat4 {
+        let translation = -self.world_rect.pos.pixel_snapped();
+        let view_mat = Mat4::from_nonuniform_scale(self.zoom_level, self.zoom_level, 1.0)
+            * Mat4::from_translation(Vector3::new(translation.x, translation.y, 0.0));
+
+        let proj_mat = Mat4::ortho_centered(
+            self.world_rect.dim.x,
+            self.world_rect.dim.y,
+            self.z_near,
+            self.z_far,
+        );
+        proj_mat * view_mat
+    }
+
+    /// Returns the [`Bounds`] of the camera view in world-space
+    pub fn bounds_worldspace(&self) -> Bounds {
+        let world_rect_zoomed = Rect::from_point_dimension(self.world_rect.pos, self.dim_zoomed());
+        world_rect_zoomed.bounds_centered()
     }
 }

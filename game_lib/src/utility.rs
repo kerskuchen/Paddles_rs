@@ -2,13 +2,18 @@
 ///
 /// It uses the `stringify` macro internally and requires the input to be an expression.
 ///
-/// # Examples
+/// # Example
 ///
 /// ```
+/// # #[macro_use] extern crate game_lib;
+/// # fn main() {
+///
 /// let name = 5;
 /// assert_eq!(dformat!(1 + 2), "1 + 2 = 3");
 /// assert_eq!(dformat!(1 + name), "1 + name = 6");
 /// assert_eq!(dformat!(name), "name = 5");
+///
+/// # }
 /// ```
 #[macro_export]
 macro_rules! dformat {
@@ -23,9 +28,12 @@ macro_rules! dformat {
 /// It uses the `dformat` macro internally and requires the input to be an expression.
 /// For more information see the `dformat` macro
 ///
-/// # Examples
+/// # Example
 ///
 /// ```
+/// # #[macro_use] extern crate game_lib;
+/// # fn main() {
+///
 /// dprintln!(1 + 2);
 /// // prints: "1 + 2 = 3"
 ///
@@ -35,6 +43,8 @@ macro_rules! dformat {
 ///
 /// dprintln!(1 + name);
 /// // prints: "1 + name = 6"
+///
+/// # }
 /// ```
 #[macro_export]
 macro_rules! dprintln {
