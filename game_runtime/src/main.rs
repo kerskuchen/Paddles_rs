@@ -39,7 +39,10 @@ use libloading::Library;
 use std::collections::HashMap;
 
 extern crate game_lib;
-use game_lib::{Color, Mat4, Point, Quad, Rect, SquareMatrix, Vertex, VertexIndex};
+
+use game_lib::{
+    Color, DrawCommand, GameInput, Mat4, Point, Quad, Rect, SquareMatrix, Vertex, VertexIndex,
+};
 
 //==================================================================================================
 // GFX-RS stuff
@@ -189,7 +192,7 @@ fn main() {
     let mut screen_rect = Rect::from_dimension(0.0, 0.0);
     let mut window_entered_fullscreen = false;
 
-    let mut input = game_lib::GameInput::new();
+    let mut input = GameInput::new();
 
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     //
@@ -462,7 +465,7 @@ where
         let mut blit_rect = self.canvas_blit_rect();
         blit_rect.width -= 1.0;
         blit_rect.height -= 1.0;
-        let blit_rect_point = game_lib::clamp_point_in_rect(screen_point, blit_rect);
+        let blit_rect_point = game_lib::math::clamp_point_in_rect(screen_point, blit_rect);
         blit_rect.width += 1.0;
         blit_rect.height += 1.0;
 
@@ -513,7 +516,7 @@ where
         // NOTE: The projection matrix is upside-down for correct rendering of the canvas
         let screen_rect = self.screen_rect();
         let projection_mat =
-            game_lib::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
+            game_lib::math::ortho(0.0, screen_rect.width, screen_rect.height, 0.0, -1.0, 1.0);
         self.screen_pipeline_data.transform = projection_mat.into();
 
         self.encoder
@@ -559,11 +562,11 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    pub fn update_and_draw(&self, input: &game_lib::GameInput) -> Vec<game_lib::DrawCommand> {
+    pub fn update_and_draw(&self, input: &GameInput) -> Vec<DrawCommand> {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(&game_lib::GameInput) -> Vec<game_lib::DrawCommand>>(b"update_and_draw\0")
+                .get::<fn(&GameInput) -> Vec<DrawCommand>>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
                         "Could not load `update_and_draw` function from GameLib: {}",
