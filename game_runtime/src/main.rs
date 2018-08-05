@@ -82,7 +82,7 @@ gfx_defines! {
 ///
 /// Note that both types are memory-equivalent so the conversion is just a transmutation
 pub fn convert_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
-    unsafe { std::mem::transmute(vertices) }
+    unsafe { &*(vertices as *const [Vertex] as *const [VertexGFX]) }
 }
 
 //==================================================================================================
@@ -196,7 +196,7 @@ fn main() {
     let mut input = GameInput::new();
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
 
-    let mut game_state = game_lib.initialize(CANVAS_WIDTH as i32, CANVAS_HEIGHT as i32);
+    let mut game_state = game_lib.initialize(i32::from(CANVAS_WIDTH), i32::from(CANVAS_HEIGHT));
 
     //
     info!("Entering main event loop");
