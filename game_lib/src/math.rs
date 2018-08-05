@@ -4,7 +4,7 @@ pub use cgmath::prelude::*;
 
 use cgmath::Vector3;
 
-pub const EPSILON: f32 = 0.000001;
+const EPSILON: f32 = 0.000001;
 
 pub type Point = Vec2;
 
@@ -17,8 +17,8 @@ pub type ScreenPoint = Vec2;
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
 
-pub fn is_zero(a: f32, b: f32) -> bool {
-    f32::abs(a - b) < EPSILON
+pub fn is_effectively_zero(x: f32) -> bool {
+    f32::abs(x) < EPSILON
 }
 
 //==================================================================================================
@@ -575,20 +575,16 @@ mod tests {
         let cam = Camera::new(100, 100, -1.0, 1.0);
 
         let screen_point = ScreenPoint::new(0.75, -0.23);
-        assert!(
-            ScreenPoint::distance(
-                screen_point,
-                cam.world_to_screen(cam.screen_to_world(screen_point))
-            ) < EPSILON
-        );
+        assert!(is_effectively_zero(ScreenPoint::distance(
+            screen_point,
+            cam.world_to_screen(cam.screen_to_world(screen_point))
+        )));
 
         let world_point = WorldPoint::new(-12.3, 134.0);
-        assert!(
-            WorldPoint::distance(
-                world_point,
-                cam.screen_to_world(cam.world_to_screen(world_point))
-            ) < EPSILON
-        );
+        assert!(is_effectively_zero(WorldPoint::distance(
+            world_point,
+            cam.screen_to_world(cam.world_to_screen(world_point))
+        )));
     }
 
     #[test]
