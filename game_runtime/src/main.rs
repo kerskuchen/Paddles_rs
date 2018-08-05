@@ -41,8 +41,8 @@ use std::collections::HashMap;
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix,
-    Vec2, Vertex, VertexIndex,
+    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, MeshDrawStyle, Point, Quad, Rect,
+    SquareMatrix, Vec2, Vertex, VertexIndex,
 };
 
 //==================================================================================================
@@ -114,7 +114,7 @@ fn main() {
 
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
-    const FULLSCREEN_MODE: bool = false;
+    const FULLSCREEN_MODE: bool = true;
     const CANVAS_WIDTH: u16 = 480;
     const CANVAS_HEIGHT: u16 = 270;
     const GL_VERSION_MAJOR: u8 = 3;
@@ -356,6 +356,7 @@ fn main() {
                 &draw_command.texture,
                 convert_to_gfx_format(&draw_command.vertices),
                 &draw_command.indices,
+                draw_command.draw_style,
             );
         }
 
@@ -386,7 +387,8 @@ where
     screen_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
 
     canvas_pipeline_data: pipe::Data<R>,
-    canvas_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
+    canvas_pipeline_state_object_fill: gfx::PipelineState<R, pipe::Meta>,
+    canvas_pipeline_state_object_line: gfx::PipelineState<R, pipe::Meta>,
 
     textures: HashMap<String, gfx::handle::ShaderResourceView<R, [f32; 4]>>,
 }
@@ -406,16 +408,73 @@ where
         canvas_heigth: u16,
     ) -> RenderingContext<C, R, F> {
         //
-        info!("Creating screen and canvas pipelines");
+        info!("Creating shader set");
         //
         let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
         let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
+        let shader_set = factory
+            .create_shader_set(&vertex_shader, &fragment_shader)
+            .unwrap_or_else(|error| {
+                panic!("Could not create shader set: {}", error);
+            });
+
+        //
+        info!("Creating screen pipeline state object");
+        //
         let screen_pipeline_state_object = factory
             .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-            .expect("Failed to create a pipeline state object");
-        let canvas_pipeline_state_object = factory
-            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-            .expect("Failed to create a pipeline state object");
+            .unwrap_or_else(|error| {
+                panic!("Failed to create screen-pipeline state object: {}", error);
+            });
+
+        //
+        info!("Creating canvas pipeline state object for line drawing");
+        //
+        use gfx::state::{CullFace, FrontFace, RasterMethod, Rasterizer};
+        let line_rasterizer = Rasterizer {
+            front_face: FrontFace::CounterClockwise,
+            cull_face: CullFace::Nothing,
+            method: RasterMethod::Line(1),
+            offset: None,
+            samples: None,
+        };
+        let canvas_pipeline_state_object_line = factory
+            .create_pipeline_state(
+                &shader_set,
+                gfx::Primitive::LineList,
+                line_rasterizer,
+                pipe::new(),
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Failed to create canvas pipeline state object for line drawing: {}",
+                    error
+                );
+            });
+
+        //
+        info!("Creating canvas pipeline state object for filled polygon drawing");
+        //
+        let fill_rasterizer = Rasterizer {
+            front_face: FrontFace::CounterClockwise,
+            cull_face: CullFace::Nothing,
+            method: RasterMethod::Fill,
+            offset: None,
+            samples: None,
+        };
+        let canvas_pipeline_state_object_fill = factory
+            .create_pipeline_state(
+                &shader_set,
+                gfx::Primitive::TriangleList,
+                fill_rasterizer,
+                pipe::new(),
+            )
+            .unwrap_or_else(|error| {
+                panic!(
+                    "Failed to create canvas pipeline state object for fill drawing: {}",
+                    error
+                );
+            });
 
         //
         info!("Creating offscreen render targets");
@@ -476,7 +535,8 @@ where
             screen_pipeline_data,
             canvas_pipeline_data,
             screen_pipeline_state_object,
-            canvas_pipeline_state_object,
+            canvas_pipeline_state_object_line,
+            canvas_pipeline_state_object_fill,
             textures,
         }
     }
@@ -542,6 +602,7 @@ where
         texture_name: &str,
         vertices: &[VertexGFX],
         indices: &[VertexIndex],
+        draw_style: MeshDrawStyle,
     ) {
         let (canvas_vertex_buffer, canvas_slice) = self
             .factory
@@ -553,7 +614,10 @@ where
 
         self.encoder.draw(
             &canvas_slice,
-            &self.canvas_pipeline_state_object,
+            match draw_style {
+                MeshDrawStyle::Line => &self.canvas_pipeline_state_object_line,
+                MeshDrawStyle::Fill => &self.canvas_pipeline_state_object_fill,
+            },
             &self.canvas_pipeline_data,
         );
     }

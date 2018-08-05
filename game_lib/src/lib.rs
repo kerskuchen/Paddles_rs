@@ -5,7 +5,7 @@ pub mod math;
 #[macro_use]
 pub mod utility;
 
-pub use draw::{DrawCommand, Quad, QuadBatch, Vertex, VertexIndex};
+pub use draw::{DrawCommand, LineBatch, MeshDrawStyle, Quad, QuadBatch, Vertex, VertexIndex};
 pub use math::{
     Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2, WorldPoint,
 };
@@ -115,8 +115,13 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     // ---------------------------------------------------------------------------------------------
     // Generate quads
     //
+    let mut line_batch = LineBatch::new();
     let mut plain_batch = QuadBatch::new();
     let mut textured_batch = QuadBatch::new();
+
+    let line_start = WorldPoint::new(0.0, 0.0);
+    let line_end = new_mouse_pos_world;
+    line_batch.push_line(line_start, line_end, 0.0, Color::new(1.0, 0.0, 0.0, 1.0));
 
     // Cursor
     let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
@@ -172,7 +177,8 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
 
     let transform = game_state.cam.proj_view_matrix();
     vec![
-        DrawCommand::new(transform, "dummy", textured_batch),
-        DrawCommand::new(transform, "another_dummy", plain_batch),
+        DrawCommand::from_quads(transform, "dummy", textured_batch),
+        DrawCommand::from_quads(transform, "another_dummy", plain_batch),
+        DrawCommand::from_lines(transform, "dummy", line_batch),
     ]
 }
