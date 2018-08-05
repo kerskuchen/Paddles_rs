@@ -92,11 +92,6 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     let _mouse_delta_world = new_mouse_pos_world - game_state.mouse_pos_world;
     game_state.mouse_pos_world = new_mouse_pos_world;
 
-    let orig = new_mouse_pos_screen;
-    let conv = game_state.cam.world_to_screen(new_mouse_pos_world);
-    dprintln!(orig);
-    dprintln!(conv);
-
     if input.mouse_button_right.is_pressed {
         game_state.cam.pan(mouse_delta_screen);
     }

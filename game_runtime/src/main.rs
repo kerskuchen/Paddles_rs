@@ -42,7 +42,7 @@ extern crate game_lib;
 
 use game_lib::{
     Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix,
-    Vertex, VertexIndex,
+    Vec2, Vertex, VertexIndex,
 };
 
 //==================================================================================================
@@ -327,8 +327,18 @@ fn main() {
         // Prepare input and update game
         // -----------------------------------------------------------------------------------------
 
-        // Get current mouse position relative to canvas
-        let canvas_cursor_pos = rc.screen_coord_to_canvas_coord(screen_cursor_pos);
+        // NOTE: We add (0.5, 0,5) to the cursors' pixel-position as we want the cursor to be in the
+        //       center of the canvas' pixel. This prevents artifacts when pixel-snapping the
+        //       cursor world-position later.
+        // Example:
+        // If we transform canvas cursor pixel-position (2,0) to its world position and back to its
+        // canvas pixel-position we get (1.9999981, 0.0). If we would floor this coordinate we would
+        // get (1.0, 0.0) which would be wrong. Adding 0.5 gives us a correct flooring result.
+        //
+        // TODO(JaSc): Evaluate if we could use f32::round in the pixel-snap function
+        //             instead of f32::floor.
+        let canvas_cursor_pos =
+            rc.screen_coord_to_canvas_coord(screen_cursor_pos) + Vec2::new(0.5, 0.5);
         let canvas_cursor_pos_relative = canvas_cursor_pos / rc.canvas_rect().dim;
         input.mouse_pos_screen = canvas_cursor_pos_relative;
 

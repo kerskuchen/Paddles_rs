@@ -571,7 +571,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn converting_between_screen_and_world_coordinates() {
+    fn converting_between_screen_and_world_coordinates_and_back() {
         let cam = Camera::new(100, 100, -1.0, 1.0);
 
         let screen_point = ScreenPoint::new(0.75, -0.23);
@@ -589,5 +589,38 @@ mod tests {
                 cam.screen_to_world(cam.world_to_screen(world_point))
             ) < EPSILON
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn pixel_snapping_of_cursor_position_fails_without_correction_term() {
+        let canvas_dim = Vec2::new(100.0, 100.0);
+        let cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
+
+        let pixel_pos = Point::new(52.0, 50.0);
+        let world_pos = cam.screen_to_world(pixel_pos / canvas_dim).pixel_snapped();
+        let pixel_pos_conv = cam.world_to_screen(world_pos) * canvas_dim;
+
+        // NOTE: pixel_pos_conv == (51.0, 50.0)
+        assert!(pixel_pos.x <= pixel_pos_conv.x && pixel_pos_conv.x < pixel_pos.x + 1.0);
+        assert!(pixel_pos.y <= pixel_pos_conv.y && pixel_pos_conv.y < pixel_pos.y + 1.0);
+    }
+
+    #[test]
+    fn pixel_snapping_of_cursor_position_succeeds_with_correction_term() {
+        let canvas_dim = Vec2::new(100.0, 100.0);
+        let cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
+
+        let pixel_pos = Point::new(52.0, 50.0);
+        let pixel_pos_corrected = pixel_pos + Vec2::new(0.5, 0.5);
+
+        let world_pos = cam
+            .screen_to_world(pixel_pos_corrected / canvas_dim)
+            .pixel_snapped();
+        let pixel_pos_conv = cam.world_to_screen(world_pos) * canvas_dim;
+
+        // NOTE: pixel_pos_conv == (52.0, 50.0)
+        assert!(pixel_pos.x <= pixel_pos_conv.x && pixel_pos_conv.x < pixel_pos.x + 1.0);
+        assert!(pixel_pos.y <= pixel_pos_conv.y && pixel_pos_conv.y < pixel_pos.y + 1.0);
     }
 }
