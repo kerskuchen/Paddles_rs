@@ -1,0 +1,11 @@
+[package]
+name = "asset_packer"
+version = "0.1.0"
+authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+[dependencies]
+rusttype = "0.6"
+image = "0.19"
+
+[dependencies.game_lib]
+path = "../game_lib"

@@ -504,11 +504,11 @@ where
         let mut textures = HashMap::new();
         textures.insert(
             "dummy".to_string(),
-            debug_load_texture(&mut factory, "resources/dummy.png"),
+            debug_load_texture(&mut factory, "assets/dummy.png"),
         );
         textures.insert(
             "another_dummy".to_string(),
-            debug_load_texture(&mut factory, "resources/another_dummy.png"),
+            debug_load_texture(&mut factory, "assets/another_dummy.png"),
         );
 
         //

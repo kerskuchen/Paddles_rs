@@ -5,7 +5,7 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "run",
+            "label": "run game",
             "command": "cargo",
             "args": [
                 "run",
@@ -18,6 +18,19 @@
             "dependsOn": [
                 "Rust: cargo build",
             ]
+        },
+        {
+            "type": "shell",
+            "label": "pack assets",
+            "command": "cargo",
+            "args": [
+                "run",
+                "-p",
+                "asset_packer"
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ],
         },
         {
             "type": "shell",
@@ -51,7 +64,7 @@
         },
         {
             "type": "shell",
-            "label": "cargo doc",
+            "label": "doc",
             "command": "cargo",
             "args": [
                 "doc",
