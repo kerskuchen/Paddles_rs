@@ -1,9 +1,9 @@
 /*
 TODO(JaSc):
-  - Pixel perfect renderer with generalized (pixel independent) coordinate system
+  X Pixel perfect renderer with generalized (pixel independent) coordinate system
     x Render to offscreen buffer and blit to main screen
-    - Static world camera 
-    - Transformation mouse <-> screen <-> world 
+    X Static world camera 
+    X Transformation mouse <-> screen <-> world 
   - Basic sprite loading and Bitmap font rendering (no sprite atlas yet)
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
@@ -114,7 +114,7 @@ fn main() {
 
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
-    const FULLSCREEN_MODE: bool = true;
+    const FULLSCREEN_MODE: bool = false;
     const CANVAS_WIDTH: u16 = 480;
     const CANVAS_HEIGHT: u16 = 270;
     const GL_VERSION_MAJOR: u8 = 3;
