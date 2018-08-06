@@ -6,45 +6,10 @@ extern crate rusttype;
 
 use image::{DynamicImage, Rgba};
 use rand::prelude::*;
-use rect_packer::DensePacker;
+use rect_packer::{DensePacker, Rect};
 use rusttype::{point, Font, Scale};
 use std::fs::File;
 use std::io::Read;
-
-#[derive(Debug, Clone, Copy)]
-struct GlyphRect {
-    code_point: char,
-    outer_rect: PixelRect,
-    inner_rect: PixelRect,
-}
-impl GlyphRect {
-    fn new(code_point: char) -> GlyphRect {
-        GlyphRect {
-            code_point,
-            outer_rect: PixelRect::zero(),
-            inner_rect: PixelRect::zero(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PixelRect {
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-}
-
-impl PixelRect {
-    fn zero() -> PixelRect {
-        PixelRect {
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
-        }
-    }
-}
 
 fn main() {
     let font_data = {
@@ -68,48 +33,57 @@ fn main() {
     let text_height = (metrics.ascent - metrics.descent).ceil() as i32;
     let descent = metrics.descent.ceil() as i32;
 
-    let mut image = DynamicImage::new_rgba8(64, 64).to_rgba();
-    let mut packer = DensePacker::new(64, 64);
-
     const COLOR_GLYPH: [u8; 4] = [255, 255, 255, 255];
     const COLOR_BORDER: [u8; 4] = [0, 0, 0, 255];
 
+    let image_width = 96;
+    let image_height = 96;
+    let mut image = DynamicImage::new_rgba8(image_width, image_height).to_rgba();
+    let mut packer = DensePacker::new(image_width as i32, image_height as i32);
+
+    let do_draw_border = true;
     let show_debug_colors = true;
     for code_point in code_points {
-        let mut glyph_rect = GlyphRect::new(code_point);
         let glyph = font
             .glyph(code_point)
             .scaled(scale)
             .positioned(point(0.0, font_height));
 
-        let glyph_metrics = glyph.unpositioned().h_metrics();
-        glyph_rect.outer_rect.width = glyph_metrics.advance_width.ceil() as i32;
-        glyph_rect.outer_rect.height = text_height;
+        let border_offset = if do_draw_border { 1 } else { 0 };
 
-        if let Some(bounding_box) = glyph.pixel_bounding_box() {
-            glyph_rect.inner_rect.width = bounding_box.width();
-            glyph_rect.inner_rect.height = bounding_box.height();
-            glyph_rect.inner_rect.y = bounding_box.min.y + descent;
-            glyph_rect.inner_rect.x =
-                bounding_box.min.x + glyph_metrics.left_side_bearing.ceil() as i32;
-            if glyph_rect.inner_rect.x < 0 {
-                // NOTE: If we ever reach here, it means we need to overhaul our font rendering to
-                //       incorporate negative horizontal offsets. It would mean that the left-most
-                //       pixel of the glyph is outside of the left outer_rect boundary
-                panic!(
-                    "The x offset of code-point {} was less than zero ({})",
-                    code_point, bounding_box.min.x
-                );
+        let glyph_metrics = glyph.unpositioned().h_metrics();
+        let advance_width = glyph_metrics.advance_width.round() as i32;
+        let left_side_bearing = glyph_metrics.left_side_bearing.round() as i32;
+
+        let inner_rect = if let Some(bounding_box) = glyph.pixel_bounding_box() {
+            Rect {
+                x: bounding_box.min.x + left_side_bearing + border_offset,
+                y: bounding_box.min.y + descent + border_offset,
+                width: bounding_box.width() + border_offset,
+                height: bounding_box.height() + border_offset,
             }
         } else {
-            glyph_rect.inner_rect.width = glyph_rect.outer_rect.width;
-            glyph_rect.inner_rect.height = glyph_rect.outer_rect.height;
-        }
+            Rect {
+                x: 0 + border_offset,
+                y: 0 + border_offset,
+                width: advance_width + border_offset,
+                height: text_height + border_offset,
+            }
+        };
+        assert!(
+            inner_rect.x >= 0,
+            // NOTE: If we ever reach here, it means we need to overhaul our font rendering to
+            //       incorporate negative horizontal offsets. It would mean that the left-most
+            //       pixel of the glyph is outside of the left outer_rect boundary
+            "The x offset of code-point {} was less than zero ({})",
+            code_point,
+            inner_rect.x
+        );
 
-        let packed_rect = packer
+        let outer_rect = packer
             .pack(
-                glyph_rect.outer_rect.width,
-                glyph_rect.outer_rect.height,
+                advance_width + 2 * border_offset,
+                text_height + 2 * border_offset,
                 false,
             )
             .unwrap_or_else(|| {
@@ -119,10 +93,7 @@ fn main() {
                 )
             });
 
-        glyph_rect.outer_rect.x = packed_rect.x;
-        glyph_rect.outer_rect.y = packed_rect.y;
-
-        // Debug coloring
+        // Debug background-coloring
         if show_debug_colors {
             let rand_color = [
                 random::<u8>(),
@@ -130,32 +101,33 @@ fn main() {
                 random::<u8>(),
                 random::<u8>(),
             ];
-            for y in glyph_rect.outer_rect.y..glyph_rect.outer_rect.y + glyph_rect.outer_rect.height
-            {
-                for x in
-                    glyph_rect.outer_rect.x..glyph_rect.outer_rect.x + glyph_rect.outer_rect.width
-                {
+            for y in outer_rect.y..outer_rect.y + outer_rect.height {
+                for x in outer_rect.x..outer_rect.x + outer_rect.width {
                     image.put_pixel(x as u32, y as u32, Rgba { data: rand_color })
                 }
             }
         }
 
+        // Draw actual glyphs
         glyph.draw(|x, y, v| {
             if v > 0.5 {
                 image.put_pixel(
-                    x + (glyph_rect.outer_rect.x + glyph_rect.inner_rect.x) as u32,
-                    y + (glyph_rect.outer_rect.y + glyph_rect.inner_rect.y) as u32,
+                    x + (outer_rect.x + inner_rect.x) as u32,
+                    y + (outer_rect.y + inner_rect.y) as u32,
                     Rgba { data: COLOR_GLYPH },
                 )
             }
         });
         println!("{} : {}", code_point as u8, code_point);
-        println!("{:?}", glyph.unpositioned().h_metrics());
-        println!("{:?}", glyph.pixel_bounding_box());
-        println!("{:?}", glyph_rect);
+        println!("metrics:    {:?}", glyph.unpositioned().h_metrics());
+        println!("bb:         {:?}", glyph.pixel_bounding_box());
+        println!("outer rect: {:?}", outer_rect);
+        println!("inner rect: {:?}", inner_rect);
     }
 
-    //draw_border(&mut image, COLOR_GLYPH, COLOR_BORDER);
+    if do_draw_border {
+        draw_border(&mut image, COLOR_GLYPH, COLOR_BORDER);
+    }
 
     std::fs::create_dir_all("data/fonts")
         .unwrap_or_else(|error| panic!("Cannot create dir 'data': {}", error));
