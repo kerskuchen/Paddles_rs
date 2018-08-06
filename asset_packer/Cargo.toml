@@ -6,6 +6,8 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 [dependencies]
 rusttype = "0.6"
 image = "0.19"
+rect_packer = "0.2"
+rand = "0.5"
 
 [dependencies.game_lib]
 path = "../game_lib"
