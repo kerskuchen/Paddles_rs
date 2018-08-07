@@ -4,55 +4,107 @@ extern crate rand;
 extern crate rect_packer;
 extern crate rusttype;
 
+#[macro_use]
+extern crate serde_derive;
+extern crate bincode;
+
+use std::fs::File;
+use std::io::prelude::*;
+
 use image::{DynamicImage, Rgba};
 use rand::prelude::*;
 use rect_packer::{DensePacker, Rect};
 use rusttype::{point, Font, PositionedGlyph, Scale};
-use std::fs::File;
-use std::io::Read;
+
+use bincode::{deserialize, serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Sprite {
+    vertex_bounds: Bounds,
+    uv_bounds: Bounds,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct Bounds {
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FontHeader {
+    num_glyphs: usize,
+    first_code_point: u8,
+    last_code_point: u8,
+}
 
 fn main() {
-    // Configuration
     let font_height = 8.0;
-    let do_draw_border = true;
     let show_debug_colors = true;
+    let do_draw_border = true;
+    let font_name = "04B_03__.TTF";
+
+    pack_font(font_name, font_height, do_draw_border, show_debug_colors);
+}
+
+fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug_colors: bool) {
+    // Configuration
     let padding = if do_draw_border { 1 } else { 0 };
+    let first_code_point: u8 = 32;
+    let last_code_point: u8 = 126;
     const COLOR_GLYPH: [u8; 4] = [255, 255, 255, 255];
     const COLOR_BORDER: [u8; 4] = [0, 0, 0, 255];
 
     // Creating font
     let font_data = {
         let mut font_data = Vec::new();
-        File::open("assets/04B_03__.TTF")
-            .unwrap_or_else(|error| panic!("Error opening font file: {}", error))
+        File::open(String::from("assets/") + font_name)
+            .unwrap_or_else(|error| panic!("Error opening font file {}: {}", font_name, error))
             .read_to_end(&mut font_data)
-            .unwrap_or_else(|error| panic!("Error reading font file: {}", error));
+            .unwrap_or_else(|error| panic!("Error reading font file {}: {}", font_name, error));
         font_data
     };
-    let font = Font::from_bytes(&font_data)
-        .unwrap_or_else(|error| panic!("Error constructing font: {}", error));
+    let font = Font::from_bytes(&font_data).unwrap_or_else(|error| {
+        panic!("Error constructing font fontname {} : {}", font_name, error)
+    });
 
     // Packing glyphs
-    let code_points: Vec<char> = (32..=126).map(|byte| (byte as u8) as char).collect();
+    let code_points: Vec<char> = (first_code_point..=last_code_point)
+        .map(|byte| byte as char)
+        .collect();
     let mut packer = DensePacker::new(96, 70);
     let glyph_data: Vec<_> = code_points
         .iter()
         .map(|&code_point| pack_glyph(&font, &mut packer, code_point, font_height, padding))
         .collect();
+    let (image_width, image_height) = packer.size();
+
+    // Write metadata
+    let glyph_rects: Vec<_> = glyph_data
+        .iter()
+        .map(|(_, _, outer_rect)| *outer_rect)
+        .collect();
+    write_metadata(
+        font_name,
+        &glyph_rects,
+        image_width as f32,
+        image_height as f32,
+        first_code_point,
+        last_code_point,
+    );
 
     // Creating image
-    let (image_width, image_height) = packer.size();
     let mut image = DynamicImage::new_rgba8(image_width as u32, image_height as u32).to_rgba();
     if show_debug_colors {
         clear_image(&mut image, [123, 200, 250, 100]);
     }
 
     // Draw glyphs
-    for (code_point, glyph, inner_rect, outer_rect) in glyph_data {
+    for (glyph, inner_rect, outer_rect) in &glyph_data {
         if show_debug_colors {
             // Visualize outer rect
-            let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 150];
-            fill_rect(&mut image, outer_rect, rand_color);
+            let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 125];
+            fill_rect(&mut image, *outer_rect, rand_color);
 
             // Visualize inner rect
             let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 255];
@@ -84,9 +136,57 @@ fn main() {
     std::fs::create_dir_all("data/fonts")
         .unwrap_or_else(|error| panic!("Cannot create dir 'data': {}", error));
     image
-        .save("data/fonts/test.png")
+        .save(String::from("data/fonts/") + font_name + ".png")
         .unwrap_or_else(|error| panic!("Error saving image: {}", error));
     println!("Packed font successfully");
+}
+
+fn write_metadata(
+    font_name: &str,
+    glyph_rects: &[Rect],
+    image_width: f32,
+    image_height: f32,
+    first_code_point: u8,
+    last_code_point: u8,
+) {
+    let mut meta_file = File::create(String::from("data/fonts/") + font_name + ".meta")
+        .unwrap_or_else(|error| {
+            panic!("Error creating font metadata for {}: {}", font_name, error)
+        });
+    let font_header = FontHeader {
+        num_glyphs: glyph_rects.len(),
+        first_code_point,
+        last_code_point,
+    };
+    let encoded_header = serialize(&font_header)
+        .unwrap_or_else(|error| panic!("Error encoding metadata for {}: {}", font_name, error));
+    meta_file
+        .write_all(&encoded_header)
+        .unwrap_or_else(|error| panic!("Error writing metadata for {}: {}", font_name, error));
+
+    for rect in glyph_rects {
+        let vertex_bounds = Bounds {
+            left: 0.0,
+            right: rect.width as f32,
+            bottom: 0.0,
+            top: rect.height as f32,
+        };
+        let uv_bounds = Bounds {
+            left: rect.x as f32 / image_width,
+            right: (rect.x + rect.width) as f32 / image_width,
+            bottom: rect.y as f32 / image_height,
+            top: (rect.y + rect.height) as f32 / image_height,
+        };
+        let sprite = Sprite {
+            vertex_bounds,
+            uv_bounds,
+        };
+        let encoded_sprite = serialize(&sprite)
+            .unwrap_or_else(|error| panic!("Error encoding metadata for {}: {}", font_name, error));
+        meta_file
+            .write_all(&encoded_sprite)
+            .unwrap_or_else(|error| panic!("Error writing metadata for {}: {}", font_name, error));
+    }
 }
 
 fn pack_glyph<'a>(
@@ -95,7 +195,7 @@ fn pack_glyph<'a>(
     code_point: char,
     font_height: f32,
     padding: i32,
-) -> (char, PositionedGlyph<'a>, Rect, Rect) {
+) -> (PositionedGlyph<'a>, Rect, Rect) {
     // Font metrics
     let scale = Scale::uniform(font_height);
     let metrics = font.v_metrics(scale);
@@ -122,8 +222,8 @@ fn pack_glyph<'a>(
         }
     } else {
         Rect {
-            x: 0 + padding,
-            y: 0 + padding,
+            x: padding,
+            y: padding,
             width: advance_width + padding,
             height: text_height + padding,
         }
@@ -150,7 +250,7 @@ fn pack_glyph<'a>(
             )
         });
 
-    (code_point, glyph, inner_rect, outer_rect)
+    (glyph, inner_rect, outer_rect)
 }
 
 fn draw_border(
@@ -161,7 +261,7 @@ fn draw_border(
     // Create a border around every glyph in the image
     for y in 0..image.height() {
         for x in 0..image.width() {
-            let pixel_val = image.get_pixel(x, y).clone();
+            let pixel_val = *image.get_pixel(x, y);
             if pixel_val.data == color_glyph {
                 // We landed on a glyph's pixel. We need to paint a border in our neighbouring
                 // pixels that are not themselves part of a glyph
@@ -169,7 +269,7 @@ fn draw_border(
                 for pair in pairs {
                     let neighbour_x = (x as i32 + pair.0) as u32;
                     let neighbour_y = (y as i32 + pair.1) as u32;
-                    let neighbour_pixel_val = image.get_pixel(neighbour_x, neighbour_y).clone();
+                    let neighbour_pixel_val = *image.get_pixel(neighbour_x, neighbour_y);
 
                     if neighbour_pixel_val.data != color_glyph {
                         image.put_pixel(neighbour_x, neighbour_y, Rgba { data: color_border })
@@ -193,6 +293,11 @@ fn fill_rect(
     rect: Rect,
     fill_color: [u8; 4],
 ) {
+    assert!(rect.x >= 0);
+    assert!(rect.y >= 0);
+    assert!(rect.x + rect.width <= image.width() as i32);
+    assert!(rect.y + rect.height <= image.height() as i32);
+
     for y in rect.y..(rect.y + rect.height) {
         for x in rect.x..(rect.x + rect.width) {
             image.put_pixel(x as u32, y as u32, Rgba { data: fill_color })

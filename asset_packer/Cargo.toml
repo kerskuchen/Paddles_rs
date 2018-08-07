@@ -8,6 +8,9 @@ rusttype = "0.6"
 image = "0.19"
 rect_packer = "0.2"
 rand = "0.5"
+serde = "1.0"
+serde_derive = "1.0"
+bincode = "1.0"
 
 [dependencies.game_lib]
 path = "../game_lib"
