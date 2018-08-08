@@ -3,13 +3,20 @@ extern crate image;
 extern crate rand;
 extern crate rect_packer;
 extern crate rusttype;
+#[macro_use]
+extern crate log;
+extern crate fern;
 
 #[macro_use]
 extern crate serde_derive;
 extern crate bincode;
 
+extern crate failure;
+use failure::{Error, ResultExt};
+
 use std::fs::File;
 use std::io::prelude::*;
+use std::path::{Path, PathBuf};
 
 use image::{DynamicImage, Rgba};
 use rand::prelude::*;
@@ -38,16 +45,61 @@ struct FontHeader {
     last_code_point: u8,
 }
 
-fn main() {
+const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Info;
+const ASSETS_DIR: &str = "assets";
+const DATA_DIR: &str = "data";
+const FONTS_DIR: &str = "fonts";
+
+fn main() -> Result<(), Error> {
+    // Initializing logger
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}-{}: {}",
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(LOG_LEVEL)
+        .chain(std::io::stdout())
+        .apply()
+        .expect("Could not initialize logger");
+
+    debug!("Packing fonts");
+    // Pack fonts
     let font_height = 8.0;
     let show_debug_colors = true;
     let do_draw_border = true;
-    let font_name = "04B_03__.TTF";
+    let font_filename = "04B_03__.TTF";
 
-    pack_font(font_name, font_height, do_draw_border, show_debug_colors);
+    pack_font(
+        font_filename,
+        font_height,
+        do_draw_border,
+        show_debug_colors,
+    ).context(format!("Could not pack font {}", font_filename))?;
+    info!("Successfully Packed fonts");
+
+    Ok(())
 }
 
-fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug_colors: bool) {
+fn pack_font(
+    font_filename: &str,
+    font_height: f32,
+    do_draw_border: bool,
+    show_debug_colors: bool,
+) -> Result<(), Error> {
+    debug!("Packing font: {}", font_filename);
+
+    // Define input and output file-paths
+    let input_filepath = Path::new(ASSETS_DIR).join(FONTS_DIR).join(font_filename);
+    let output_dir = Path::new(DATA_DIR).join(FONTS_DIR);
+    let texture_filepath = output_dir.clone().join(font_filename).with_extension("png");
+    let meta_filepath = output_dir.clone().join(font_filename).with_extension("fnt");
+    std::fs::create_dir_all(output_dir.clone())
+        .context(format!("Could not create dir '{}'", output_dir.display()))?;
+
     // Configuration
     let padding = if do_draw_border { 1 } else { 0 };
     let first_code_point: u8 = 32;
@@ -55,43 +107,50 @@ fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug
     const COLOR_GLYPH: [u8; 4] = [255, 255, 255, 255];
     const COLOR_BORDER: [u8; 4] = [0, 0, 0, 255];
 
-    // Creating font
+    // Create font from binary data
     let font_data = {
         let mut font_data = Vec::new();
-        File::open(String::from("assets/") + font_name)
-            .unwrap_or_else(|error| panic!("Error opening font file {}: {}", font_name, error))
+        File::open(input_filepath.clone())
+            .context(format!(
+                "Could not open font file '{}'",
+                input_filepath.clone().display()
+            ))?
             .read_to_end(&mut font_data)
-            .unwrap_or_else(|error| panic!("Error reading font file {}: {}", font_name, error));
+            .context(format!(
+                "Could not read font file '{}'",
+                input_filepath.display()
+            ))?;
         font_data
     };
-    let font = Font::from_bytes(&font_data).unwrap_or_else(|error| {
-        panic!("Error constructing font fontname {} : {}", font_name, error)
-    });
+    let font = Font::from_bytes(&font_data).context("Could not construct front from bytes")?;
 
-    // Packing glyphs
+    // Rectangle pack glyphs
     let code_points: Vec<char> = (first_code_point..=last_code_point)
         .map(|byte| byte as char)
         .collect();
-    let mut packer = DensePacker::new(96, 70);
+    let mut packer = DensePacker::new(960, 700);
     let glyph_data: Vec<_> = code_points
         .iter()
         .map(|&code_point| pack_glyph(&font, &mut packer, code_point, font_height, padding))
         .collect();
     let (image_width, image_height) = packer.size();
 
-    // Write metadata
+    // Write font and glyph metadata
     let glyph_rects: Vec<_> = glyph_data
         .iter()
-        .map(|(_, _, outer_rect)| *outer_rect)
+        .map(|(_, _, _, outer_rect)| *outer_rect)
         .collect();
     write_metadata(
-        font_name,
+        &meta_filepath,
         &glyph_rects,
         image_width as f32,
         image_height as f32,
         first_code_point,
         last_code_point,
-    );
+    ).context(format!(
+        "Could not write metadata '{}'",
+        meta_filepath.display()
+    ))?;
 
     // Creating image
     let mut image = DynamicImage::new_rgba8(image_width as u32, image_height as u32).to_rgba();
@@ -100,7 +159,7 @@ fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug
     }
 
     // Draw glyphs
-    for (glyph, inner_rect, outer_rect) in &glyph_data {
+    for (code_point, glyph, inner_rect, outer_rect) in &glyph_data {
         if show_debug_colors {
             // Visualize outer rect
             let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 125];
@@ -118,11 +177,25 @@ fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug
         }
 
         // Draw actual glyphs
+        let glyph_origin_x = (outer_rect.x + inner_rect.x) as u32;
+        let glyph_origin_y = (outer_rect.y + inner_rect.y) as u32;
+        trace!(
+            concat!(
+                "\nDrawing glyph '{}' for {} at\n",
+                "pos: {} x {}, dim: {} x {}"
+            ),
+            code_point,
+            font_filename,
+            glyph_origin_x,
+            glyph_origin_y,
+            outer_rect.width,
+            outer_rect.height
+        );
         glyph.draw(|x, y, v| {
             if v > 0.5 {
                 image.put_pixel(
-                    x + (outer_rect.x + inner_rect.x) as u32,
-                    y + (outer_rect.y + inner_rect.y) as u32,
+                    x + glyph_origin_x,
+                    y + glyph_origin_y,
                     Rgba { data: COLOR_GLYPH },
                 )
             }
@@ -133,36 +206,38 @@ fn pack_font(font_name: &str, font_height: f32, do_draw_border: bool, show_debug
     }
 
     // Write out image
-    std::fs::create_dir_all("data/fonts")
-        .unwrap_or_else(|error| panic!("Cannot create dir 'data': {}", error));
-    image
-        .save(String::from("data/fonts/") + font_name + ".png")
-        .unwrap_or_else(|error| panic!("Error saving image: {}", error));
-    println!("Packed font successfully");
+    image.save(texture_filepath.clone()).context(format!(
+        "Could not save font texture to '{}'",
+        texture_filepath.display()
+    ))?;
+
+    info!("Succesfully packed font: {}", font_filename);
+    Ok(())
 }
 
 fn write_metadata(
-    font_name: &str,
+    meta_filepath: &Path,
     glyph_rects: &[Rect],
     image_width: f32,
     image_height: f32,
     first_code_point: u8,
     last_code_point: u8,
-) {
-    let mut meta_file = File::create(String::from("data/fonts/") + font_name + ".meta")
-        .unwrap_or_else(|error| {
-            panic!("Error creating font metadata for {}: {}", font_name, error)
-        });
+) -> Result<(), Error> {
+    let mut meta_file = File::create(meta_filepath).context(format!(
+        "Could not create file '{}'",
+        meta_filepath.display()
+    ))?;
+
     let font_header = FontHeader {
         num_glyphs: glyph_rects.len(),
         first_code_point,
         last_code_point,
     };
-    let encoded_header = serialize(&font_header)
-        .unwrap_or_else(|error| panic!("Error encoding metadata for {}: {}", font_name, error));
+    let encoded_header = serialize(&font_header).context("Could not encode font metadata header")?;
+
     meta_file
         .write_all(&encoded_header)
-        .unwrap_or_else(|error| panic!("Error writing metadata for {}: {}", font_name, error));
+        .context("Could not write font metadata header")?;
 
     for rect in glyph_rects {
         let vertex_bounds = Bounds {
@@ -181,12 +256,12 @@ fn write_metadata(
             vertex_bounds,
             uv_bounds,
         };
-        let encoded_sprite = serialize(&sprite)
-            .unwrap_or_else(|error| panic!("Error encoding metadata for {}: {}", font_name, error));
+        let encoded_sprite = serialize(&sprite).context("Could not encode glyph metadata")?;
         meta_file
             .write_all(&encoded_sprite)
-            .unwrap_or_else(|error| panic!("Error writing metadata for {}: {}", font_name, error));
+            .context("Could not write glyph metadata")?;
     }
+    Ok(())
 }
 
 fn pack_glyph<'a>(
@@ -195,7 +270,7 @@ fn pack_glyph<'a>(
     code_point: char,
     font_height: f32,
     padding: i32,
-) -> (PositionedGlyph<'a>, Rect, Rect) {
+) -> (char, PositionedGlyph<'a>, Rect, Rect) {
     // Font metrics
     let scale = Scale::uniform(font_height);
     let metrics = font.v_metrics(scale);
@@ -250,7 +325,7 @@ fn pack_glyph<'a>(
             )
         });
 
-    (glyph, inner_rect, outer_rect)
+    (code_point, glyph, inner_rect, outer_rect)
 }
 
 fn draw_border(
