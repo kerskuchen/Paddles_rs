@@ -1,16 +1,20 @@
 pub extern crate cgmath;
+extern crate image;
 
 pub mod draw;
 pub mod math;
 #[macro_use]
 pub mod utility;
 
-pub use draw::{DrawCommand, LineBatch, MeshDrawStyle, Quad, QuadBatch, Vertex, VertexIndex};
+pub use draw::{DrawCommand, LineBatch, Quad, QuadBatch, Texture, Vertex, VertexIndex};
 pub use math::{
     Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2, WorldPoint,
 };
 
 pub struct GameState {
+    loaded_textures: bool,
+    texture_dummy: Texture,
+    texture_another_dummy: Texture,
     mouse_pos_screen: ScreenPoint,
     mouse_pos_world: WorldPoint,
     cam: Camera,
@@ -74,11 +78,26 @@ impl GameInput {
 
 pub fn initialize(canvas_width: i32, canvas_height: i32) -> GameState {
     GameState {
+        loaded_textures: false,
+        texture_dummy: Texture::empty(),
+        texture_another_dummy: Texture::empty(),
         // TODO(JaSc): Fix and standardize z_near/z_far
         cam: Camera::new(canvas_width, canvas_height, -1.0, 1.0),
         mouse_pos_screen: ScreenPoint::zero(),
         mouse_pos_world: WorldPoint::zero(),
     }
+}
+
+fn debug_load_texture(id: u32, file_name: &str) -> (Texture, Vec<u8>) {
+    let img = image::open(file_name).unwrap().to_rgba();
+    let (width, height) = img.dimensions();
+    let info = Texture {
+        id,
+        width: width as u16,
+        height: height as u16,
+        name: String::from(file_name),
+    };
+    (info, img.into_raw())
 }
 
 pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<DrawCommand> {
@@ -115,6 +134,21 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     // ---------------------------------------------------------------------------------------------
     // Generate quads
     //
+
+    let mut draw_commands = Vec::new();
+
+    if !game_state.loaded_textures {
+        let (texture, pixels) = debug_load_texture(0, "assets/dummy.png");
+        game_state.texture_dummy = texture.clone();
+        draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
+
+        let (texture, pixels) = debug_load_texture(1, "assets/another_dummy.png");
+        game_state.texture_another_dummy = texture.clone();
+        draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
+
+        game_state.loaded_textures = true;
+    }
+
     let mut line_batch = LineBatch::new();
     let mut plain_batch = QuadBatch::new();
     let mut textured_batch = QuadBatch::new();
@@ -176,9 +210,21 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     }
 
     let transform = game_state.cam.proj_view_matrix();
-    vec![
-        DrawCommand::from_quads(transform, "dummy", textured_batch),
-        DrawCommand::from_quads(transform, "another_dummy", plain_batch),
-        DrawCommand::from_lines(transform, "dummy", line_batch),
-    ]
+    draw_commands.push(DrawCommand::from_quads(
+        transform,
+        game_state.texture_dummy.clone(),
+        textured_batch,
+    ));
+    draw_commands.push(DrawCommand::from_quads(
+        transform,
+        game_state.texture_another_dummy.clone(),
+        plain_batch,
+    ));
+    draw_commands.push(DrawCommand::from_lines(
+        transform,
+        game_state.texture_dummy.clone(),
+        line_batch,
+    ));
+
+    draw_commands
 }

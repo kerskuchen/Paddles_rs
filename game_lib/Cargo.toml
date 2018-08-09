@@ -5,3 +5,4 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
 [dependencies]
 cgmath = "0.16"
+image = "0.19.0"

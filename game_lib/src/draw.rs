@@ -1,10 +1,5 @@
 use math::{Color, Mat4, Point, Rect};
 
-pub enum MeshDrawStyle {
-    Line,
-    Fill,
-}
-
 pub type VertexIndex = u16;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,38 +9,68 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Texture {
+    pub id: u32,
+    pub width: u16,
+    pub height: u16,
+    pub name: String,
+}
+
+impl Texture {
+    pub fn empty() -> Texture {
+        Texture {
+            id: 0,
+            width: 0,
+            height: 0,
+            name: String::from(""),
+        }
+    }
+}
+
 //==================================================================================================
 // DrawCommand
 //==================================================================================================
 //
 
-pub struct DrawCommand {
-    pub transform: Mat4,
-    pub vertices: Vec<Vertex>,
-    pub indices: Vec<VertexIndex>,
-    pub texture: String,
-    pub draw_style: MeshDrawStyle,
+#[derive(Debug)]
+pub enum DrawCommand {
+    UploadTexture {
+        texture: Texture,
+        pixels: Vec<u8>,
+    },
+    DrawLines {
+        transform: Mat4,
+        vertices: Vec<Vertex>,
+        indices: Vec<VertexIndex>,
+        texture: Texture,
+    },
+    DrawFilled {
+        transform: Mat4,
+        vertices: Vec<Vertex>,
+        indices: Vec<VertexIndex>,
+        texture: Texture,
+    },
 }
 
 impl DrawCommand {
-    pub fn from_quads(transform: Mat4, texture_name: &str, batch: QuadBatch) -> DrawCommand {
+    pub fn from_quads(transform: Mat4, texture: Texture, batch: QuadBatch) -> DrawCommand {
         let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand {
+        DrawCommand::DrawFilled {
             transform,
             vertices,
             indices,
-            texture: String::from(texture_name),
-            draw_style: MeshDrawStyle::Fill,
+            texture,
         }
     }
-    pub fn from_lines(transform: Mat4, texture_name: &str, batch: LineBatch) -> DrawCommand {
+
+    pub fn from_lines(transform: Mat4, texture: Texture, batch: LineBatch) -> DrawCommand {
         let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand {
+        DrawCommand::DrawLines {
             transform,
             vertices,
             indices,
-            texture: String::from(texture_name),
-            draw_style: MeshDrawStyle::Line,
+            texture,
         }
     }
 }

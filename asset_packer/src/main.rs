@@ -128,7 +128,7 @@ fn pack_font(
     let code_points: Vec<char> = (first_code_point..=last_code_point)
         .map(|byte| byte as char)
         .collect();
-    let mut packer = DensePacker::new(960, 700);
+    let mut packer = DensePacker::new(96, 70);
     let glyph_data: Vec<_> = code_points
         .iter()
         .map(|&code_point| pack_glyph(&font, &mut packer, code_point, font_height, padding))

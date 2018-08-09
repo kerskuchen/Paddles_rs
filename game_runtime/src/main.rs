@@ -32,7 +32,6 @@ BACKLOG(JaSc):
 #[macro_use]
 extern crate log;
 extern crate fern;
-extern crate image;
 extern crate rand;
 
 use libloading::Library;
@@ -41,8 +40,8 @@ use std::collections::HashMap;
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, MeshDrawStyle, Point, Quad, Rect,
-    SquareMatrix, Vec2, Vertex, VertexIndex,
+    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix,
+    Texture, Vec2, Vertex, VertexIndex,
 };
 
 //==================================================================================================
@@ -351,13 +350,31 @@ fn main() {
         rc.clear_canvas(clear_color);
 
         for draw_command in draw_commands {
-            rc.draw_into_canvas(
-                draw_command.transform,
-                &draw_command.texture,
-                convert_to_gfx_format(&draw_command.vertices),
-                &draw_command.indices,
-                draw_command.draw_style,
-            );
+            match draw_command {
+                DrawCommand::UploadTexture { texture, pixels } => rc.add_texture(texture, &pixels),
+                DrawCommand::DrawFilled {
+                    transform,
+                    vertices,
+                    indices,
+                    texture,
+                } => rc.draw_into_canvas_filled(
+                    transform,
+                    texture,
+                    convert_to_gfx_format(&vertices),
+                    &indices,
+                ),
+                DrawCommand::DrawLines {
+                    transform,
+                    vertices,
+                    indices,
+                    texture,
+                } => rc.draw_into_canvas_lines(
+                    transform,
+                    texture,
+                    convert_to_gfx_format(&vertices),
+                    &indices,
+                ),
+            }
         }
 
         // Draw to screen and flip
@@ -390,7 +407,7 @@ where
     canvas_pipeline_state_object_fill: gfx::PipelineState<R, pipe::Meta>,
     canvas_pipeline_state_object_line: gfx::PipelineState<R, pipe::Meta>,
 
-    textures: HashMap<String, gfx::handle::ShaderResourceView<R, [f32; 4]>>,
+    textures: HashMap<Texture, gfx::handle::ShaderResourceView<R, [f32; 4]>>,
 }
 
 impl<C, R, F> RenderingContext<C, R, F>
@@ -495,28 +512,26 @@ where
             .expect("Failed to create a canvas depth render target");
 
         //
-        info!("Creating dummy textures and sampler");
+        info!("Creating empty default texture and sampler");
         //
         use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
         let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
         let texture_sampler = factory.create_sampler(sampler_info);
 
-        let mut textures = HashMap::new();
-        textures.insert(
-            "dummy".to_string(),
-            debug_load_texture(&mut factory, "assets/dummy.png"),
-        );
-        textures.insert(
-            "another_dummy".to_string(),
-            debug_load_texture(&mut factory, "assets/another_dummy.png"),
-        );
+        // TODO(JaSc): Clean this up
+        use gfx::format::Rgba8;
+        let pixels = vec![0, 0, 0, 0];
+        let kind = gfx::texture::Kind::D2(1, 1, gfx::texture::AaMode::Single);
+        let (_, empty_texture) = factory
+            .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&pixels])
+            .unwrap();
 
         //
         info!("Creating screen and canvas pipeline data");
         //
         let canvas_pipeline_data = pipe::Data {
             vertex_buffer: factory.create_vertex_buffer(&[]),
-            texture: (textures["dummy"].clone(), texture_sampler.clone()),
+            texture: (empty_texture, texture_sampler.clone()),
             transform: Mat4::identity().into(),
             out_color: canvas_color_render_target_view,
             out_depth: canvas_depth_render_target_view,
@@ -537,7 +552,7 @@ where
             screen_pipeline_state_object,
             canvas_pipeline_state_object_line,
             canvas_pipeline_state_object_fill,
-            textures,
+            textures: HashMap::new(),
         }
     }
 
@@ -596,28 +611,56 @@ where
             .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
     }
 
-    pub fn draw_into_canvas(
+    // TODO(JaSc): Remove duplicates
+    pub fn draw_into_canvas_filled(
         &mut self,
         projection: Mat4,
-        texture_name: &str,
+        texture: Texture,
         vertices: &[VertexGFX],
         indices: &[VertexIndex],
-        draw_style: MeshDrawStyle,
     ) {
         let (canvas_vertex_buffer, canvas_slice) = self
             .factory
             .create_vertex_buffer_with_slice(&vertices, &*indices);
 
-        self.canvas_pipeline_data.texture.0 = self.textures[texture_name].clone();
+        self.canvas_pipeline_data.texture.0 = self
+            .textures
+            .get(&texture)
+            .expect(&format!("Could not find texture {:?}", texture))
+            .clone();
+
         self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
         self.canvas_pipeline_data.transform = projection.into();
 
         self.encoder.draw(
             &canvas_slice,
-            match draw_style {
-                MeshDrawStyle::Line => &self.canvas_pipeline_state_object_line,
-                MeshDrawStyle::Fill => &self.canvas_pipeline_state_object_fill,
-            },
+            &self.canvas_pipeline_state_object_fill,
+            &self.canvas_pipeline_data,
+        );
+    }
+
+    pub fn draw_into_canvas_lines(
+        &mut self,
+        projection: Mat4,
+        texture: Texture,
+        vertices: &[VertexGFX],
+        indices: &[VertexIndex],
+    ) {
+        let (canvas_vertex_buffer, canvas_slice) = self
+            .factory
+            .create_vertex_buffer_with_slice(&vertices, &*indices);
+
+        self.canvas_pipeline_data.texture.0 = self
+            .textures
+            .get(&texture)
+            .expect(&format!("Could not find texture {:?}", texture))
+            .clone();
+        self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
+        self.canvas_pipeline_data.transform = projection.into();
+
+        self.encoder.draw(
+            &canvas_slice,
+            &self.canvas_pipeline_state_object_line,
             &self.canvas_pipeline_data,
         );
     }
@@ -647,24 +690,18 @@ where
             &self.screen_pipeline_data,
         );
     }
-}
 
-fn debug_load_texture<F, R>(
-    factory: &mut F,
-    file_name: &str,
-) -> gfx::handle::ShaderResourceView<R, [f32; 4]>
-where
-    F: gfx::Factory<R>,
-    R: gfx::Resources,
-{
-    use gfx::format::Rgba8;
-    let img = image::open(file_name).unwrap().to_rgba();
-    let (width, height) = img.dimensions();
-    let kind = gfx::texture::Kind::D2(width as u16, height as u16, gfx::texture::AaMode::Single);
-    let (_, view) = factory
-        .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&img])
-        .unwrap();
-    view
+    fn add_texture(&mut self, texture: Texture, pixels: &[u8]) {
+        use gfx::format::Rgba8;
+        let kind =
+            gfx::texture::Kind::D2(texture.width, texture.height, gfx::texture::AaMode::Single);
+        let (_, view) = self
+            .factory
+            .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&pixels])
+            .unwrap();
+
+        self.textures.insert(texture, view);
+    }
 }
 
 //==================================================================================================
