@@ -4,6 +4,9 @@ TODO(JaSc):
     x Render to offscreen buffer and blit to main screen
     X Static world camera 
     X Transformation mouse <-> screen <-> world 
+  - Atlas packer
+  x Font packer
+  - Atlas textures and sprite/quad/line-batching
   - Basic sprite loading and Bitmap font rendering (no sprite atlas yet)
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
@@ -16,14 +19,13 @@ BACKLOG(JaSc):
     x Debug macro to print a variable and it's name quickly
     - Be able to conveniently do debug printing on screen
     - Moving camera system
-    - Atlas textures and sprite/quad/line-batching
-    - Atlas and font packer
     - Texture array of atlases implementation
     - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
     - Gamepad input
-    - Mouse zooming
+    x Mouse zooming
     - Raycasting and collision detection
-    - Fixed sized and flexible sized pixel perfect canvases (framebuffers)
+    x Fixed sized pixel perfect canvase (framebuffer)
+    - Flexible sized pixel perfect canvase (framebuffer)
     - Live looped input playback and recording
     x Hot reloading of game code
     - Disable hot reloading when making a publish build
@@ -34,15 +36,16 @@ extern crate log;
 extern crate fern;
 extern crate rand;
 
-use libloading::Library;
-use std::collections::HashMap;
-
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, GameState, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix,
-    Texture, Vec2, Vertex, VertexIndex,
+    Color, DrawCommand, GameInput, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix, Texture,
+    Vec2, Vertex, VertexIndex,
 };
+
+pub mod game_interface;
+use game_interface::GameLib;
+use std::collections::HashMap;
 
 //==================================================================================================
 // GFX-RS stuff
@@ -701,166 +704,5 @@ where
             .unwrap();
 
         self.textures.insert(texture, view);
-    }
-}
-
-//==================================================================================================
-// GameLib
-//==================================================================================================
-//
-pub struct GameLib {
-    pub lib: Library,
-    lib_path: String,
-    lib_name: String,
-    last_modified_time: std::time::SystemTime,
-    copy_counter: usize,
-}
-
-impl GameLib {
-    pub fn initialize(&self, canvas_width: i32, canvas_heigth: i32) -> GameState {
-        unsafe {
-            let f = self
-                .lib
-                .get::<fn(i32, i32) -> GameState>(b"initialize\0")
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "Could not load `initialize` function from GameLib: {}",
-                        error
-                    )
-                });
-            f(canvas_width, canvas_heigth)
-        }
-    }
-    pub fn update_and_draw(
-        &self,
-        input: &GameInput,
-        game_state: &mut GameState,
-    ) -> Vec<DrawCommand> {
-        unsafe {
-            let f = self
-                .lib
-                .get::<fn(&GameInput, &mut GameState) -> Vec<DrawCommand>>(b"update_and_draw\0")
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "Could not load `update_and_draw` function from GameLib: {}",
-                        error
-                    )
-                });
-            f(input, game_state)
-        }
-    }
-
-    pub fn new(lib_path: &str, lib_name: &str) -> GameLib {
-        GameLib::load(0, lib_path, lib_name)
-    }
-
-    pub fn needs_reloading(&mut self) -> bool {
-        let (file_path, _, _) =
-            GameLib::construct_paths(self.copy_counter, &self.lib_path, &self.lib_name);
-
-        if let Ok(Ok(last_modified_time)) =
-            std::fs::metadata(&file_path).map(|metadata| metadata.modified())
-        {
-            // NOTE: We do not set `self.last_modified_time` here because we might call this
-            //       function multiple times and want the same result everytime until we reload
-            last_modified_time > self.last_modified_time
-        } else {
-            false
-        }
-    }
-
-    pub fn reload(self) -> GameLib {
-        let lib_path = self.lib_path.clone();
-        let lib_name = self.lib_name.clone();
-        let mut copy_counter = self.copy_counter;
-
-        if GameLib::copy_lib(copy_counter, &lib_path, &lib_name).is_err() {
-            // NOTE: It can happen (even multiple times) that we fail to copy the library while
-            //       it is being recompiled/updated. This is OK as we can just retry the next time.
-            return self;
-        }
-
-        copy_counter += 1;
-        drop(self);
-        GameLib::load(copy_counter, &lib_path, &lib_name)
-    }
-
-    fn load(mut copy_counter: usize, lib_path: &str, lib_name: &str) -> GameLib {
-        GameLib::copy_lib(copy_counter, lib_path, lib_name)
-            .unwrap_or_else(|error| panic!("Error while copying: {}", error));
-        let (file_path, _, copy_file_path) =
-            GameLib::construct_paths(copy_counter, lib_path, lib_name);
-        copy_counter += 1;
-
-        // NOTE: Loading from a copy is necessary on MS Windows due to write protection issues
-        let lib = Library::new(&copy_file_path).unwrap_or_else(|error| {
-            panic!("Failed to load library {} : {}", copy_file_path, error)
-        });
-
-        let last_modified_time = std::fs::metadata(&file_path)
-            .unwrap_or_else(|error| {
-                panic!("Cannot open file {} to read metadata: {}", file_path, error)
-            })
-            .modified()
-            .unwrap_or_else(|error| {
-                panic!("Cannot read metadata of file {}: {}", file_path, error)
-            });
-
-        info!("Game lib reloaded");
-        GameLib {
-            lib,
-            lib_path: String::from(lib_path),
-            lib_name: String::from(lib_name),
-            last_modified_time,
-            copy_counter,
-        }
-    }
-
-    /// Creates temp folder (if necessary) and copies our lib into it
-    fn copy_lib(
-        copy_counter: usize,
-        lib_path: &str,
-        lib_name: &str,
-    ) -> Result<u64, std::io::Error> {
-        // Construct necessary the file paths
-        let (file_path, copy_path, copy_file_path) =
-            GameLib::construct_paths(copy_counter, lib_path, lib_name);
-
-        std::fs::create_dir_all(&copy_path)
-            .unwrap_or_else(|error| panic!("Cannot create dir {}: {}", copy_path, error));
-
-        // NOTE: Copy may fail while the library being rebuild
-        let copy_result = std::fs::copy(&file_path, &copy_file_path);
-        if let Err(ref error) = copy_result {
-            warn!(
-                "Cannot copy file {} to {}: {}",
-                file_path, copy_file_path, error
-            )
-        }
-        copy_result
-    }
-
-    fn construct_paths(
-        copy_counter: usize,
-        lib_path: &str,
-        lib_name: &str,
-    ) -> (String, String, String) {
-        let file_path = String::from(lib_path) + &GameLib::lib_name_to_file_name(lib_name);
-        let copy_path = String::from(lib_path) + "libcopies/";
-        let copy_file_path = copy_path.clone()
-            + &GameLib::lib_name_to_file_name(
-                &(String::from(lib_name) + &copy_counter.to_string()),
-            );
-
-        (file_path, copy_path, copy_file_path)
-    }
-
-    #[cfg(target_os = "windows")]
-    fn lib_name_to_file_name(lib_name: &str) -> String {
-        format!("{}.dll", lib_name)
-    }
-    #[cfg(target_os = "linux")]
-    fn lib_name_to_file_name(lib_name: &str) -> String {
-        format!("lib{}.so", lib_name)
     }
 }
