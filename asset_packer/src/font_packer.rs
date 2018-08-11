@@ -29,14 +29,7 @@ pub fn pack_font(
     do_draw_borders: bool,
     show_debug_colors: bool,
 ) -> Result<(), Error> {
-    let font_filename = font_filepath
-        .file_name()
-        .ok_or(failure::err_msg(format!(
-            "Could not retrieve filename from path {}",
-            font_filepath.display()
-        )))?
-        .to_string_lossy()
-        .into_owned();
+    let font_filename = filepath_to_filename_string(font_filepath)?;
     debug!("Packing font: {}", &font_filename);
 
     // Define input and output file-paths
@@ -93,7 +86,6 @@ pub fn pack_font(
         image_width as f32,
         image_height as f32,
         first_code_point,
-        last_code_point,
     ).context(format!(
         "Could not write metadata '{}'",
         meta_filepath.display()
@@ -191,7 +183,6 @@ fn write_metadata(
     image_width: f32,
     image_height: f32,
     first_code_point: u8,
-    last_code_point: u8,
 ) -> Result<(), Error> {
     let mut meta_file = File::create(meta_filepath).context(format!(
         "Could not create file '{}'",
@@ -201,38 +192,40 @@ fn write_metadata(
     let font_header = FontHeader {
         num_glyphs: glyph_data.len(),
         first_code_point,
-        last_code_point,
     };
-    let encoded_header = serialize(&font_header).context("Could not encode font metadata header")?;
+    let sprites: Vec<_> = glyph_data
+        .iter()
+        .map(|data| {
+            let rect = data.outer_rect;
+            let vertex_bounds = Bounds {
+                left: 0.0,
+                right: rect.width as f32,
+                bottom: 0.0,
+                top: rect.height as f32,
+            };
+            let uv_bounds = Bounds {
+                left: rect.x as f32 / image_width,
+                right: (rect.x + rect.width) as f32 / image_width,
+                bottom: rect.y as f32 / image_height,
+                top: (rect.y + rect.height) as f32 / image_height,
+            };
+            Sprite {
+                vertex_bounds,
+                uv_bounds,
+            }
+        })
+        .collect();
 
+    let encoded_header = serialize(&font_header).context("Could not encode font metadata header")?;
     meta_file
         .write_all(&encoded_header)
         .context("Could not write font metadata header")?;
 
-    // TODO(JaSc): Just serialize a vector of sprites here
-    for data in glyph_data {
-        let rect = data.outer_rect;
-        let vertex_bounds = Bounds {
-            left: 0.0,
-            right: rect.width as f32,
-            bottom: 0.0,
-            top: rect.height as f32,
-        };
-        let uv_bounds = Bounds {
-            left: rect.x as f32 / image_width,
-            right: (rect.x + rect.width) as f32 / image_width,
-            bottom: rect.y as f32 / image_height,
-            top: (rect.y + rect.height) as f32 / image_height,
-        };
-        let sprite = Sprite {
-            vertex_bounds,
-            uv_bounds,
-        };
-        let encoded_sprite = serialize(&sprite).context("Could not encode glyph metadata")?;
-        meta_file
-            .write_all(&encoded_sprite)
-            .context("Could not write glyph metadata")?;
-    }
+    let encoded_sprites = serialize(&sprites).context("Could not encode glyph metadata")?;
+    meta_file
+        .write_all(&encoded_sprites)
+        .context("Could not write glyph metadata")?;
+
     Ok(())
 }
 

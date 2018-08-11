@@ -6,6 +6,9 @@ use image::Rgba;
 use rect_packer::Rect;
 use walkdir::WalkDir;
 
+use failure;
+use failure::Error;
+
 pub const ASSETS_DIR: &str = "assets";
 pub const DATA_DIR: &str = "data";
 pub const FONTS_DIR: &str = "fonts";
@@ -29,7 +32,23 @@ pub struct Bounds {
 pub struct FontHeader {
     pub num_glyphs: usize,
     pub first_code_point: u8,
-    pub last_code_point: u8,
+}
+
+pub fn filepath_to_filename_string(filepath: &PathBuf) -> Result<String, Error> {
+    let filename = filepath
+        .file_name()
+        .ok_or(failure::err_msg(format!(
+            "Could not retrieve filename from path {}",
+            filepath.display()
+        )))?
+        .to_str()
+        .ok_or(failure::err_msg(format!(
+            "Could not convert filename to string {}",
+            filepath.display()
+        )))?
+        .to_owned();
+
+    Ok(filename)
 }
 
 pub fn all_files_with_extension(root_folder: &str, extension: &str) -> Vec<PathBuf> {
