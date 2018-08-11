@@ -19,6 +19,7 @@ BACKLOG(JaSc):
     x Debug macro to print a variable and it's name quickly
     - Be able to conveniently do debug printing on screen
     - Moving camera system
+    - Aseprite image parser and converter
     - Texture array of atlases implementation
     - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
     - Gamepad input
@@ -43,7 +44,7 @@ use game_lib::{
     Vec2, Vertex, VertexIndex,
 };
 
-pub mod game_interface;
+mod game_interface;
 use game_interface::GameLib;
 use std::collections::HashMap;
 
@@ -334,11 +335,10 @@ fn main() {
         //       cursor world-position later.
         // Example:
         // If we transform canvas cursor pixel-position (2,0) to its world position and back to its
-        // canvas pixel-position we get (1.9999981, 0.0). If we would floor this coordinate we would
-        // get (1.0, 0.0) which would be wrong. Adding 0.5 gives us a correct flooring result.
+        // canvas pixel-position we get (1.9999981, 0.0). If we would pixel-snap this coordinate
+        // (effectively flooring it), we would get (1.0, 0.0) which would be wrong.
+        // Adding 0.5 gives us a correct flooring result.
         //
-        // TODO(JaSc): Evaluate if we could use f32::round in the pixel-snap function
-        //             instead of f32::floor.
         let canvas_cursor_pos =
             rc.screen_coord_to_canvas_coord(screen_cursor_pos) + Vec2::new(0.5, 0.5);
         let canvas_cursor_pos_relative = canvas_cursor_pos / rc.canvas_rect().dim;
