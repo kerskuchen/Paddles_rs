@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 pub const ASSETS_DIR: &str = "assets";
 pub const DATA_DIR: &str = "data";
 pub const FONTS_DIR: &str = "fonts";
+pub const IMAGES_DIR: &str = "images";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Sprite {
@@ -48,27 +49,89 @@ pub fn all_files_with_extension(root_folder: &str, extension: &str) -> Vec<PathB
         .collect()
 }
 
-pub fn clear_image(
-    image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
-    fill_color: [u8; 4],
-) {
-    let rect = Rect::new(0, 0, image.width() as i32, image.height() as i32);
-    fill_rect(image, rect, fill_color);
+pub type Image = image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>;
+
+pub trait ImageHelper {
+    fn clear(&mut self, fill_color: [u8; 4]);
+    fn draw_rect(&mut self, rect: Rect, border_color: [u8; 4]);
+    fn fill_rect(&mut self, rect: Rect, fill_color: [u8; 4]);
+    fn copy_region(
+        source_image: &mut Image,
+        source_region: Rect,
+        dest_image: &mut Image,
+        dest_region: Rect,
+    );
 }
 
-pub fn fill_rect(
-    image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
-    rect: Rect,
-    fill_color: [u8; 4],
-) {
-    assert!(rect.x >= 0);
-    assert!(rect.y >= 0);
-    assert!(rect.x + rect.width <= image.width() as i32);
-    assert!(rect.y + rect.height <= image.height() as i32);
+impl ImageHelper for Image {
+    fn clear(&mut self, fill_color: [u8; 4]) {
+        let rect = Rect::new(0, 0, self.width() as i32, self.height() as i32);
+        self.fill_rect(rect, fill_color);
+    }
 
-    for y in rect.y..(rect.y + rect.height) {
-        for x in rect.x..(rect.x + rect.width) {
-            image.put_pixel(x as u32, y as u32, Rgba { data: fill_color })
+    fn draw_rect(&mut self, rect: Rect, border_color: [u8; 4]) {
+        assert!(rect.x >= 0);
+        assert!(rect.y >= 0);
+        assert!(rect.x + rect.width <= self.width() as i32);
+        assert!(rect.y + rect.height <= self.height() as i32);
+
+        for y in rect.y..(rect.y + rect.height) {
+            for x in rect.x..(rect.x + rect.width) {
+                if x == rect.x
+                    || y == rect.y
+                    || x == (rect.x + rect.width - 1)
+                    || y == (rect.y + rect.height - 1)
+                {
+                    self.put_pixel(x as u32, y as u32, Rgba { data: border_color })
+                }
+            }
+        }
+    }
+
+    fn fill_rect(&mut self, rect: Rect, fill_color: [u8; 4]) {
+        assert!(rect.x >= 0);
+        assert!(rect.y >= 0);
+        assert!(rect.x + rect.width <= self.width() as i32);
+        assert!(rect.y + rect.height <= self.height() as i32);
+
+        for y in rect.y..(rect.y + rect.height) {
+            for x in rect.x..(rect.x + rect.width) {
+                self.put_pixel(x as u32, y as u32, Rgba { data: fill_color })
+            }
+        }
+    }
+
+    fn copy_region(
+        source_image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
+        source_region: Rect,
+        dest_image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
+        dest_region: Rect,
+    ) {
+        assert!(source_region.width == dest_region.width);
+        assert!(source_region.height == dest_region.height);
+
+        assert!(source_region.x >= 0);
+        assert!(source_region.y >= 0);
+        assert!(source_region.x + source_region.width <= source_image.width() as i32);
+        assert!(source_region.y + source_region.height <= source_image.height() as i32);
+
+        assert!(dest_region.x >= 0);
+        assert!(dest_region.y >= 0);
+        assert!(dest_region.x + dest_region.width <= dest_image.width() as i32);
+        assert!(dest_region.y + dest_region.height <= dest_image.height() as i32);
+
+        for y in 0..source_region.height {
+            for x in 0..source_region.width {
+                let source_color = source_image
+                    .get_pixel((x + source_region.x) as u32, (y + source_region.y) as u32)
+                    .data;
+
+                dest_image.put_pixel(
+                    (x + dest_region.x) as u32,
+                    (y + dest_region.y) as u32,
+                    Rgba { data: source_color },
+                )
+            }
         }
     }
 }

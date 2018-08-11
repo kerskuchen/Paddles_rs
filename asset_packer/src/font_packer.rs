@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use bincode::serialize;
 use failure;
 use failure::{Error, ResultExt};
-use image;
 use image::{DynamicImage, Rgba};
 use rand::prelude::*;
 use rect_packer::{DensePacker, Rect};
@@ -27,7 +26,7 @@ struct GlyphData<'a> {
 pub fn pack_font(
     font_filepath: &PathBuf,
     font_height: f32,
-    do_draw_border: bool,
+    do_draw_borders: bool,
     show_debug_colors: bool,
 ) -> Result<(), Error> {
     let font_filename = font_filepath
@@ -54,7 +53,7 @@ pub fn pack_font(
         .context(format!("Could not create dir '{}'", output_dir.display()))?;
 
     // Configuration
-    let padding = if do_draw_border { 1 } else { 0 };
+    let padding = if do_draw_borders { 1 } else { 0 };
     let first_code_point: u8 = 32;
     let last_code_point: u8 = 126;
 
@@ -79,11 +78,12 @@ pub fn pack_font(
     let code_points: Vec<char> = (first_code_point..=last_code_point)
         .map(|byte| byte as char)
         .collect();
-    let mut packer = DensePacker::new(96, 70);
-    let glyph_data: Vec<_> = code_points
+    let mut packer = DensePacker::new(128, 128);
+    let glyph_data = code_points
         .iter()
         .map(|&code_point| pack_glyph(&font, &mut packer, code_point, font_height, padding))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .context("Could not pack some glyphs")?;
     let (image_width, image_height) = packer.size();
 
     // Write font and glyph metadata
@@ -104,7 +104,7 @@ pub fn pack_font(
         image_width as u32,
         image_height as u32,
         &glyph_data,
-        do_draw_border,
+        do_draw_borders,
         padding,
         show_debug_colors,
         &font_filename,
@@ -114,7 +114,7 @@ pub fn pack_font(
         texture_filepath.display()
     ))?;
 
-    info!("Succesfully packed font: {}", font_filename);
+    info!("Succesfully packed font: '{}'", font_filename);
     Ok(())
 }
 
@@ -124,7 +124,7 @@ fn pack_glyph<'a>(
     code_point: char,
     font_height: f32,
     padding: i32,
-) -> GlyphData<'a> {
+) -> Result<GlyphData<'a>, Error> {
     // Font metrics
     let scale = Scale::uniform(font_height);
     let metrics = font.v_metrics(scale);
@@ -162,7 +162,7 @@ fn pack_glyph<'a>(
         // NOTE: If we ever reach here, it means we need to overhaul our font rendering to
         //       incorporate negative horizontal offsets. It would mean that the left-most
         //       pixel of the glyph is outside of the left outer_rect boundary
-        "The x offset of code-point {} was less than zero ({})",
+        "The x offset of code-point '{}' was less than zero ({})",
         code_point,
         inner_rect.x
     );
@@ -172,19 +172,17 @@ fn pack_glyph<'a>(
     let pack_height = text_height + 2 * padding;
     let outer_rect = packer
         .pack(pack_width, pack_height, false)
-        .unwrap_or_else(|| {
-            panic!(
-                "Not enough space to pack glyph for code_point: {}",
-                code_point
-            )
-        });
+        .ok_or(failure::err_msg(format!(
+            "Not enough space to pack glyph for code_point: '{}'",
+            code_point
+        )))?;
 
-    GlyphData {
+    Ok(GlyphData {
         code_point,
         glyph,
         inner_rect,
         outer_rect,
-    }
+    })
 }
 
 fn write_metadata(
@@ -211,6 +209,7 @@ fn write_metadata(
         .write_all(&encoded_header)
         .context("Could not write font metadata header")?;
 
+    // TODO(JaSc): Just serialize a vector of sprites here
     for data in glyph_data {
         let rect = data.outer_rect;
         let vertex_bounds = Bounds {
@@ -241,14 +240,14 @@ fn create_font_atlas_texture(
     image_width: u32,
     image_height: u32,
     glyph_data: &[GlyphData],
-    do_draw_border: bool,
+    do_draw_borders: bool,
     padding: i32,
     show_debug_colors: bool,
     font_filename: &str,
-) -> image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>> {
+) -> Image {
     let mut image = DynamicImage::new_rgba8(image_width, image_height).to_rgba();
     if show_debug_colors {
-        clear_image(&mut image, [123, 200, 250, 100]);
+        image.clear([123, 200, 250, 100]);
     }
 
     // Draw glyphs
@@ -261,7 +260,7 @@ fn create_font_atlas_texture(
         if show_debug_colors {
             // Visualize outer rect
             let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 125];
-            fill_rect(&mut image, outer_rect, rand_color);
+            image.fill_rect(outer_rect, rand_color);
 
             // Visualize inner rect
             let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 255];
@@ -271,7 +270,7 @@ fn create_font_atlas_texture(
                 width: inner_rect.width + padding,
                 height: inner_rect.height + padding,
             };
-            fill_rect(&mut image, inner_rect_with_padding, rand_color);
+            image.fill_rect(inner_rect_with_padding, rand_color);
         }
 
         // Draw actual glyphs
@@ -299,17 +298,13 @@ fn create_font_atlas_texture(
             }
         });
     }
-    if do_draw_border {
-        draw_border(&mut image, COLOR_GLYPH, COLOR_BORDER);
+    if do_draw_borders {
+        draw_glyph_borders(&mut image, COLOR_GLYPH, COLOR_BORDER);
     }
     image
 }
 
-fn draw_border(
-    image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
-    color_glyph: [u8; 4],
-    color_border: [u8; 4],
-) {
+fn draw_glyph_borders(image: &mut Image, color_glyph: [u8; 4], color_border: [u8; 4]) {
     // Create a border around every glyph in the image
     for y in 0..image.height() {
         for x in 0..image.width() {

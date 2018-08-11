@@ -61,7 +61,8 @@ fn main() -> Result<(), Error> {
     let image_filelist = common::all_files_with_extension(common::ASSETS_DIR, "png");
     trace!("Image list: {:?}", image_filelist);
 
-    // TODO(JaSc): Actually pack the images
+    image_packer::pack_images(&image_filelist, show_debug_colors)
+        .context("Could not pack atlases")?;
 
     info!("Successfully packed images");
 
