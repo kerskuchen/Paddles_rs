@@ -1,5 +1,8 @@
 use math::{Color, Mat4, Point, Rect};
+use rgb;
+pub use rgb::ComponentBytes;
 
+pub type Pixel = rgb::RGBA8;
 pub type VertexIndex = u16;
 
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +31,28 @@ impl Texture {
     }
 }
 
+// TODO(JaSc): Evaluate where Sprite and Bounds will be moved to and what else they need
+// TODO(JaSc): Evaluate if we even need a FontHeader at the moment
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Sprite {
+    pub vertex_bounds: Bounds,
+    pub uv_bounds: Bounds,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Bounds {
+    pub left: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub top: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FontHeader {
+    pub num_glyphs: usize,
+    pub first_code_point: u8,
+}
+
 //==================================================================================================
 // DrawCommand
 //==================================================================================================
@@ -37,7 +62,7 @@ impl Texture {
 pub enum DrawCommand {
     UploadTexture {
         texture: Texture,
-        pixels: Vec<u8>,
+        pixels: Vec<Pixel>,
     },
     DrawLines {
         transform: Mat4,

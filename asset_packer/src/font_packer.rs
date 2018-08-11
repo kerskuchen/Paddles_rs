@@ -1,4 +1,5 @@
 use common::*;
+use game_lib::{Bounds, FontHeader, Sprite};
 
 use std;
 use std::fs::File;

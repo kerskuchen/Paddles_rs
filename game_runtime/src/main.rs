@@ -40,8 +40,8 @@ extern crate rand;
 extern crate game_lib;
 
 use game_lib::{
-    Color, DrawCommand, GameInput, Mat4, Mat4Helper, Point, Quad, Rect, SquareMatrix, Texture,
-    Vec2, Vertex, VertexIndex,
+    Color, ComponentBytes, DrawCommand, GameInput, Mat4, Mat4Helper, Pixel, Point, Quad, Rect,
+    SquareMatrix, Texture, Vec2, Vertex, VertexIndex,
 };
 
 mod game_interface;
@@ -354,7 +354,7 @@ fn main() {
 
         for draw_command in draw_commands {
             match draw_command {
-                DrawCommand::UploadTexture { texture, pixels } => rc.add_texture(texture, &pixels),
+                DrawCommand::UploadTexture { texture, pixels } => rc.add_texture(texture, pixels),
                 DrawCommand::DrawFilled {
                     transform,
                     vertices,
@@ -694,13 +694,17 @@ where
         );
     }
 
-    fn add_texture(&mut self, texture: Texture, pixels: &[u8]) {
+    fn add_texture(&mut self, texture: Texture, pixels: Vec<Pixel>) {
         use gfx::format::Rgba8;
         let kind =
             gfx::texture::Kind::D2(texture.width, texture.height, gfx::texture::AaMode::Single);
         let (_, view) = self
             .factory
-            .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&pixels])
+            .create_texture_immutable_u8::<Rgba8>(
+                kind,
+                gfx::texture::Mipmap::Provided,
+                &[(&pixels).as_bytes()],
+            )
             .unwrap();
 
         self.textures.insert(texture, view);

@@ -1,4 +1,5 @@
 use common::*;
+use game_lib::{Bounds, Sprite};
 
 use std;
 use std::fs::File;
@@ -132,7 +133,7 @@ fn write_metadata(
         })
         .collect();
 
-    let sprite_mapping: Vec<_> = sprite_data
+    let sprite_mapping: Vec<(usize, String)> = sprite_data
         .into_iter()
         .enumerate()
         .map(|(index, data)| (index, data.filepath))

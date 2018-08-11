@@ -14,26 +14,6 @@ pub const DATA_DIR: &str = "data";
 pub const FONTS_DIR: &str = "fonts";
 pub const IMAGES_DIR: &str = "images";
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Sprite {
-    pub vertex_bounds: Bounds,
-    pub uv_bounds: Bounds,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Bounds {
-    pub left: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub top: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FontHeader {
-    pub num_glyphs: usize,
-    pub first_code_point: u8,
-}
-
 pub fn filepath_to_filename_string(filepath: &PathBuf) -> Result<String, Error> {
     let filename = filepath
         .file_name()

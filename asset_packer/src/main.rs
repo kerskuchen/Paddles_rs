@@ -9,9 +9,8 @@ extern crate rusttype;
 extern crate log;
 extern crate fern;
 
-#[macro_use]
-extern crate serde_derive;
 extern crate bincode;
+extern crate serde;
 
 extern crate failure;
 use failure::{Error, ResultExt};

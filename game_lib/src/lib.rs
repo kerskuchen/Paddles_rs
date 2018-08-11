@@ -1,20 +1,31 @@
 pub extern crate cgmath;
-extern crate image;
+extern crate lodepng;
+extern crate rgb;
+
+#[macro_use]
+extern crate serde_derive;
+extern crate bincode;
+
+use std::fs::File;
 
 pub mod draw;
 pub mod math;
 #[macro_use]
 pub mod utility;
 
-pub use draw::{DrawCommand, LineBatch, Quad, QuadBatch, Texture, Vertex, VertexIndex};
+pub use draw::{
+    Bounds, ComponentBytes, DrawCommand, FontHeader, LineBatch, Pixel, Quad, QuadBatch, Sprite,
+    Texture, Vertex, VertexIndex,
+};
 pub use math::{
     Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2, WorldPoint,
 };
 
 pub struct GameState {
-    loaded_textures: bool,
-    texture_dummy: Texture,
-    texture_another_dummy: Texture,
+    loaded_resources: bool,
+    texture_atlas: Texture,
+    sprites: Vec<Sprite>,
+    texture_font: Texture,
     mouse_pos_screen: ScreenPoint,
     mouse_pos_world: WorldPoint,
     cam: Camera,
@@ -63,7 +74,6 @@ impl GameInput {
             mouse_button_middle: GameButton::new(),
             mouse_button_right: GameButton::new(),
             mouse_pos_screen: ScreenPoint::zero(),
-
             mouse_wheel_delta: 0,
         }
     }
@@ -78,9 +88,10 @@ impl GameInput {
 
 pub fn initialize(canvas_width: i32, canvas_height: i32) -> GameState {
     GameState {
-        loaded_textures: false,
-        texture_dummy: Texture::empty(),
-        texture_another_dummy: Texture::empty(),
+        loaded_resources: false,
+        texture_atlas: Texture::empty(),
+        sprites: Vec::new(),
+        texture_font: Texture::empty(),
         // TODO(JaSc): Fix and standardize z_near/z_far
         cam: Camera::new(canvas_width, canvas_height, -1.0, 1.0),
         mouse_pos_screen: ScreenPoint::zero(),
@@ -88,16 +99,15 @@ pub fn initialize(canvas_width: i32, canvas_height: i32) -> GameState {
     }
 }
 
-fn debug_load_texture(id: u32, file_name: &str) -> (Texture, Vec<u8>) {
-    let img = image::open(file_name).unwrap().to_rgba();
-    let (width, height) = img.dimensions();
+fn load_texture(id: u32, file_name: &str) -> (Texture, Vec<rgb::RGBA8>) {
+    let img = lodepng::decode32_file(file_name).unwrap();
     let info = Texture {
         id,
-        width: width as u16,
-        height: height as u16,
+        width: img.width as u16,
+        height: img.height as u16,
         name: String::from(file_name),
     };
-    (info, img.into_raw())
+    (info, img.buffer)
 }
 
 pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<DrawCommand> {
@@ -137,16 +147,28 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
 
     let mut draw_commands = Vec::new();
 
-    if !game_state.loaded_textures {
-        let (texture, pixels) = debug_load_texture(0, "assets/dummy.png");
-        game_state.texture_dummy = texture.clone();
+    if !game_state.loaded_resources {
+        game_state.loaded_resources = true;
+
+        // Load atlas texture and sprites
+        let (texture, pixels) = load_texture(0, "data/images/atlas.png");
+        game_state.texture_atlas = texture.clone();
         draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
 
-        let (texture, pixels) = debug_load_texture(1, "assets/another_dummy.png");
-        game_state.texture_another_dummy = texture.clone();
-        draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
+        let mut atlas_metafile =
+            File::open("data/images/atlas.tex").expect("Could not load atlas file");
+        let sprite_mapping: Vec<(usize, String)> = bincode::deserialize_from(&mut atlas_metafile)
+            .expect("Could not deserialize sprite mapping");
+        let sprites: Vec<Sprite> =
+            bincode::deserialize_from(&mut atlas_metafile).expect("Could not deserialize sprites");
 
-        game_state.loaded_textures = true;
+        dprintln!(sprite_mapping);
+        dprintln!(sprites);
+
+        // Load font
+        let (texture, pixels) = load_texture(1, "data/fonts/04B_03__.png");
+        game_state.texture_font = texture.clone();
+        draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
     }
 
     let mut line_batch = LineBatch::new();
@@ -212,17 +234,17 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     let transform = game_state.cam.proj_view_matrix();
     draw_commands.push(DrawCommand::from_quads(
         transform,
-        game_state.texture_dummy.clone(),
+        game_state.texture_atlas.clone(),
         textured_batch,
     ));
     draw_commands.push(DrawCommand::from_quads(
         transform,
-        game_state.texture_another_dummy.clone(),
+        game_state.texture_atlas.clone(),
         plain_batch,
     ));
     draw_commands.push(DrawCommand::from_lines(
         transform,
-        game_state.texture_dummy.clone(),
+        game_state.texture_atlas.clone(),
         line_batch,
     ));
 

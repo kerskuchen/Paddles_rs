@@ -2,8 +2,6 @@ pub use cgmath;
 pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
-use cgmath::Vector3;
-
 const EPSILON: f32 = 0.000001;
 
 pub type Point = Vec2;
@@ -428,6 +426,8 @@ impl Rect {
 // Camera and coordinate systems
 //==================================================================================================
 //
+
+use cgmath::Vector3;
 pub const PIXELS_PER_UNIT: f32 = 16 as f32;
 pub const PIXEL_SIZE: f32 = 1.0 / PIXELS_PER_UNIT;
 
