@@ -1,5 +1,5 @@
 use common::*;
-use game_lib::{Bounds, FontHeader, Sprite};
+use game_lib::{Bounds, Sprite};
 
 use std;
 use std::fs::File;
@@ -16,6 +16,8 @@ use rusttype::{point, Font, PositionedGlyph, Scale};
 
 const COLOR_GLYPH: [u8; 4] = [255, 255, 255, 255];
 const COLOR_BORDER: [u8; 4] = [0, 0, 0, 255];
+const FIRST_VISIBLE_ASCII_CODE_POINT: u8 = 32;
+const LAST_ASCII_CODE_POINT: u8 = 126;
 
 struct GlyphData<'a> {
     code_point: char,
@@ -48,8 +50,7 @@ pub fn pack_font(
 
     // Configuration
     let padding = if do_draw_borders { 1 } else { 0 };
-    let first_code_point: u8 = 32;
-    let last_code_point: u8 = 126;
+    let last_code_point: u8 = LAST_ASCII_CODE_POINT;
 
     // Create font from binary data
     let font_data = {
@@ -69,7 +70,7 @@ pub fn pack_font(
     let font = Font::from_bytes(&font_data).context("Could not construct front from bytes")?;
 
     // Rectangle pack glyphs
-    let code_points: Vec<char> = (first_code_point..=last_code_point)
+    let code_points: Vec<char> = (FIRST_VISIBLE_ASCII_CODE_POINT..=last_code_point)
         .map(|byte| byte as char)
         .collect();
     let mut packer = DensePacker::new(128, 128);
@@ -86,7 +87,6 @@ pub fn pack_font(
         &glyph_data,
         image_width as f32,
         image_height as f32,
-        first_code_point,
     ).context(format!(
         "Could not write metadata '{}'",
         meta_filepath.display()
@@ -183,18 +183,13 @@ fn write_metadata(
     glyph_data: &[GlyphData],
     image_width: f32,
     image_height: f32,
-    first_code_point: u8,
 ) -> Result<(), Error> {
     let mut meta_file = File::create(meta_filepath).context(format!(
         "Could not create file '{}'",
         meta_filepath.display()
     ))?;
 
-    let font_header = FontHeader {
-        num_glyphs: glyph_data.len(),
-        first_code_point,
-    };
-    let sprites: Vec<_> = glyph_data
+    let mut sprites: Vec<_> = glyph_data
         .iter()
         .map(|data| {
             let rect = data.outer_rect;
@@ -217,10 +212,25 @@ fn write_metadata(
         })
         .collect();
 
-    let encoded_header = serialize(&font_header).context("Could not encode font metadata header")?;
-    meta_file
-        .write_all(&encoded_header)
-        .context("Could not write font metadata header")?;
+    let sprites = {
+        assert_eq!(FIRST_VISIBLE_ASCII_CODE_POINT, 32);
+        // We prepend `FIRST_VISIBLE_ASCII_CODE_POINT = 32` number of empty sprites into sprite
+        // vector such that the vector index of the code points correspond to their respective
+        // ASCII index.
+        //
+        // Example:
+        // Before prepending we have i.e. 'A' (which is 65 in ASCII) at vector index 33.
+        // After prepending 32 empty codepoints into the vector we have 'A' at vector index 65,
+        // which is now equal to its ASCII-index.
+        let num_code_points_before_first_code_point = (FIRST_VISIBLE_ASCII_CODE_POINT as usize) - 1;
+        let index_for_space_code_point = (' ' as u8 - FIRST_VISIBLE_ASCII_CODE_POINT) as usize;
+        let space_code_point_sprite = sprites[index_for_space_code_point];
+        let mut sprites_till_first_codepoint: Vec<_> = std::iter::repeat(space_code_point_sprite)
+            .take(num_code_points_before_first_code_point)
+            .collect();
+        sprites_till_first_codepoint.append(&mut sprites);
+        sprites_till_first_codepoint
+    };
 
     let encoded_sprites = serialize(&sprites).context("Could not encode glyph metadata")?;
     meta_file

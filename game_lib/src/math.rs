@@ -19,6 +19,10 @@ pub fn is_effectively_zero(x: f32) -> bool {
     f32::abs(x) < EPSILON
 }
 
+pub fn is_positive(x: f32) -> bool {
+    x > EPSILON
+}
+
 //==================================================================================================
 // Clamping
 //==================================================================================================
@@ -301,14 +305,6 @@ pub struct Rect {
     pub dim: Vec2,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Bounds {
-    pub left: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub top: f32,
-}
-
 impl Rect {
     pub fn zero() -> Rect {
         Rect {
@@ -403,7 +399,7 @@ impl Rect {
         Rect::from_point_dimension(offset_centered, self.dim)
     }
 
-    pub fn bounds(&self) -> Bounds {
+    pub fn to_bounds(&self) -> Bounds {
         Bounds {
             left: self.pos.x,
             right: self.pos.x + self.dim.x,
@@ -412,7 +408,7 @@ impl Rect {
         }
     }
 
-    pub fn bounds_centered(&self) -> Bounds {
+    pub fn to_bounds_centered(&self) -> Bounds {
         Bounds {
             left: self.pos.x - 0.5 * self.dim.x,
             right: self.pos.x + 0.5 * self.dim.x,
@@ -422,10 +418,41 @@ impl Rect {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Bounds {
+    pub left: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub top: f32,
+}
+
+impl Bounds {
+    pub fn to_rect(&self) -> Rect {
+        Rect {
+            pos: Point::new(self.left, self.right),
+            dim: Vec2::new(self.right - self.left, self.top - self.bottom),
+        }
+    }
+
+    pub fn scaled_from_origin(self, scale: Vec2) -> Bounds {
+        debug_assert!(is_positive(scale.x));
+        debug_assert!(is_positive(scale.y));
+        Bounds {
+            left: self.left * scale.x,
+            right: self.right * scale.x,
+            bottom: self.bottom * scale.y,
+            top: self.top * scale.y,
+        }
+    }
+}
+
 //==================================================================================================
 // Camera and coordinate systems
 //==================================================================================================
 //
+
+// TODO(JaSc): Evaluate if it would be easier to just use pixel coordinates for world/screen
+//             especially with respect to pixel snapping, camera jittering and debuggability
 
 use cgmath::Vector3;
 pub const PIXELS_PER_UNIT: f32 = 16 as f32;
@@ -602,10 +629,10 @@ impl Camera {
         proj_mat * view_mat
     }
 
-    /// Returns the [`Bounds`] of the camera view in world-space
+    /// Returns the [`Bounto_bounds_centeredera view in world-space
     pub fn bounds_worldspace(&self) -> Bounds {
         let world_rect_zoomed = Rect::from_point_dimension(self.world_rect.pos, self.dim_zoomed());
-        world_rect_zoomed.bounds_centered()
+        world_rect_zoomed.to_bounds_centered()
     }
 }
 

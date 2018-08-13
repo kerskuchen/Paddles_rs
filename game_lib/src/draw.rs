@@ -1,4 +1,4 @@
-use math::{Color, Mat4, Point, Rect};
+use math::{Bounds, Color, Mat4, Point, Rect, Vec2, WorldPoint};
 use rgb;
 pub use rgb::ComponentBytes;
 
@@ -29,28 +29,6 @@ impl Texture {
             name: String::from(""),
         }
     }
-}
-
-// TODO(JaSc): Evaluate where Sprite and Bounds will be moved to and what else they need
-// TODO(JaSc): Evaluate if we even need a FontHeader at the moment
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Sprite {
-    pub vertex_bounds: Bounds,
-    pub uv_bounds: Bounds,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Bounds {
-    pub left: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub top: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FontHeader {
-    pub num_glyphs: usize,
-    pub first_code_point: u8,
 }
 
 //==================================================================================================
@@ -127,6 +105,11 @@ impl QuadBatch {
             .extend_from_slice(&quad.into_vertices_centered());
     }
 
+    pub fn push_sprite(&mut self, sprite: Sprite, pos: WorldPoint, depth: f32, color: Color) {
+        self.vertices
+            .extend_from_slice(&sprite.into_vertices(pos, depth, color));
+    }
+
     pub fn into_vertices_indices(self) -> (Vec<Vertex>, Vec<VertexIndex>) {
         let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
         let num_indices = num_quads * QuadBatch::INDICES_PER_QUAD;
@@ -194,6 +177,56 @@ impl LineBatch {
 }
 
 //==================================================================================================
+// Sprite
+//==================================================================================================
+//
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct Sprite {
+    pub vertex_bounds: Bounds,
+    pub uv_bounds: Bounds,
+}
+
+impl Sprite {
+    pub fn with_scale(self, scale: Vec2) -> Sprite {
+        Sprite {
+            vertex_bounds: self.vertex_bounds.scaled_from_origin(scale),
+            uv_bounds: self.uv_bounds,
+        }
+    }
+
+    pub fn into_vertices(self, pos: WorldPoint, depth: f32, color: Color) -> [Vertex; 4] {
+        let vertex = self.vertex_bounds;
+        let uv = self.uv_bounds;
+        let color = color.into();
+
+        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
+        [
+            Vertex {
+                pos: [pos.x + vertex.left, pos.y + vertex.bottom, depth, 1.0],
+                uv: [uv.left, uv.top],
+                color,
+            },
+            Vertex {
+                pos: [pos.x + vertex.right, pos.y + vertex.bottom, depth, 1.0],
+                uv: [uv.right, uv.top],
+                color,
+            },
+            Vertex {
+                pos: [pos.x + vertex.right, pos.y + vertex.top, depth, 1.0],
+                uv: [uv.right, uv.bottom],
+                color,
+            },
+            Vertex {
+                pos: [pos.x + vertex.left, pos.y + vertex.top, depth, 1.0],
+                uv: [uv.left, uv.bottom],
+                color,
+            },
+        ]
+    }
+}
+
+//==================================================================================================
 // Quad
 //==================================================================================================
 //
@@ -210,7 +243,7 @@ impl Quad {
     }
 
     pub fn into_vertices(self) -> [Vertex; 4] {
-        let bounds = self.rect.bounds();
+        let bounds = self.rect.to_bounds();
         let color = self.color.into();
         let depth = self.depth;
 
@@ -240,7 +273,7 @@ impl Quad {
     }
 
     pub fn into_vertices_centered(self) -> [Vertex; 4] {
-        let bounds = self.rect.bounds_centered();
+        let bounds = self.rect.to_bounds_centered();
         let color = self.color.into();
         let depth = self.depth;
 

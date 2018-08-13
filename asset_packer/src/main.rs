@@ -43,7 +43,7 @@ fn main() -> Result<(), Error> {
     let font_height = 8.0;
     let show_debug_colors = true;
     let do_draw_border = true;
-    let font_filelist = common::all_files_with_extension(common::ASSETS_DIR, "ttf");
+    let font_filelist = common::collect_all_files_with_extension(common::ASSETS_DIR, "ttf");
 
     trace!("Font list: {:?}", font_filelist);
     for font_filepath in font_filelist {
@@ -57,7 +57,7 @@ fn main() -> Result<(), Error> {
     info!("Successfully packed fonts");
 
     debug!("Packing images");
-    let image_filelist = common::all_files_with_extension(common::ASSETS_DIR, "png");
+    let image_filelist = common::collect_all_files_with_extension(common::ASSETS_DIR, "png");
     trace!("Image list: {:?}", image_filelist);
 
     image_packer::pack_images(&image_filelist, show_debug_colors)

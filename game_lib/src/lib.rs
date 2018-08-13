@@ -6,6 +6,7 @@ extern crate rgb;
 extern crate serde_derive;
 extern crate bincode;
 
+use std::collections::HashMap;
 use std::fs::File;
 
 pub mod draw;
@@ -14,18 +15,20 @@ pub mod math;
 pub mod utility;
 
 pub use draw::{
-    Bounds, ComponentBytes, DrawCommand, FontHeader, LineBatch, Pixel, Quad, QuadBatch, Sprite,
-    Texture, Vertex, VertexIndex,
+    ComponentBytes, DrawCommand, LineBatch, Pixel, Quad, QuadBatch, Sprite, Texture, Vertex,
+    VertexIndex,
 };
 pub use math::{
-    Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2, WorldPoint,
+    Bounds, Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2,
+    WorldPoint, PIXELS_PER_UNIT, PIXEL_SIZE,
 };
 
 pub struct GameState {
     loaded_resources: bool,
     texture_atlas: Texture,
-    sprites: Vec<Sprite>,
     texture_font: Texture,
+    sprite_map: HashMap<String, Sprite>,
+    glyph_sprites: Vec<Sprite>,
     mouse_pos_screen: ScreenPoint,
     mouse_pos_world: WorldPoint,
     cam: Camera,
@@ -90,8 +93,9 @@ pub fn initialize(canvas_width: i32, canvas_height: i32) -> GameState {
     GameState {
         loaded_resources: false,
         texture_atlas: Texture::empty(),
-        sprites: Vec::new(),
         texture_font: Texture::empty(),
+        sprite_map: HashMap::new(),
+        glyph_sprites: Vec::new(),
         // TODO(JaSc): Fix and standardize z_near/z_far
         cam: Camera::new(canvas_width, canvas_height, -1.0, 1.0),
         mouse_pos_screen: ScreenPoint::zero(),
@@ -142,11 +146,12 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Generate quads
+    // Generate draw commands
     //
 
     let mut draw_commands = Vec::new();
 
+    // Load sprites if needed
     if !game_state.loaded_resources {
         game_state.loaded_resources = true;
 
@@ -156,25 +161,25 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
         draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
 
         let mut atlas_metafile =
-            File::open("data/images/atlas.tex").expect("Could not load atlas file");
-        let sprite_mapping: Vec<(usize, String)> = bincode::deserialize_from(&mut atlas_metafile)
-            .expect("Could not deserialize sprite mapping");
-        let sprites: Vec<Sprite> =
-            bincode::deserialize_from(&mut atlas_metafile).expect("Could not deserialize sprites");
+            File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
+        game_state.sprite_map = bincode::deserialize_from(&mut atlas_metafile)
+            .expect("Could not deserialize sprite map");
 
-        dprintln!(sprite_mapping);
-        dprintln!(sprites);
-
-        // Load font
+        // Load font texture and sprites
         let (texture, pixels) = load_texture(1, "data/fonts/04B_03__.png");
         game_state.texture_font = texture.clone();
         draw_commands.push(DrawCommand::UploadTexture { texture, pixels });
+
+        let mut font_metafile =
+            File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
+        game_state.glyph_sprites = bincode::deserialize_from(&mut font_metafile)
+            .expect("Could not deserialize font glyphs");
     }
 
     let mut line_batch = LineBatch::new();
-    let mut plain_batch = QuadBatch::new();
-    let mut textured_batch = QuadBatch::new();
+    let mut fill_batch = QuadBatch::new();
 
+    // Draw line from origin to cursor position
     let line_start = WorldPoint::new(0.0, 0.0);
     let line_end = new_mouse_pos_world;
     line_batch.push_line(line_start, line_end, 0.0, Color::new(1.0, 0.0, 0.0, 1.0));
@@ -190,62 +195,47 @@ pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<Dra
     if input.mouse_button_right.is_pressed {
         cursor_color.z = 1.0;
     }
-
-    let cursor_quad = Quad::new(
-        Rect::from_point(new_mouse_pos_world, math::PIXEL_SIZE, math::PIXEL_SIZE),
+    fill_batch.push_sprite(
+        game_state.sprite_map["images/plain"].with_scale(Vec2::new(PIXEL_SIZE, PIXEL_SIZE)),
+        new_mouse_pos_world.pixel_snapped(),
         -0.1,
         cursor_color,
     );
-    plain_batch.push_quad(cursor_quad);
-    let cursor_quad = Quad::new(
-        Rect::from_point(
-            new_mouse_pos_world.pixel_snapped(),
-            math::PIXEL_SIZE,
-            math::PIXEL_SIZE,
-        ),
-        -0.1,
-        Color::new(1.0, 1.0, 1.0, 1.0),
-    );
-    plain_batch.push_quad(cursor_quad);
 
     // Grid
     let grid_dark = Color::new(0.5, 0.3, 0.0, 1.0);
     let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
-    let rect_dim = Vec2::new(1.0, 1.0);
     for x in -10..10 {
-        for dia in -10..10 {
-            let pos = Point::new((x + dia) as f32, dia as f32);
+        for diagonal in -10..10 {
+            let pos = Point::new((x + diagonal) as f32, diagonal as f32);
             if x % 2 == 0 {
-                textured_batch.push_quad(Quad::new(
-                    Rect::from_point_dimension(pos, rect_dim),
+                fill_batch.push_sprite(
+                    game_state.sprite_map["images/textured"],
+                    pos,
                     -0.2,
                     grid_dark,
-                ));
+                );
             } else {
-                plain_batch.push_quad(Quad::new(
-                    Rect::from_point_dimension(pos, rect_dim),
+                fill_batch.push_sprite(
+                    game_state.sprite_map["images/plain"],
+                    pos,
                     -0.2,
                     grid_light,
-                ));
+                );
             }
         }
     }
 
     let transform = game_state.cam.proj_view_matrix();
-    draw_commands.push(DrawCommand::from_quads(
-        transform,
-        game_state.texture_atlas.clone(),
-        textured_batch,
-    ));
-    draw_commands.push(DrawCommand::from_quads(
-        transform,
-        game_state.texture_atlas.clone(),
-        plain_batch,
-    ));
     draw_commands.push(DrawCommand::from_lines(
         transform,
         game_state.texture_atlas.clone(),
         line_batch,
+    ));
+    draw_commands.push(DrawCommand::from_quads(
+        transform,
+        game_state.texture_atlas.clone(),
+        fill_batch,
     ));
 
     draw_commands

@@ -1,7 +1,8 @@
 use common::*;
-use game_lib::{Bounds, Sprite};
+use game_lib::{Bounds, Sprite, PIXELS_PER_UNIT};
 
 use std;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::{Path, PathBuf};
@@ -46,8 +47,7 @@ pub fn pack_images(image_filelist: &[PathBuf], show_debug_colors: bool) -> Resul
     }
 
     for image_filepath in image_filelist {
-        let image_filename = filepath_to_filename_string(image_filepath)?;
-        debug!("Packing image: {}", &image_filename);
+        debug!("Packing image: '{}'", image_filepath.display());
 
         let mut source_image = image::open(image_filepath)
             .context(format!(
@@ -76,8 +76,17 @@ pub fn pack_images(image_filelist: &[PathBuf], show_debug_colors: bool) -> Resul
             atlas.draw_rect(dest_region, rand_color);
         }
 
+        let image_relative_filepath = image_filepath
+            .strip_prefix(ASSETS_DIR)
+            .context(format!(
+                "Could not strip '{}' from image path {:?}",
+                ASSETS_DIR,
+                image_filepath.display()
+            ))?
+            .to_path_buf();
+        let image_sprite_id = filepath_to_string_without_extension(&image_relative_filepath)?;
         sprite_data.push(SpriteData {
-            filepath: image_filename,
+            filepath: image_sprite_id,
             rect: dest_region,
         });
     }
@@ -110,15 +119,15 @@ fn write_metadata(
         meta_filepath.display()
     ))?;
 
-    let sprites: Vec<_> = sprite_data
-        .iter()
+    let sprite_map: HashMap<String, Sprite> = sprite_data
+        .into_iter()
         .map(|data| {
             let rect = data.rect;
             let vertex_bounds = Bounds {
                 left: 0.0,
-                right: rect.width as f32,
+                right: rect.width as f32 / PIXELS_PER_UNIT,
                 bottom: 0.0,
-                top: rect.height as f32,
+                top: rect.height as f32 / PIXELS_PER_UNIT,
             };
             let uv_bounds = Bounds {
                 left: rect.x as f32 / image_width,
@@ -126,29 +135,21 @@ fn write_metadata(
                 bottom: rect.y as f32 / image_height,
                 top: (rect.y + rect.height) as f32 / image_height,
             };
-            Sprite {
-                vertex_bounds,
-                uv_bounds,
-            }
+            (
+                data.filepath,
+                Sprite {
+                    vertex_bounds,
+                    uv_bounds,
+                },
+            )
         })
         .collect();
 
-    let sprite_mapping: Vec<(usize, String)> = sprite_data
-        .into_iter()
-        .enumerate()
-        .map(|(index, data)| (index, data.filepath))
-        .collect();
-
-    let encoded_sprite_mapping =
-        serialize(&sprite_mapping).context("Could not encode sprite mapping metadata")?;
+    let encoded_sprite_map =
+        serialize(&sprite_map).context("Could not encode sprite map metadata")?;
     meta_file
-        .write_all(&encoded_sprite_mapping)
+        .write_all(&encoded_sprite_map)
         .context("Could not write sprite mapping metadata")?;
-
-    let encoded_sprites = serialize(&sprites).context("Could not encode sprite metadata")?;
-    meta_file
-        .write_all(&encoded_sprites)
-        .context("Could not write sprite metadata")?;
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 use image;
 use image::Rgba;
@@ -14,24 +15,45 @@ pub const DATA_DIR: &str = "data";
 pub const FONTS_DIR: &str = "fonts";
 pub const IMAGES_DIR: &str = "images";
 
-pub fn filepath_to_filename_string(filepath: &PathBuf) -> Result<String, Error> {
-    let filename = filepath
+pub trait PathHelper {
+    fn to_string(&self) -> Result<String, Error>;
+}
+
+impl PathHelper for OsStr {
+    fn to_string(&self) -> Result<String, Error> {
+        Ok(self
+            .to_str()
+            .ok_or(failure::err_msg(format!(
+                "Could not convert path to string {:?}",
+                self
+            )))?
+            .to_owned())
+    }
+}
+
+pub fn filepath_to_filename_string(filepath: &Path) -> Result<String, Error> {
+    Ok(filepath
         .file_name()
         .ok_or(failure::err_msg(format!(
             "Could not retrieve filename from path {}",
             filepath.display()
         )))?
-        .to_str()
-        .ok_or(failure::err_msg(format!(
-            "Could not convert filename to string {}",
-            filepath.display()
-        )))?
-        .to_owned();
-
-    Ok(filename)
+        .to_string()?)
 }
 
-pub fn all_files_with_extension(root_folder: &str, extension: &str) -> Vec<PathBuf> {
+pub fn filepath_to_filename_string_without_extension(filepath: &Path) -> Result<String, Error> {
+    Ok(filepath_to_filename_string(&filepath.with_extension(""))?)
+}
+
+pub fn filepath_to_string_without_extension(filepath: &Path) -> Result<String, Error> {
+    Ok(filepath
+        .with_extension("")
+        .as_os_str()
+        .to_string()?
+        .replace("\\", "/"))
+}
+
+pub fn collect_all_files_with_extension(root_folder: &str, extension: &str) -> Vec<PathBuf> {
     WalkDir::new(root_folder)
         .into_iter()
         .filter_map(|maybe_entry| maybe_entry.ok())

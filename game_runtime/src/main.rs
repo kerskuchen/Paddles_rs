@@ -4,10 +4,10 @@ TODO(JaSc):
     x Render to offscreen buffer and blit to main screen
     X Static world camera 
     X Transformation mouse <-> screen <-> world 
-  - Atlas packer
+  x Atlas packer
   x Font packer
-  - Atlas textures and sprite/quad/line-batching
-  - Basic sprite loading and Bitmap font rendering (no sprite atlas yet)
+  x Atlas textures and sprite/quad/line-batching
+  - Bitmap font rendering 
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
   - Audio playback
