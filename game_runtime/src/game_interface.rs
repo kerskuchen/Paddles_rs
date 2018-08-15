@@ -18,19 +18,19 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    /// Forwards to the dynamic libraries' corresponding `initialize` function
-    pub fn initialize(&self, canvas_width: i32, canvas_heigth: i32) -> GameState {
+    /// Forwards to the dynamic libraries' corresponding `create_gamestate` function
+    pub fn create_gamestate(&self) -> GameState {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(i32, i32) -> GameState>(b"initialize\0")
+                .get::<fn() -> GameState>(b"create_gamestate\0")
                 .unwrap_or_else(|error| {
                     panic!(
-                        "Could not load `initialize` function from GameLib: {}",
+                        "Could not load `create_gamestate` function from GameLib: {}",
                         error
                     )
                 });
-            f(canvas_width, canvas_heigth)
+            f()
         }
     }
 

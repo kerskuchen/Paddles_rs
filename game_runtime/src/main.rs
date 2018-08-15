@@ -1,3 +1,4 @@
+#![feature(nll)]
 /*
 TODO(JaSc):
   X Pixel perfect renderer with generalized (pixel independent) coordinate system
@@ -42,13 +43,16 @@ BACKLOG(JaSc):
 
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{Color, DrawCommand, GameInput, Point, Rect, Vec2};
+use game_lib::{GameInput, Point, Vec2};
 
 mod game_interface;
 mod graphics;
 
 use game_interface::GameLib;
 use graphics::{ColorFormat, DepthFormat, RenderingContext};
+
+extern crate failure;
+use failure::{Error, ResultExt};
 
 #[macro_use]
 extern crate log;
@@ -62,11 +66,26 @@ extern crate glutin;
 use gfx::Device;
 use glutin::GlContext;
 
+const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Trace;
+
+pub trait OptionHelper {
+    fn none_or(self, err: Error) -> Result<(), Error>;
+}
+
+impl<T> OptionHelper for Option<T> {
+    fn none_or(self, err: Error) -> Result<(), Error> {
+        match self {
+            None => Ok(()),
+            Some(_) => Err(err),
+        }
+    }
+}
+
 //==================================================================================================
 // Mainloop
 //==================================================================================================
 //
-fn main() {
+fn main() -> Result<(), Error> {
     // Initializing logger
     //
     fern::Dispatch::new()
@@ -78,12 +97,12 @@ fn main() {
                 message
             ))
         })
-        .level(log::LevelFilter::Trace)
+        .level(LOG_LEVEL)
         .level_for("gfx_device_gl", log::LevelFilter::Warn)
         .level_for("winit", log::LevelFilter::Warn)
         .chain(std::io::stdout())
         .apply()
-        .expect("Could not initialize logger");
+        .context("Could not initialize logger")?;
 
     // ---------------------------------------------------------------------------------------------
     // Video subsystem initialization
@@ -92,8 +111,6 @@ fn main() {
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
     const MONITOR_ID: usize = 0;
     const FULLSCREEN_MODE: bool = true;
-    const CANVAS_WIDTH: u16 = 480;
-    const CANVAS_HEIGHT: u16 = 270;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
@@ -104,9 +121,10 @@ fn main() {
     let monitor = events_loop
         .get_available_monitors()
         .nth(MONITOR_ID)
-        .unwrap_or_else(|| {
-            panic!("No monitor with id {} found", MONITOR_ID);
-        });
+        .ok_or(failure::err_msg(format!(
+            "No monitor with id {} found",
+            MONITOR_ID
+        )))?;
 
     let monitor_logical_dimensions = monitor
         .get_dimensions()
@@ -156,9 +174,7 @@ fn main() {
         encoder,
         screen_color_render_target_view,
         screen_depth_render_target_view,
-        CANVAS_WIDTH,
-        CANVAS_HEIGHT,
-    );
+    ).context("Could not create rendering context")?;
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -166,14 +182,13 @@ fn main() {
 
     // State variables
     let mut running = true;
-    let mut screen_cursor_pos = Point::new(0.0, 0.0);
-    let mut screen_rect = Rect::zero();
+    let mut screen_cursor_pos = Point::zero();
+    let mut screen_dimensions = Vec2::zero();
     let mut window_entered_fullscreen = false;
 
     let mut input = GameInput::new();
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
-
-    let mut game_state = game_lib.initialize(i32::from(CANVAS_WIDTH), i32::from(CANVAS_HEIGHT));
+    let mut gamestate = game_lib.create_gamestate();
 
     //
     info!("Entering main event loop");
@@ -221,38 +236,10 @@ fn main() {
                         window.resize(new_dim.to_physical(window.get_hidpi_factor()));
                         gfx_window_glutin::update_views(
                             &window,
-                            &mut rc.screen_pipeline_data.out_color,
-                            &mut rc.screen_pipeline_data.out_depth,
+                            &mut rc.screen_framebuffer.color_render_target_view,
+                            &mut rc.screen_framebuffer.depth_render_target_view,
                         );
-                        screen_rect =
-                            Rect::from_width_height(new_dim.width as f32, new_dim.height as f32);
-
-                        info!("=====================");
-                        info!(
-                            "Window resized: {} x {}",
-                            rc.screen_rect().width(),
-                            rc.screen_rect().height()
-                        );
-                        info!(
-                            "Canvas size: {} x {}",
-                            rc.canvas_rect().width(),
-                            rc.canvas_rect().height()
-                        );
-                        info!("Blit-rect: {:?}", rc.canvas_blit_rect());
-                        info!(
-                            "Pixel scale factor: {} ",
-                            if rc.canvas_blit_rect().pos.x == 0.0 {
-                                rc.screen_rect().width() / rc.canvas_rect().width()
-                            } else {
-                                rc.screen_rect().height() / rc.canvas_rect().height()
-                            }
-                        );
-                        info!(
-                            "Pixel waste: {} x {}",
-                            rc.screen_rect().width() - rc.canvas_blit_rect().width(),
-                            rc.screen_rect().height() - rc.canvas_blit_rect().height(),
-                        );
-                        info!("=====================");
+                        screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
 
                         // Grab mouse cursor in window
                         // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
@@ -272,7 +259,7 @@ fn main() {
                         //       where (0,0) is the bottom left of the screen
                         screen_cursor_pos = Point::new(
                             position.x as f32,
-                            (screen_rect.height() - 1.0) - position.y as f32,
+                            (screen_dimensions.y - 1.0) - position.y as f32,
                         );
                     }
                     WindowEvent::MouseWheel { delta, .. } => {
@@ -302,54 +289,19 @@ fn main() {
         });
 
         // Prepare input and update game
-        // -----------------------------------------------------------------------------------------
+        input.mouse_pos_screen = screen_cursor_pos;
+        input.screen_dim = screen_dimensions;
+        let draw_commands = game_lib.update_and_draw(&input, &mut gamestate);
 
-        // NOTE: We add (0.5, 0,5) to the cursors' pixel-position as we want the cursor to be in the
-        //       center of the canvas' pixel. This prevents artifacts when pixel-snapping the
-        //       cursor world-position later.
-        // Example:
-        // If we transform canvas cursor pixel-position (2,0) to its world position and back to its
-        // canvas pixel-position we get (1.9999981, 0.0). If we would pixel-snap this coordinate
-        // (effectively flooring it), we would get (1.0, 0.0) which would be wrong.
-        // Adding 0.5 gives us a correct flooring result.
-        //
-        let canvas_cursor_pos =
-            rc.screen_coord_to_canvas_coord(screen_cursor_pos) + Vec2::new(0.5, 0.5);
-        let canvas_cursor_pos_relative = canvas_cursor_pos / rc.canvas_rect().dim;
-        input.mouse_pos_screen = canvas_cursor_pos_relative;
-
-        let draw_commands = game_lib.update_and_draw(&input, &mut game_state);
-
-        // Draw into canvas
-        // -----------------------------------------------------------------------------------------
-
-        let clear_color = Color::new(0.7, 0.4, 0.2, 1.0);
-        rc.clear_canvas(clear_color);
-
-        for draw_command in draw_commands {
-            match draw_command {
-                DrawCommand::UploadTexture { texture, pixels } => rc.add_texture(texture, pixels),
-                DrawCommand::DrawFilled {
-                    transform,
-                    vertices,
-                    indices,
-                    texture,
-                } => rc.draw_into_canvas_filled(transform, texture, &vertices, &indices),
-                DrawCommand::DrawLines {
-                    transform,
-                    vertices,
-                    indices,
-                    texture,
-                } => rc.draw_into_canvas_lines(transform, texture, &vertices, &indices),
-            }
-        }
-
-        // Draw to screen and flip
-        // -----------------------------------------------------------------------------------------
-        let letterbox_color = Color::new(1.0, 0.4, 0.7, 1.0);
-        rc.blit_canvas_to_screen(letterbox_color);
+        // Draw to screen and flip buffers
+        rc.process_draw_commands(draw_commands)
+            .context("Could not to process a draw command")?;
         rc.encoder.flush(&mut device);
-        window.swap_buffers().expect("Failed to swap framebuffers");
+        window
+            .swap_buffers()
+            .context("Could not to swap framebuffers")?;
         device.cleanup();
     }
+
+    Ok(())
 }

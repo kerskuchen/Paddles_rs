@@ -37,7 +37,7 @@ fn main() -> Result<(), Error> {
         .level(LOG_LEVEL)
         .chain(std::io::stdout())
         .apply()
-        .expect("Could not initialize logger");
+        .context("Could not initialize logger")?;
 
     debug!("Packing fonts");
     let font_height = 8.0;

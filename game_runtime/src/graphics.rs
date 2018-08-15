@@ -1,14 +1,26 @@
 use game_lib::{
-    Color, ComponentBytes, Mat4, Mat4Helper, Pixel, Point, Quad, Rect, SquareMatrix, Texture,
-    Vertex, VertexIndex,
+    Color, ComponentBytes, DrawCommand, DrawMode, FramebufferInfo, FramebufferTarget, Mat4,
+    Mat4Helper, Pixel, Quad, Rect, TextureInfo, Vertex, VertexIndex,
 };
+
+use OptionHelper;
 
 use gfx;
 use gfx::traits::FactoryExt;
 use std::collections::HashMap;
 
+use failure;
+use failure::{Error, ResultExt};
+
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::DepthStencil;
+
+type TextureSampler<R> = gfx::handle::Sampler<R>;
+type VertexBuffer<R> = gfx::handle::Buffer<R, VertexGFX>;
+type RenderTargetColor<R> = gfx::handle::RenderTargetView<R, ColorFormat>;
+type RenderTargetDepth<R> = gfx::handle::DepthStencilView<R, DepthFormat>;
+type ShaderResourceView<R> = gfx::handle::ShaderResourceView<R, [f32; 4]>;
+type PipelineStateObject<R> = gfx::PipelineState<R, pipe::Meta>;
 
 gfx_defines! {
     vertex VertexGFX {
@@ -27,6 +39,161 @@ gfx_defines! {
 }
 
 //==================================================================================================
+// Framebuffer
+//==================================================================================================
+//
+
+#[derive(Clone)]
+pub struct Framebuffer<R>
+where
+    R: gfx::Resources,
+{
+    pub info: FramebufferInfo,
+    pub texture_sampler: TextureSampler<R>,
+
+    pub pipeline_state_object_fill: PipelineStateObject<R>,
+    pub pipeline_state_object_line: PipelineStateObject<R>,
+
+    pub color_render_target_view: RenderTargetColor<R>,
+    pub depth_render_target_view: RenderTargetDepth<R>,
+    pub shader_resource_view: Option<ShaderResourceView<R>>,
+}
+
+impl<R> Framebuffer<R>
+where
+    R: gfx::Resources,
+{
+    fn from_render_targets<F>(
+        factory: &mut F,
+        framebuffer_id: u32,
+        framebuffer_name: &str,
+        color_render_target_view: RenderTargetColor<R>,
+        depth_render_target_view: RenderTargetDepth<R>,
+        shader_resource_view: Option<ShaderResourceView<R>>,
+    ) -> Result<Framebuffer<R>, Error>
+    where
+        F: gfx::Factory<R>,
+    {
+        info!("Creating framebuffer '{}'", &framebuffer_name);
+        let info = FramebufferInfo {
+            id: framebuffer_id,
+            width: color_render_target_view.get_dimensions().0,
+            height: color_render_target_view.get_dimensions().1,
+            name: String::from(framebuffer_name),
+        };
+
+        //
+        trace!("Creating default nearest neighbour texture sampler");
+        //
+        use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
+        let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
+        let texture_sampler = factory.create_sampler(sampler_info);
+
+        //
+        trace!("Creating shader set for framebuffer");
+        //
+        let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
+        let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
+        let shader_set = factory
+            .create_shader_set(&vertex_shader, &fragment_shader)
+            .context("Could not create shader set for framebuffer")?;
+
+        //
+        trace!("Creating framebuffer pipeline state object for line drawing");
+        //
+        use gfx::state::{CullFace, FrontFace, RasterMethod, Rasterizer};
+        let line_rasterizer = Rasterizer {
+            front_face: FrontFace::CounterClockwise,
+            cull_face: CullFace::Nothing,
+            method: RasterMethod::Line(1),
+            offset: None,
+            samples: None,
+        };
+        let pipeline_state_object_line = factory
+            .create_pipeline_state(
+                &shader_set,
+                gfx::Primitive::LineList,
+                line_rasterizer,
+                pipe::new(),
+            )
+            .context("Failed to create framebuffer pipeline state object for line drawing")?;
+
+        //
+        trace!("Creating framebuffer pipeline state object for filled polygon drawing");
+        //
+        let fill_rasterizer = Rasterizer {
+            front_face: FrontFace::CounterClockwise,
+            cull_face: CullFace::Nothing,
+            method: RasterMethod::Fill,
+            offset: None,
+            samples: None,
+        };
+        let pipeline_state_object_fill = factory
+            .create_pipeline_state(
+                &shader_set,
+                gfx::Primitive::TriangleList,
+                fill_rasterizer,
+                pipe::new(),
+            )
+            .context("Failed to create framebuffer pipeline state object for filled drawing")?;
+
+        Ok(Framebuffer {
+            info,
+            texture_sampler,
+
+            pipeline_state_object_fill,
+            pipeline_state_object_line,
+
+            shader_resource_view,
+            color_render_target_view,
+            depth_render_target_view,
+        })
+    }
+
+    fn new<F>(factory: &mut F, info: &FramebufferInfo) -> Result<Framebuffer<R>, Error>
+    where
+        F: gfx::Factory<R>,
+    {
+        //
+        info!("Creating offscreen render targets");
+        //
+        let (_, shader_resource_view, color_render_target_view) = factory
+            .create_render_target::<ColorFormat>(info.width, info.height)
+            .context("Failed to create a framebuffer color render target")?;
+        let depth_render_target_view = factory
+            .create_depth_stencil_view_only::<DepthFormat>(info.width, info.height)
+            .context("Failed to create a framebuffer depth render target")?;
+
+        Framebuffer::from_render_targets(
+            factory,
+            info.id,
+            &info.name,
+            color_render_target_view,
+            depth_render_target_view,
+            Some(shader_resource_view),
+        )
+    }
+
+    fn create_pipeline_data(
+        &self,
+        transform: Mat4,
+        texture: ShaderResourceView<R>,
+        vertex_buffer: VertexBuffer<R>,
+    ) -> pipe::Data<R>
+    where
+        R: gfx::Resources,
+    {
+        pipe::Data {
+            vertex_buffer,
+            texture: (texture, self.texture_sampler.clone()),
+            transform: transform.into(),
+            out_color: self.color_render_target_view.clone(),
+            out_depth: self.depth_render_target_view.clone(),
+        }
+    }
+}
+
+//==================================================================================================
 // RenderingContext
 //==================================================================================================
 //
@@ -37,16 +204,14 @@ where
     F: gfx::Factory<R>,
 {
     factory: F,
+    // NOTE: `encoder` and `screen_framebuffer` need to be public for direct access from
+    //        gfx_glutin in the mainloop
     pub encoder: gfx::Encoder<R, C>,
+    pub screen_framebuffer: Framebuffer<R>,
 
-    pub screen_pipeline_data: pipe::Data<R>,
-    screen_pipeline_state_object: gfx::PipelineState<R, pipe::Meta>,
-
-    canvas_pipeline_data: pipe::Data<R>,
-    canvas_pipeline_state_object_fill: gfx::PipelineState<R, pipe::Meta>,
-    canvas_pipeline_state_object_line: gfx::PipelineState<R, pipe::Meta>,
-
-    textures: HashMap<Texture, gfx::handle::ShaderResourceView<R, [f32; 4]>>,
+    framebuffers: HashMap<FramebufferInfo, Framebuffer<R>>,
+    textures: HashMap<TextureInfo, ShaderResourceView<R>>,
+    textures_pixeldata_cache: HashMap<TextureInfo, Vec<Pixel>>,
 }
 
 impl<C, R, F> RenderingContext<C, R, F>
@@ -55,295 +220,318 @@ where
     C: gfx::CommandBuffer<R>,
     F: gfx::Factory<R>,
 {
+    // TODO(JaSc): Logging in all functions
     pub fn new(
         mut factory: F,
         encoder: gfx::Encoder<R, C>,
-        screen_color_render_target_view: gfx::handle::RenderTargetView<R, ColorFormat>,
-        screen_depth_render_target_view: gfx::handle::DepthStencilView<R, DepthFormat>,
-        canvas_width: u16,
-        canvas_heigth: u16,
-    ) -> RenderingContext<C, R, F> {
+        screen_color_render_target_view: RenderTargetColor<R>,
+        screen_depth_render_target_view: RenderTargetDepth<R>,
+    ) -> Result<RenderingContext<C, R, F>, Error> {
         //
-        info!("Creating shader set");
+        info!("Creating screen framebuffer object");
         //
-        let vertex_shader = include_bytes!("shaders/basic.glslv").to_vec();
-        let fragment_shader = include_bytes!("shaders/basic.glslf").to_vec();
-        let shader_set = factory
-            .create_shader_set(&vertex_shader, &fragment_shader)
-            .unwrap_or_else(|error| {
-                panic!("Could not create shader set: {}", error);
-            });
+        let framebuffer_id = u32::max_value();
+        let framebuffer_name = "Mainscreen";
+        let screen_framebuffer = Framebuffer::from_render_targets(
+            &mut factory,
+            framebuffer_id,
+            framebuffer_name,
+            screen_color_render_target_view,
+            screen_depth_render_target_view,
+            None,
+        ).context(format!(
+            "Could not create framebuffer '{}'",
+            framebuffer_name
+        ))?;
 
-        //
-        info!("Creating screen pipeline state object");
-        //
-        let screen_pipeline_state_object = factory
-            .create_pipeline_simple(&vertex_shader, &fragment_shader, pipe::new())
-            .unwrap_or_else(|error| {
-                panic!("Failed to create screen-pipeline state object: {}", error);
-            });
-
-        //
-        info!("Creating canvas pipeline state object for line drawing");
-        //
-        use gfx::state::{CullFace, FrontFace, RasterMethod, Rasterizer};
-        let line_rasterizer = Rasterizer {
-            front_face: FrontFace::CounterClockwise,
-            cull_face: CullFace::Nothing,
-            method: RasterMethod::Line(1),
-            offset: None,
-            samples: None,
-        };
-        let canvas_pipeline_state_object_line = factory
-            .create_pipeline_state(
-                &shader_set,
-                gfx::Primitive::LineList,
-                line_rasterizer,
-                pipe::new(),
-            )
-            .unwrap_or_else(|error| {
-                panic!(
-                    "Failed to create canvas pipeline state object for line drawing: {}",
-                    error
-                );
-            });
-
-        //
-        info!("Creating canvas pipeline state object for filled polygon drawing");
-        //
-        let fill_rasterizer = Rasterizer {
-            front_face: FrontFace::CounterClockwise,
-            cull_face: CullFace::Nothing,
-            method: RasterMethod::Fill,
-            offset: None,
-            samples: None,
-        };
-        let canvas_pipeline_state_object_fill = factory
-            .create_pipeline_state(
-                &shader_set,
-                gfx::Primitive::TriangleList,
-                fill_rasterizer,
-                pipe::new(),
-            )
-            .unwrap_or_else(|error| {
-                panic!(
-                    "Failed to create canvas pipeline state object for fill drawing: {}",
-                    error
-                );
-            });
-
-        //
-        info!("Creating offscreen render targets");
-        //
-        let canvas_rect =
-            Rect::from_width_height(f32::from(canvas_width), f32::from(canvas_heigth));
-        let (_, canvas_shader_resource_view, canvas_color_render_target_view) = factory
-            .create_render_target::<ColorFormat>(
-                canvas_rect.width() as u16,
-                canvas_rect.height() as u16,
-            )
-            .expect("Failed to create a canvas color render target");
-        let canvas_depth_render_target_view = factory
-            .create_depth_stencil_view_only::<DepthFormat>(
-                canvas_rect.width() as u16,
-                canvas_rect.height() as u16,
-            )
-            .expect("Failed to create a canvas depth render target");
-
-        //
-        info!("Creating empty default texture and sampler");
-        //
-        use gfx::texture::{FilterMethod, SamplerInfo, WrapMode};
-        let sampler_info = SamplerInfo::new(FilterMethod::Scale, WrapMode::Tile);
-        let texture_sampler = factory.create_sampler(sampler_info);
-
-        // TODO(JaSc): Clean this up
-        use gfx::format::Rgba8;
-        let pixels = vec![0, 0, 0, 0];
-        let kind = gfx::texture::Kind::D2(1, 1, gfx::texture::AaMode::Single);
-        let (_, empty_texture) = factory
-            .create_texture_immutable_u8::<Rgba8>(kind, gfx::texture::Mipmap::Provided, &[&pixels])
-            .unwrap();
-
-        //
-        info!("Creating screen and canvas pipeline data");
-        //
-        let canvas_pipeline_data = pipe::Data {
-            vertex_buffer: factory.create_vertex_buffer(&[]),
-            texture: (empty_texture, texture_sampler.clone()),
-            transform: Mat4::identity().into(),
-            out_color: canvas_color_render_target_view,
-            out_depth: canvas_depth_render_target_view,
-        };
-        let screen_pipeline_data = pipe::Data {
-            vertex_buffer: factory.create_vertex_buffer(&[]),
-            texture: (canvas_shader_resource_view, texture_sampler),
-            transform: Mat4::identity().into(),
-            out_color: screen_color_render_target_view,
-            out_depth: screen_depth_render_target_view,
-        };
-
-        RenderingContext {
+        Ok(RenderingContext {
             factory,
             encoder,
-            screen_pipeline_data,
-            canvas_pipeline_data,
-            screen_pipeline_state_object,
-            canvas_pipeline_state_object_line,
-            canvas_pipeline_state_object_fill,
+            screen_framebuffer,
+            framebuffers: HashMap::new(),
             textures: HashMap::new(),
+            textures_pixeldata_cache: HashMap::new(),
+        })
+    }
+
+    pub fn process_draw_commands(&mut self, draw_commands: Vec<DrawCommand>) -> Result<(), Error> {
+        for draw_command in draw_commands {
+            match draw_command {
+                DrawCommand::Draw {
+                    transform,
+                    vertices,
+                    indices,
+                    texture_info,
+                    framebuffer,
+                    draw_mode,
+                } => {
+                    self.draw(
+                        transform,
+                        self.get_texture(&texture_info)?.clone(),
+                        &vertices,
+                        &indices,
+                        &framebuffer,
+                        draw_mode,
+                    ).context("Could not execute draw command 'Draw'")?;
+                }
+                DrawCommand::Clear { framebuffer, color } => {
+                    self.clear(&framebuffer, color)
+                        .context("Could not execute draw command 'Clear'")?;
+                }
+                DrawCommand::BlitFramebuffer {
+                    source_framebuffer,
+                    target_framebuffer,
+                    source_rect,
+                    target_rect,
+                } => {
+                    self.blit_framebuffer(
+                        &source_framebuffer,
+                        &target_framebuffer,
+                        source_rect,
+                        target_rect,
+                    ).context("Could not execute draw command 'BlitFramebuffer'")?;
+                }
+                DrawCommand::CreateFramebuffer { framebuffer_info } => {
+                    self.create_framebuffer(&framebuffer_info)
+                        .context("Could not execute draw command 'CreateFramebuffer'")?;
+                }
+                DrawCommand::DeleteFramebuffer { framebuffer_info } => {
+                    self.delete_framebuffer(&framebuffer_info)
+                        .context("Could not execute draw command 'DeleteFramebuffer'")?;
+                }
+                DrawCommand::CreateTexture {
+                    texture_info,
+                    pixels,
+                } => {
+                    self.create_texture(&texture_info, pixels)
+                        .context("Could not execute draw command 'CreateTexture'")?;
+                }
+                DrawCommand::DeleteTexture { texture_info } => {
+                    self.delete_texture(&texture_info)
+                        .context("Could not execute draw command 'DeleteTexture'")?;
+                }
+            }
         }
+
+        Ok(())
     }
 
-    /// Returns the dimensions of the canvas in pixels as rectangle
-    pub fn canvas_rect(&self) -> Rect {
-        let (width, height, _, _) = self.canvas_pipeline_data.out_color.get_dimensions();
-        Rect::from_width_height(f32::from(width), f32::from(height))
-    }
-
-    /// Returns the dimensions of the screen in pixels as rectangle
-    pub fn screen_rect(&self) -> Rect {
-        let (width, height, _, _) = self.screen_pipeline_data.out_color.get_dimensions();
-        Rect::from_width_height(f32::from(width), f32::from(height))
-    }
-
-    /// Returns the dimensions of the `blit_rectangle` of the canvas in pixels.
-    /// The `blit-rectange` is the area of the screen where the content of the canvas is drawn onto.
-    /// It is as big as a canvas that is proportionally stretched and centered to fill the whole
-    /// screen.
-    ///
-    /// It may or may not be smaller than the full screen size depending on the aspect
-    /// ratio of both the screen and the canvas. The `blit_rectange` is guaranteed to either have
-    /// the same width a as the screen (with letterboxing if needed) or the same height as the
-    /// screen (with columnboxing if needed) or completely fill the screen.
-    pub fn canvas_blit_rect(&self) -> Rect {
-        let screen_rect = self.screen_rect();
-        self.canvas_rect()
-            .stretched_to_fit(screen_rect)
-            .centered_in(screen_rect)
-    }
-
-    /// Clamps a given `screen_point` to the area of the
-    /// [`canvas_blit_rect`](#method.canvas_blit_rect) and converts the result into
-    /// a canvas-position in the following interval:
-    /// `[0..canvas_rect.width-1]x[0..canvas_rect.height-1]`
-    /// where `(0,0)` is the bottom left of the canvas.
-    pub fn screen_coord_to_canvas_coord(&self, screen_point: Point) -> Point {
-        // NOTE: Clamping the point needs to use integer arithmetic such that
-        //          x != canvas.rect.width and y != canvas.rect.height
-        //       holds. We therefore need to subtract one from the blit_rect's dimension and then
-        //       add one again after clamping to achieve the desired effect.
-        // TODO(JaSc): Maybe make this more self documenting via integer rectangles
-        let mut blit_rect = self.canvas_blit_rect();
-        blit_rect.dim -= 1.0;
-        let clamped_point = screen_point.clamped_in_rect(blit_rect);
-        blit_rect.dim += 1.0;
-
-        let result = self.canvas_rect().dim * ((clamped_point - blit_rect.pos) / blit_rect.dim);
-        Point::new(f32::floor(result.x), f32::floor(result.y))
-    }
-
-    pub fn clear_canvas(&mut self, clear_color: Color) {
-        self.encoder
-            .clear(&self.canvas_pipeline_data.out_color, clear_color.into());
-        self.encoder
-            .clear_depth(&self.canvas_pipeline_data.out_depth, 1.0);
-    }
-
-    // TODO(JaSc): Remove duplicates
-    pub fn draw_into_canvas_filled(
+    fn draw(
         &mut self,
-        projection: Mat4,
-        texture: Texture,
+        transform: Mat4,
+        texture: ShaderResourceView<R>,
         vertices: &[Vertex],
         indices: &[VertexIndex],
-    ) {
-        let (canvas_vertex_buffer, canvas_slice) = self
-            .factory
-            .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &*indices);
-
-        self.canvas_pipeline_data.texture.0 = self
-            .textures
-            .get(&texture)
-            .expect(&format!("Could not find texture {:?}", texture))
-            .clone();
-
-        self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
-        self.canvas_pipeline_data.transform = projection.into();
-
-        self.encoder.draw(
-            &canvas_slice,
-            &self.canvas_pipeline_state_object_fill,
-            &self.canvas_pipeline_data,
-        );
-    }
-
-    pub fn draw_into_canvas_lines(
-        &mut self,
-        projection: Mat4,
-        texture: Texture,
-        vertices: &[Vertex],
-        indices: &[VertexIndex],
-    ) {
-        let (canvas_vertex_buffer, canvas_slice) = self
-            .factory
-            .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &*indices);
-
-        self.canvas_pipeline_data.texture.0 = self
-            .textures
-            .get(&texture)
-            .expect(&format!("Could not find texture {:?}", texture))
-            .clone();
-        self.canvas_pipeline_data.vertex_buffer = canvas_vertex_buffer;
-        self.canvas_pipeline_data.transform = projection.into();
-
-        self.encoder.draw(
-            &canvas_slice,
-            &self.canvas_pipeline_state_object_line,
-            &self.canvas_pipeline_data,
-        );
-    }
-
-    pub fn blit_canvas_to_screen(&mut self, letterbox_color: Color) {
-        let blit_quad = Quad::new(self.canvas_blit_rect(), 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let vertices = blit_quad.into_vertices();
-        let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
+        framebuffer_target: &FramebufferTarget,
+        draw_mode: DrawMode,
+    ) -> Result<(), Error>
+    where
+        R: gfx::Resources,
+    {
+        // TODO(JaSc): Evaluate if we can avoid cloning the framebuffer and re-creating its pipeline
+        //             data from scratch. We cannot borrow it immutable/mutable from ourselves
+        //             though as we already borrow encoder from ourselves mutably.
         let (vertex_buffer, slice) = self
             .factory
-            .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &indices[..]);
-        self.screen_pipeline_data.vertex_buffer = vertex_buffer;
+            .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &*indices);
+        let framebuffer = self.get_framebuffer(framebuffer_target)?;
+        let pipeline_data = framebuffer.create_pipeline_data(transform, texture, vertex_buffer);
 
-        // NOTE: The projection matrix is flipped upside-down for correct rendering of the canvas
-        let screen_rect = self.screen_rect();
-        let projection_mat =
-            Mat4::ortho_bottom_left_flipped_y(screen_rect.width(), screen_rect.height(), 0.0, 1.0);
-        self.screen_pipeline_data.transform = projection_mat.into();
+        match draw_mode {
+            DrawMode::Lines => self.encoder.draw(
+                &slice,
+                &framebuffer.pipeline_state_object_line,
+                &pipeline_data,
+            ),
+            DrawMode::Fill => self.encoder.draw(
+                &slice,
+                &framebuffer.pipeline_state_object_fill,
+                &pipeline_data,
+            ),
+        }
 
-        self.encoder
-            .clear(&self.screen_pipeline_data.out_color, letterbox_color.into());
-        self.encoder
-            .clear_depth(&self.screen_pipeline_data.out_depth, 1.0);
-        self.encoder.draw(
-            &slice,
-            &self.screen_pipeline_state_object,
-            &self.screen_pipeline_data,
-        );
+        Ok(())
     }
 
-    pub fn add_texture(&mut self, texture: Texture, pixels: Vec<Pixel>) {
-        use gfx::format::Rgba8;
-        let kind =
-            gfx::texture::Kind::D2(texture.width, texture.height, gfx::texture::AaMode::Single);
+    fn clear(
+        &mut self,
+        framebuffer_target: &FramebufferTarget,
+        clear_color: Color,
+    ) -> Result<(), Error> {
+        let target = self.get_framebuffer(framebuffer_target)?;
+        self.encoder
+            .clear(&target.color_render_target_view, clear_color.into());
+        self.encoder
+            .clear_depth(&target.depth_render_target_view, 1.0);
+
+        Ok(())
+    }
+
+    fn blit_framebuffer(
+        &mut self,
+        source_framebuffer_info: &FramebufferInfo,
+        target_framebuffer: &FramebufferTarget,
+        _source_rect: Rect,
+        target_rect: Rect,
+    ) -> Result<(), Error> {
+        let source_framebuffer = self.get_framebuffer_by_info(source_framebuffer_info)?;
+        let target_framebuffer_info = self.get_framebuffer(target_framebuffer)?.info;
+
+        // TODO(JaSc): Incorporate source_rect into blit_quad calculation
+        let blit_quad = Quad::new(target_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
+        let vertices = blit_quad.into_vertices();
+        let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
+
+        // NOTE: The projection matrix is flipped upside-down for correct blitting
+        let projection_mat = Mat4::ortho_bottom_left_flipped_y(
+            f32::from(target_framebuffer_info.width),
+            f32::from(target_framebuffer_info.height),
+            0.0,
+            1.0,
+        );
+        // TODO(JaSc): Maybe throw error instead of except
+        self.draw(
+            projection_mat,
+            source_framebuffer.shader_resource_view.expect(&format!(
+                "Source framebuffer {:?} does not have a shader resouce view",
+                source_framebuffer.info
+            )),
+            &vertices,
+            &indices,
+            target_framebuffer,
+            DrawMode::Fill,
+        )?;
+
+        Ok(())
+    }
+
+    fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
+        debug!("Creating framebuffer with {:?}", framebuffer_info);
+        let framebuffer = Framebuffer::new(&mut self.factory, framebuffer_info).context(format!(
+            "Could not create framebuffer {:?}",
+            framebuffer_info
+        ))?;
+
+        self.framebuffers
+            .insert(framebuffer_info.clone(), framebuffer)
+            .none_or(failure::err_msg(format!(
+                "Could not create framebuffer because it already exists for {:?}",
+                framebuffer_info
+            )))?;
+
+        Ok(())
+    }
+
+    fn delete_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
+        debug!("Creating framebuffer with {:?}", framebuffer_info);
+        self.framebuffers
+            .remove(&framebuffer_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not delete framebuffer because it did not exist for {:?}",
+                framebuffer_info
+            )))?;
+
+        Ok(())
+    }
+
+    fn create_texture(
+        &mut self,
+        texture_info: &TextureInfo,
+        pixels: Vec<Pixel>,
+    ) -> Result<(), Error> {
+        debug!("Creating texture with {:?}", texture_info);
+        let kind = gfx::texture::Kind::D2(
+            texture_info.width,
+            texture_info.height,
+            gfx::texture::AaMode::Single,
+        );
         let (_, view) = self
             .factory
-            .create_texture_immutable_u8::<Rgba8>(
+            .create_texture_immutable_u8::<ColorFormat>(
                 kind,
                 gfx::texture::Mipmap::Provided,
                 &[(&pixels).as_bytes()],
             )
-            .unwrap();
+            .context(format!(
+                "Could not create texture data from pixels for {:?}",
+                texture_info
+            ))?;
 
-        self.textures.insert(texture, view);
+        self.textures
+            .insert(texture_info.clone(), view)
+            .none_or(failure::err_msg(format!(
+                "Could not create texture because it already exists for {:?}",
+                texture_info
+            )))?;
+
+        self.textures_pixeldata_cache
+            .insert(texture_info.clone(), pixels)
+            .none_or(failure::err_msg(format!(
+                "Could not create pixeldata cache because it already exists for {:?}",
+                texture_info
+            )))?;
+
+        Ok(())
+    }
+
+    fn delete_texture(&mut self, texture_info: &TextureInfo) -> Result<(), Error> {
+        debug!("Deleting texture with {:?}", texture_info);
+        self.textures
+            .remove(texture_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not delete texture because it did not exist for {:?}",
+                texture_info
+            )))?;
+        self.textures_pixeldata_cache
+            .remove(texture_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not delete pixeldata cache because it did not exist for {:?}",
+                texture_info
+            )))?;
+        Ok(())
+    }
+
+    fn get_framebuffer(&self, framebuffer: &FramebufferTarget) -> Result<Framebuffer<R>, Error> {
+        match framebuffer {
+            FramebufferTarget::Screen => Ok(self.screen_framebuffer.clone()),
+            FramebufferTarget::Offscreen(framebuffer_info) => {
+                self.get_framebuffer_by_info(framebuffer_info)
+            }
+        }
+    }
+
+    fn get_framebuffer_by_info(
+        &self,
+        framebuffer_info: &FramebufferInfo,
+    ) -> Result<Framebuffer<R>, Error> {
+        Ok(self
+            .framebuffers
+            .get(framebuffer_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not find framebuffer for {:?}",
+                framebuffer_info
+            )))?
+            .clone())
+    }
+
+    fn get_texture(&self, texture_info: &TextureInfo) -> Result<&ShaderResourceView<R>, Error> {
+        Ok(self
+            .textures
+            .get(texture_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not find texture for {:?}",
+                texture_info
+            )))?)
+    }
+
+    fn _get_texture_pixeldata(&self, texture_info: &TextureInfo) -> Result<&Vec<Pixel>, Error> {
+        Ok(self
+            .textures_pixeldata_cache
+            .get(texture_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not find pixeldata for {:?}",
+                texture_info
+            )))?)
     }
 }
 

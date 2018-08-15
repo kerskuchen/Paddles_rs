@@ -43,14 +43,14 @@
 extern crate game_lib;
 use game_lib::{DrawCommand, GameInput, GameState};
 
-/// Forwards directly to [`game_lib::initialize`]
+/// Forwards directly to [`game_lib::create_gamestate`]
 #[no_mangle]
-pub fn initialize(canvas_width: i32, canvas_height: i32) -> GameState {
-    game_lib::initialize(canvas_width, canvas_height)
+pub fn create_gamestate() -> GameState {
+    game_lib::create_gamestate()
 }
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]
-pub fn update_and_draw(input: &GameInput, game_state: &mut GameState) -> Vec<DrawCommand> {
-    game_lib::update_and_draw(input, game_state)
+pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<DrawCommand> {
+    game_lib::update_and_draw(input, gamestate)
 }

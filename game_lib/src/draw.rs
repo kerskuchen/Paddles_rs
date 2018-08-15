@@ -1,4 +1,5 @@
 use math::{Bounds, Color, Mat4, Point, Rect, Vec2, WorldPoint};
+
 use rgb;
 pub use rgb::ComponentBytes;
 
@@ -13,16 +14,16 @@ pub struct Vertex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Texture {
+pub struct TextureInfo {
     pub id: u32,
     pub width: u16,
     pub height: u16,
     pub name: String,
 }
 
-impl Texture {
-    pub fn empty() -> Texture {
-        Texture {
+impl TextureInfo {
+    pub fn empty() -> TextureInfo {
+        TextureInfo {
             id: 0,
             width: 0,
             height: 0,
@@ -31,49 +32,108 @@ impl Texture {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FramebufferInfo {
+    pub id: u32,
+    pub width: u16,
+    pub height: u16,
+    pub name: String,
+}
+
+impl FramebufferInfo {
+    pub fn empty() -> FramebufferInfo {
+        FramebufferInfo {
+            id: 0,
+            width: 0,
+            height: 0,
+            name: String::from(""),
+        }
+    }
+}
 //==================================================================================================
 // DrawCommand
 //==================================================================================================
 //
 
+#[derive(Debug, Copy, Clone)]
+pub enum DrawMode {
+    Lines,
+    Fill,
+}
+
+#[derive(Debug)]
+pub enum FramebufferTarget {
+    Screen,
+    Offscreen(FramebufferInfo),
+}
+
 #[derive(Debug)]
 pub enum DrawCommand {
-    UploadTexture {
-        texture: Texture,
+    Draw {
+        transform: Mat4,
+        vertices: Vec<Vertex>,
+        indices: Vec<VertexIndex>,
+        texture_info: TextureInfo,
+        framebuffer: FramebufferTarget,
+        draw_mode: DrawMode,
+    },
+    Clear {
+        framebuffer: FramebufferTarget,
+        color: Color,
+    },
+    BlitFramebuffer {
+        source_framebuffer: FramebufferInfo,
+        target_framebuffer: FramebufferTarget,
+        source_rect: Rect,
+        target_rect: Rect,
+    },
+    CreateFramebuffer {
+        framebuffer_info: FramebufferInfo,
+    },
+    DeleteFramebuffer {
+        framebuffer_info: FramebufferInfo,
+    },
+    CreateTexture {
+        texture_info: TextureInfo,
         pixels: Vec<Pixel>,
     },
-    DrawLines {
-        transform: Mat4,
-        vertices: Vec<Vertex>,
-        indices: Vec<VertexIndex>,
-        texture: Texture,
-    },
-    DrawFilled {
-        transform: Mat4,
-        vertices: Vec<Vertex>,
-        indices: Vec<VertexIndex>,
-        texture: Texture,
+    DeleteTexture {
+        texture_info: TextureInfo,
     },
 }
 
 impl DrawCommand {
-    pub fn from_quads(transform: Mat4, texture: Texture, batch: QuadBatch) -> DrawCommand {
+    pub fn from_quads(
+        transform: Mat4,
+        texture_info: TextureInfo,
+        framebuffer: FramebufferTarget,
+        batch: QuadBatch,
+    ) -> DrawCommand {
         let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand::DrawFilled {
+        DrawCommand::Draw {
             transform,
             vertices,
             indices,
-            texture,
+            texture_info,
+            framebuffer,
+            draw_mode: DrawMode::Fill,
         }
     }
 
-    pub fn from_lines(transform: Mat4, texture: Texture, batch: LineBatch) -> DrawCommand {
+    pub fn from_lines(
+        transform: Mat4,
+        texture_info: TextureInfo,
+        framebuffer: FramebufferTarget,
+        batch: LineBatch,
+    ) -> DrawCommand {
         let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand::DrawLines {
+        DrawCommand::Draw {
             transform,
             vertices,
             indices,
-            texture,
+            texture_info,
+            framebuffer,
+            draw_mode: DrawMode::Lines,
         }
     }
 }
