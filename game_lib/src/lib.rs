@@ -87,6 +87,11 @@ impl GameState {
 //
 #[derive(Default)]
 pub struct GameInput {
+    pub time_since_startup: f64,
+    pub time_delta: f32,
+    pub time_update: f32,
+    pub time_draw: f32,
+
     pub screen_dim: Vec2,
 
     /// Mouse position is given in the following interval:
@@ -106,6 +111,11 @@ pub struct GameInput {
 impl GameInput {
     pub fn new() -> GameInput {
         GameInput {
+            time_since_startup: 0.0,
+            time_delta: 0.0,
+            time_update: 0.0,
+            time_draw: 0.0,
+
             screen_dim: Vec2::zero(),
 
             mouse_pos_screen: CanvasPoint::zero(),
@@ -242,6 +252,16 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         draw_commands.append(&mut initialization_commands);
     }
 
+    let startup = pretty_format_duration_ms(input.time_since_startup);
+    let delta = pretty_format_duration_ms(input.time_delta as f64);
+    let draw = pretty_format_duration_ms(input.time_draw as f64);
+    let update = pretty_format_duration_ms(input.time_update as f64);
+
+    dprintln!(startup);
+    dprintln!(delta);
+    dprintln!(draw);
+    dprintln!(update);
+
     let texture_atlas = gamestate
         .texture_atlas
         .clone()
@@ -369,8 +389,8 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     // Grid
     let grid_dark = Color::new(0.5, 0.3, 0.0, 1.0);
     let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
-    for x in -10..10 {
-        for diagonal in -10..10 {
+    for x in -30..30 {
+        for diagonal in -20..20 {
             let pos = Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE;
             if x % 2 == 0 {
                 fill_batch.push_sprite(
@@ -449,4 +469,8 @@ fn screen_coord_to_canvas_coord(
 
     let result = canvas_rect.dim * ((clamped_point - blit_rect.pos) / blit_rect.dim);
     Point::new(f32::floor(result.x), f32::floor(result.y))
+}
+
+fn pretty_format_duration_ms(duration: f64) -> String {
+    format!("{:.3}ms", (duration * 1_000_000.0).round() / 1000.0)
 }

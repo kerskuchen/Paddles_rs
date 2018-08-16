@@ -47,9 +47,11 @@ use game_lib::{GameInput, Point, Vec2};
 
 mod game_interface;
 mod graphics;
+mod timer;
 
 use game_interface::GameLib;
 use graphics::{ColorFormat, DepthFormat, RenderingContext};
+use timer::Timer;
 
 extern crate failure;
 use failure::{Error, ResultExt};
@@ -186,6 +188,8 @@ fn main() -> Result<(), Error> {
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     let mut gamestate = game_lib.create_gamestate();
 
+    let timer_startup = Timer::new();
+    let mut timer_delta = Timer::new();
     //
     info!("Entering main event loop");
     info!("------------------------");
@@ -291,11 +295,21 @@ fn main() -> Result<(), Error> {
         // Prepare input and update game
         input.mouse_pos_screen = screen_cursor_pos;
         input.screen_dim = screen_dimensions;
+
+        input.time_since_startup = timer_startup.elapsed_time();
+        input.time_delta = timer_delta.elapsed_time() as f32;
+        timer_delta.reset();
+
+        let timer_update = Timer::new();
         let draw_commands = game_lib.update_and_draw(&input, &mut gamestate);
+        input.time_update = timer_update.elapsed_time() as f32;
 
         // Draw to screen and flip buffers
+        let timer_draw = Timer::new();
         rc.process_draw_commands(draw_commands)
             .context("Could not to process a draw command")?;
+        input.time_draw = timer_draw.elapsed_time() as f32;
+
         rc.encoder.flush(&mut device);
         window
             .swap_buffers()
