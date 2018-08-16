@@ -2,6 +2,7 @@ use math::{Bounds, Color, Mat4, Point, Rect, Vec2, WorldPoint};
 
 use rgb;
 pub use rgb::ComponentBytes;
+use std;
 
 pub type Pixel = rgb::RGBA8;
 pub type VertexIndex = u16;
@@ -67,7 +68,6 @@ pub enum FramebufferTarget {
     Offscreen(FramebufferInfo),
 }
 
-#[derive(Debug)]
 pub enum DrawCommand {
     Draw {
         transform: Mat4,
@@ -100,6 +100,66 @@ pub enum DrawCommand {
     DeleteTexture {
         texture_info: TextureInfo,
     },
+}
+
+impl std::fmt::Debug for DrawCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            DrawCommand::Draw {
+                transform,
+                vertices,
+                texture_info,
+                framebuffer,
+                draw_mode,
+                ..
+            } => write!(
+                f,
+                "\n  Draw:\n  {:?}\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
+                draw_mode,
+                transform,
+                vertices.len(),
+                texture_info,
+                framebuffer
+            ),
+            DrawCommand::CreateTexture {
+                texture_info,
+                pixels,
+            } => write!(
+                f,
+                "\n  CreateTexture:\n  {:?}\n  num_pixels: {:?}",
+                texture_info,
+                pixels.len()
+            ),
+            DrawCommand::Clear { framebuffer, color } => {
+                write!(f, "\n  Clear: color: {:?}, {:?}", color, framebuffer)
+            }
+            DrawCommand::BlitFramebuffer {
+                source_framebuffer,
+                target_framebuffer,
+                source_rect,
+                target_rect,
+            } => write!(
+                f,
+                concat!(
+                    "\n  BlitFramebuffer:\n  source: {:?}",
+                    "\n  target: {:?}\n  source: {:?}\n  target: {:?}"
+                ),
+                source_framebuffer,
+                target_framebuffer,
+                source_rect,
+                target_rect,
+            ),
+            DrawCommand::CreateFramebuffer { framebuffer_info } => {
+                write!(f, "\n  CreateFramebuffer: {:?}", framebuffer_info,)
+            }
+            DrawCommand::DeleteFramebuffer { framebuffer_info } => {
+                write!(f, "\n  DeleteFramebuffer: {:?}", framebuffer_info,)
+            }
+            DrawCommand::DeleteTexture { texture_info } => {
+                write!(f, "\n  DeleteTexture: {:?}", texture_info,)
+            }
+        }
+    }
 }
 
 impl DrawCommand {

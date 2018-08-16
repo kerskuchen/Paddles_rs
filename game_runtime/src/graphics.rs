@@ -74,7 +74,7 @@ where
     where
         F: gfx::Factory<R>,
     {
-        info!("Creating framebuffer '{}'", &framebuffer_name);
+        info!("Creating framebuffer {:?}", &framebuffer_name);
         let info = FramebufferInfo {
             id: framebuffer_id,
             width: color_render_target_view.get_dimensions().0,
@@ -211,7 +211,7 @@ where
 
     framebuffers: HashMap<FramebufferInfo, Framebuffer<R>>,
     textures: HashMap<TextureInfo, ShaderResourceView<R>>,
-    textures_pixeldata_cache: HashMap<TextureInfo, Vec<Pixel>>,
+    textures_pixeldata: HashMap<TextureInfo, Vec<Pixel>>,
 }
 
 impl<C, R, F> RenderingContext<C, R, F>
@@ -227,9 +227,8 @@ where
         screen_color_render_target_view: RenderTargetColor<R>,
         screen_depth_render_target_view: RenderTargetDepth<R>,
     ) -> Result<RenderingContext<C, R, F>, Error> {
-        //
-        info!("Creating screen framebuffer object");
-        //
+        info!("Creating rendering context");
+
         let framebuffer_id = u32::max_value();
         let framebuffer_name = "Mainscreen";
         let screen_framebuffer = Framebuffer::from_render_targets(
@@ -240,7 +239,7 @@ where
             screen_depth_render_target_view,
             None,
         ).context(format!(
-            "Could not create framebuffer '{}'",
+            "Could not create framebuffer {:?}",
             framebuffer_name
         ))?;
 
@@ -250,12 +249,15 @@ where
             screen_framebuffer,
             framebuffers: HashMap::new(),
             textures: HashMap::new(),
-            textures_pixeldata_cache: HashMap::new(),
+            textures_pixeldata: HashMap::new(),
         })
     }
 
     pub fn process_draw_commands(&mut self, draw_commands: Vec<DrawCommand>) -> Result<(), Error> {
+        trace!("Processing {:?} draw commands", draw_commands.len());
+
         for draw_command in draw_commands {
+            trace!("Processing draw command: {:?}", draw_command);
             match draw_command {
                 DrawCommand::Draw {
                     transform,
@@ -371,11 +373,19 @@ where
         &mut self,
         source_framebuffer_info: &FramebufferInfo,
         target_framebuffer: &FramebufferTarget,
-        _source_rect: Rect,
+        source_rect: Rect,
         target_rect: Rect,
     ) -> Result<(), Error> {
         let source_framebuffer = self.get_framebuffer_by_info(source_framebuffer_info)?;
         let target_framebuffer_info = self.get_framebuffer(target_framebuffer)?.info;
+
+        trace!(
+            "Blitting framebuffer:\n  source: {:?}\n  target: {:?}\n  source: {:?}\n  target: {:?}",
+            source_framebuffer_info,
+            target_framebuffer_info,
+            source_rect,
+            target_rect
+        );
 
         // TODO(JaSc): Incorporate source_rect into blit_quad calculation
         let blit_quad = Quad::new(target_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
@@ -389,13 +399,17 @@ where
             0.0,
             1.0,
         );
-        // TODO(JaSc): Maybe throw error instead of except
+
+        let texture = source_framebuffer
+            .shader_resource_view
+            .ok_or(failure::err_msg(format!(
+            "Could not blit framebuffer because source {:?} does not have a shader resouce view",
+            source_framebuffer.info
+        )))?;
+
         self.draw(
             projection_mat,
-            source_framebuffer.shader_resource_view.expect(&format!(
-                "Source framebuffer {:?} does not have a shader resouce view",
-                source_framebuffer.info
-            )),
+            texture,
             &vertices,
             &indices,
             target_framebuffer,
@@ -406,7 +420,8 @@ where
     }
 
     fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
-        debug!("Creating framebuffer with {:?}", framebuffer_info);
+        debug!("Creating framebuffer for {:?}", framebuffer_info);
+
         let framebuffer = Framebuffer::new(&mut self.factory, framebuffer_info).context(format!(
             "Could not create framebuffer {:?}",
             framebuffer_info
@@ -423,7 +438,8 @@ where
     }
 
     fn delete_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
-        debug!("Creating framebuffer with {:?}", framebuffer_info);
+        debug!("Deleting framebuffer for {:?}", framebuffer_info);
+
         self.framebuffers
             .remove(&framebuffer_info)
             .ok_or(failure::err_msg(format!(
@@ -439,7 +455,8 @@ where
         texture_info: &TextureInfo,
         pixels: Vec<Pixel>,
     ) -> Result<(), Error> {
-        debug!("Creating texture with {:?}", texture_info);
+        debug!("Creating texture for {:?}", texture_info);
+
         let kind = gfx::texture::Kind::D2(
             texture_info.width,
             texture_info.height,
@@ -464,7 +481,7 @@ where
                 texture_info
             )))?;
 
-        self.textures_pixeldata_cache
+        self.textures_pixeldata
             .insert(texture_info.clone(), pixels)
             .none_or(failure::err_msg(format!(
                 "Could not create pixeldata cache because it already exists for {:?}",
@@ -475,14 +492,15 @@ where
     }
 
     fn delete_texture(&mut self, texture_info: &TextureInfo) -> Result<(), Error> {
-        debug!("Deleting texture with {:?}", texture_info);
+        debug!("Deleting texture for {:?}", texture_info);
+
         self.textures
             .remove(texture_info)
             .ok_or(failure::err_msg(format!(
                 "Could not delete texture because it did not exist for {:?}",
                 texture_info
             )))?;
-        self.textures_pixeldata_cache
+        self.textures_pixeldata
             .remove(texture_info)
             .ok_or(failure::err_msg(format!(
                 "Could not delete pixeldata cache because it did not exist for {:?}",
@@ -526,7 +544,7 @@ where
 
     fn _get_texture_pixeldata(&self, texture_info: &TextureInfo) -> Result<&Vec<Pixel>, Error> {
         Ok(self
-            .textures_pixeldata_cache
+            .textures_pixeldata
             .get(texture_info)
             .ok_or(failure::err_msg(format!(
                 "Could not find pixeldata for {:?}",

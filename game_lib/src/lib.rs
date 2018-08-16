@@ -65,6 +65,48 @@ impl GameState {
     }
 }
 
+//==================================================================================================
+// GameInput
+//==================================================================================================
+//
+pub struct GameInput {
+    pub screen_dim: Vec2,
+
+    /// Mouse position is given in the following interval:
+    /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
+    /// where (0,0) is the bottom left of the screen
+    pub mouse_pos_screen: ScreenPoint,
+
+    pub mouse_button_left: GameButton,
+    pub mouse_button_middle: GameButton,
+    pub mouse_button_right: GameButton,
+
+    /// * `Positive`: Moving away from user
+    /// * `Negative`: Moving towards user
+    pub mouse_wheel_delta: i32,
+}
+
+impl GameInput {
+    pub fn new() -> GameInput {
+        GameInput {
+            screen_dim: Vec2::zero(),
+
+            mouse_pos_screen: ScreenPoint::zero(),
+            mouse_button_left: GameButton::new(),
+            mouse_button_middle: GameButton::new(),
+            mouse_button_right: GameButton::new(),
+            mouse_wheel_delta: 0,
+        }
+    }
+
+    pub fn clear_button_transitions(&mut self) {
+        self.mouse_button_left.clear_transitions();
+        self.mouse_button_middle.clear_transitions();
+        self.mouse_button_right.clear_transitions();
+        self.mouse_wheel_delta = 0;
+    }
+}
+
 pub struct GameButton {
     pub num_state_transitions: u32,
     pub is_pressed: bool,
@@ -90,40 +132,10 @@ impl GameButton {
     }
 }
 
-pub struct GameInput {
-    pub screen_dim: Vec2,
-
-    pub mouse_button_left: GameButton,
-    pub mouse_button_middle: GameButton,
-    pub mouse_button_right: GameButton,
-    pub mouse_pos_screen: ScreenPoint,
-
-    /// * `Positive`: Moving away from user
-    /// * `Negative`: Moving towards from user
-    pub mouse_wheel_delta: i32,
-}
-
-impl GameInput {
-    pub fn new() -> GameInput {
-        GameInput {
-            screen_dim: Vec2::zero(),
-
-            mouse_button_left: GameButton::new(),
-            mouse_button_middle: GameButton::new(),
-            mouse_button_right: GameButton::new(),
-            mouse_pos_screen: ScreenPoint::zero(),
-            mouse_wheel_delta: 0,
-        }
-    }
-
-    pub fn clear_button_transitions(&mut self) {
-        self.mouse_button_left.clear_transitions();
-        self.mouse_button_middle.clear_transitions();
-        self.mouse_button_right.clear_transitions();
-        self.mouse_wheel_delta = 0;
-    }
-}
-
+//==================================================================================================
+// Game
+//==================================================================================================
+//
 pub fn create_gamestate() -> GameState {
     GameState::new()
 }
@@ -149,7 +161,6 @@ fn initialize_gamestate(gamestate: &mut GameState) -> Vec<DrawCommand> {
         texture_info,
         pixels,
     });
-
     let mut atlas_metafile =
         File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
     gamestate.sprite_map =
@@ -162,13 +173,22 @@ fn initialize_gamestate(gamestate: &mut GameState) -> Vec<DrawCommand> {
         texture_info,
         pixels,
     });
-
     let mut font_metafile =
         File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
     gamestate.glyph_sprites =
         bincode::deserialize_from(&mut font_metafile).expect("Could not deserialize font glyphs");
 
-    // TODO(JaSc): Create new framebuffer
+    // Create new canvas framebuffer
+    let framebuffer_info = FramebufferInfo {
+        id: 0,
+        width: CANVAS_WIDTH as u16,
+        height: CANVAS_HEIGHT as u16,
+        name: String::from("Canvas"),
+    };
+    gamestate.canvas_framebuffer = framebuffer_info.clone();
+    draw_commands.push(DrawCommand::CreateFramebuffer {
+        framebuffer_info: framebuffer_info,
+    });
 
     draw_commands
 }
@@ -188,7 +208,8 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     // Load sprites if needed
     if !gamestate.is_initialized {
         gamestate.is_initialized = true;
-        draw_commands.append(&mut initialize_gamestate(&mut gamestate));
+        let mut initialization_commands = initialize_gamestate(&mut gamestate);
+        draw_commands.append(&mut initialization_commands);
     }
 
     if gamestate.screen_dim != input.screen_dim {
@@ -204,8 +225,6 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         info!("Canvas size: {} x {}", CANVAS_WIDTH, CANVAS_HEIGHT);
 
         // TODO(JaSc): Calculate new blit rect
-        // TODO(JaSc): Create new framebuffer
-        // TODO(JaSc): Delete old framebuffer
 
         // info!("Blit-rect: {:?}", rc.canvas_blit_rect());
         // info!(

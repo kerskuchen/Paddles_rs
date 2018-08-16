@@ -89,14 +89,7 @@ fn main() -> Result<(), Error> {
     // Initializing logger
     //
     fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}-{}: {}",
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
+        .format(|out, message, record| out.finish(format_args!("{}: {}", record.level(), message)))
         .level(LOG_LEVEL)
         .level_for("gfx_device_gl", log::LevelFilter::Warn)
         .level_for("winit", log::LevelFilter::Warn)
