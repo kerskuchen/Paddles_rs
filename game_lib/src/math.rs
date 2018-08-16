@@ -4,14 +4,6 @@ pub use cgmath::prelude::*;
 
 const EPSILON: f32 = 0.000001;
 
-pub type Point = Vec2;
-
-pub type WorldPoint = Vec2;
-
-/// Normalized screen coordinate given in the range `[0, 1[x[0, 1[`
-/// where `(0,0) is the bottom-left corner
-pub type ScreenPoint = Vec2;
-
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
 
@@ -38,6 +30,9 @@ pub fn clamp_integer(val: i32, min: i32, max: i32) -> i32 {
     debug_assert!(min <= max);
     i32::max(min, i32::min(val, max))
 }
+
+/// A typedef for [`Vec2`] mainly used for representing points.
+pub type Point = Vec2;
 
 impl Point {
     /// Clamps a points x and y coordinates to the boundaries of a given rectangle
@@ -451,25 +446,31 @@ impl Bounds {
 //==================================================================================================
 //
 
-// TODO(JaSc): Evaluate if it would be easier to just use pixel coordinates for world/screen
-//             especially with respect to pixel snapping, camera jittering and debuggability
+/// A point in world-coordinate-space. One 1x1 square in world-space equals to the pixel size
+/// on the canvas on a default zoom level.
+pub type WorldPoint = Vec2;
+/// A point in canvas-coordinate-space. Given in the range
+/// `[0, CANVAS_WIDTH - 1]x[0, CANVAS_HEIGHT - 1]`
+/// where `(0,0)` is the bottom-left corner
+pub type CanvasPoint = Vec2;
 
-use cgmath::Vector3;
-pub const PIXELS_PER_UNIT: f32 = 16 as f32;
-pub const PIXEL_SIZE: f32 = 1.0 / PIXELS_PER_UNIT;
+/// Same as [`WorldPoint`] only as vector
+pub type WorldVec = Vec2;
+/// Same as [`CanvasPoint`] only as vector
+pub type CanvasVec = Vec2;
 
 impl WorldPoint {
     /// For a given [`WorldPoint`] returns the nearest [`WorldPoint`] that is aligned to the
-    /// screen's pixel grid when drawn.
+    /// canvas's pixel grid when drawn.
     ///
-    /// Pixel-snapping the cameras position for example before drawing prevents pixel-jittering
+    /// For example pixel-snapping the cameras position before drawing prevents pixel-jittering
     /// artifacts on visible objects if the camera is moving at sub-pixel distances.
     pub fn pixel_snapped(self) -> WorldPoint {
         // NOTE: Because OpenGL pixels are drawn from the bottom left we need to floor here
         //       to correctly transform world coordinates to pixels.
         WorldPoint {
-            x: f32::floor(PIXELS_PER_UNIT * self.x) / PIXELS_PER_UNIT,
-            y: f32::floor(PIXELS_PER_UNIT * self.y) / PIXELS_PER_UNIT,
+            x: f32::floor(self.x),
+            y: f32::floor(self.y),
         }
     }
 }
@@ -509,14 +510,14 @@ impl WorldPoint {
 /// let canvas_dim = Vec2::new(320.0, 180.0);
 /// let mut cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
 ///
-/// // Screen mouse position and delta
-/// let old_mouse_pos_screen = Point::new(50.0, 130.0) / canvas_dim;
-/// let new_mouse_pos_screen = Point::new(60.0, 130.0) / canvas_dim;
-/// let mouse_delta_screen = new_mouse_pos_screen - old_mouse_pos_screen;
+/// // Canvas mouse position and delta
+/// let old_mouse_pos_canvas = Point::new(50.0, 130.0) / canvas_dim;
+/// let new_mouse_pos_canvas = Point::new(60.0, 130.0) / canvas_dim;
+/// let mouse_delta_canvas = new_mouse_pos_canvas - old_mouse_pos_canvas;
 ///
 /// // World mouse position and delta
-/// let old_mouse_pos_world = cam.screen_to_world(old_mouse_pos_screen);
-/// let new_mouse_pos_world = cam.screen_to_world(new_mouse_pos_screen);
+/// let old_mouse_pos_world = cam.canvas_to_world(old_mouse_pos_canvas);
+/// let new_mouse_pos_world = cam.canvas_to_world(new_mouse_pos_canvas);
 /// let _mouse_delta_world = new_mouse_pos_world - old_mouse_pos_world;
 ///
 /// let mouse_button_right_pressed = true;
@@ -525,7 +526,7 @@ impl WorldPoint {
 ///
 /// // Pan camera
 /// if mouse_button_right_pressed {
-///     cam.pan(mouse_delta_screen);
+///     cam.pan(mouse_delta_canvas);
 /// }
 /// // Reset zoom
 /// if mouse_button_middle_pressed {
@@ -553,24 +554,25 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(screen_width: i32, screen_height: i32, z_near: f32, z_far: f32) -> Camera {
-        Camera::with_position(Point::zero(), screen_width, screen_height, z_near, z_far)
+    pub fn new(canvas_width: i32, canvas_height: i32, z_near: f32, z_far: f32) -> Camera {
+        Camera::with_position(
+            WorldPoint::zero(),
+            canvas_width,
+            canvas_height,
+            z_near,
+            z_far,
+        )
     }
 
     pub fn with_position(
         pos: WorldPoint,
-        screen_width: i32,
-        screen_height: i32,
+        canvas_width: i32,
+        canvas_height: i32,
         z_near: f32,
         z_far: f32,
     ) -> Camera {
         Camera {
-            world_rect: Rect::new(
-                pos.x,
-                pos.y,
-                screen_width as f32 / PIXELS_PER_UNIT,
-                screen_height as f32 / PIXELS_PER_UNIT,
-            ),
+            world_rect: Rect::new(pos.x, pos.y, canvas_width as f32, canvas_height as f32),
             zoom_level: 1.0,
             z_near,
             z_far,
@@ -581,20 +583,18 @@ impl Camera {
         self.world_rect.pos
     }
 
-    pub fn dim_zoomed(&self) -> Vec2 {
+    pub fn dim_zoomed(&self) -> WorldVec {
         self.world_rect.dim / self.zoom_level
     }
 
-    /// Converts normalized screen coordinates (`[0, 1[x[0, 1[` - bottom-left to top-right)
-    /// to world coordinates.
-    pub fn screen_to_world(&self, point: ScreenPoint) -> WorldPoint {
-        (point - 0.5) * self.dim_zoomed() + self.pos().pixel_snapped()
+    /// Converts a [`CanvasPoint`] into a [`WorldPoint`]
+    pub fn canvas_to_world(&self, point: CanvasPoint) -> WorldPoint {
+        (point - 0.5 * self.world_rect.dim) / self.zoom_level + self.pos().pixel_snapped()
     }
 
-    /// Converts world coordinates to normalized screen coordinates
-    /// (`[0, 1[x[0, 1[` - bottom-left to top-right)
-    pub fn world_to_screen(&self, point: WorldPoint) -> ScreenPoint {
-        (point - self.pos().pixel_snapped()) / self.dim_zoomed() + 0.5
+    /// Converts a [`WorldPoint`] into a [`CanvasPoint`]
+    pub fn world_to_canvas(&self, point: WorldPoint) -> CanvasPoint {
+        (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.world_rect.dim
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -608,14 +608,15 @@ impl Camera {
             (self.world_rect.pos - world_point) * (old_zoom_level / new_zoom_level) + world_point;
     }
 
-    /// Pans the camera using cursor movement distance which is given in normalized screen
-    /// coordinates (`[0, 1[x[0, 1[` - bottom-left to top-right)
-    pub fn pan(&mut self, screen_move_distance: ScreenPoint) {
-        self.world_rect.pos -= screen_move_distance * self.dim_zoomed();
+    /// Pans the camera using cursor movement distance on the canvas
+    pub fn pan(&mut self, canvas_move_distance: CanvasVec) {
+        self.world_rect.pos -= canvas_move_distance / self.zoom_level;
     }
 
     /// Returns a project-view-matrix that can transform vertices into camera-view-space
     pub fn proj_view_matrix(&self) -> Mat4 {
+        use cgmath::Vector3;
+
         let translation = -self.world_rect.pos.pixel_snapped();
         let view_mat = Mat4::from_nonuniform_scale(self.zoom_level, self.zoom_level, 1.0)
             * Mat4::from_translation(Vector3::new(translation.x, translation.y, 0.0));
@@ -629,7 +630,7 @@ impl Camera {
         proj_mat * view_mat
     }
 
-    /// Returns the [`Bounto_bounds_centeredera view in world-space
+    /// Returns the [`Bounds`] of the cameras view in world-space
     pub fn bounds_worldspace(&self) -> Bounds {
         let world_rect_zoomed = Rect::from_point_dimension(self.world_rect.pos, self.dim_zoomed());
         world_rect_zoomed.to_bounds_centered()
@@ -641,52 +642,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn converting_between_screen_and_world_coordinates_and_back() {
+    fn converting_between_canvas_and_world_coordinates_and_back() {
         let cam = Camera::new(100, 100, -1.0, 1.0);
 
-        let screen_point = ScreenPoint::new(0.75, -0.23);
-        assert!(is_effectively_zero(ScreenPoint::distance(
-            screen_point,
-            cam.world_to_screen(cam.screen_to_world(screen_point))
+        let canvas_point = CanvasPoint::new(0.75, -0.23);
+        assert!(is_effectively_zero(CanvasPoint::distance(
+            canvas_point,
+            cam.world_to_canvas(cam.canvas_to_world(canvas_point))
         )));
 
         let world_point = WorldPoint::new(-12.3, 134.0);
         assert!(is_effectively_zero(WorldPoint::distance(
             world_point,
-            cam.screen_to_world(cam.world_to_screen(world_point))
+            cam.canvas_to_world(cam.world_to_canvas(world_point))
         )));
-    }
-
-    #[test]
-    #[should_panic]
-    fn pixel_snapping_of_cursor_position_fails_without_correction_term() {
-        let canvas_dim = Vec2::new(100.0, 100.0);
-        let cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
-
-        let pixel_pos = Point::new(52.0, 50.0);
-        let world_pos = cam.screen_to_world(pixel_pos / canvas_dim).pixel_snapped();
-        let pixel_pos_conv = cam.world_to_screen(world_pos) * canvas_dim;
-
-        // NOTE: pixel_pos_conv == (51.0, 50.0)
-        assert!(pixel_pos.x <= pixel_pos_conv.x && pixel_pos_conv.x < pixel_pos.x + 1.0);
-        assert!(pixel_pos.y <= pixel_pos_conv.y && pixel_pos_conv.y < pixel_pos.y + 1.0);
-    }
-
-    #[test]
-    fn pixel_snapping_of_cursor_position_succeeds_with_correction_term() {
-        let canvas_dim = Vec2::new(100.0, 100.0);
-        let cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
-
-        let pixel_pos = Point::new(52.0, 50.0);
-        let pixel_pos_corrected = pixel_pos + Vec2::new(0.5, 0.5);
-
-        let world_pos = cam
-            .screen_to_world(pixel_pos_corrected / canvas_dim)
-            .pixel_snapped();
-        let pixel_pos_conv = cam.world_to_screen(world_pos) * canvas_dim;
-
-        // NOTE: pixel_pos_conv == (52.0, 50.0)
-        assert!(pixel_pos.x <= pixel_pos_conv.x && pixel_pos_conv.x < pixel_pos.x + 1.0);
-        assert!(pixel_pos.y <= pixel_pos_conv.y && pixel_pos_conv.y < pixel_pos.y + 1.0);
     }
 }

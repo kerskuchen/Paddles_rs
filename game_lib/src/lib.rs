@@ -28,10 +28,11 @@ pub use draw::{
     Quad, QuadBatch, Sprite, TextureInfo, Vertex, VertexIndex,
 };
 pub use math::{
-    Bounds, Camera, Color, Mat4, Mat4Helper, Point, Rect, ScreenPoint, SquareMatrix, Vec2,
-    WorldPoint, PIXELS_PER_UNIT, PIXEL_SIZE,
+    Bounds, Camera, CanvasPoint, Color, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2,
+    WorldPoint,
 };
 
+const UNIT_SIZE: f32 = 16.0;
 const CANVAS_WIDTH: i32 = 480;
 const CANVAS_HEIGHT: i32 = 270;
 
@@ -52,7 +53,7 @@ pub struct GameState {
     sprite_map: HashMap<String, Sprite>,
     glyph_sprites: Vec<Sprite>,
 
-    mouse_pos_screen: ScreenPoint,
+    mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
     cam: Camera,
 }
@@ -72,7 +73,7 @@ impl GameState {
             glyph_sprites: Vec::new(),
             // TODO(JaSc): Fix and standardize z_near/z_far
             cam: Camera::new(CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0),
-            mouse_pos_screen: ScreenPoint::zero(),
+            mouse_pos_canvas: CanvasPoint::zero(),
             mouse_pos_world: WorldPoint::zero(),
         }
     }
@@ -92,7 +93,7 @@ pub struct GameInput {
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
     /// where (0,0) is the bottom left of the screen
-    pub mouse_pos_screen: ScreenPoint,
+    pub mouse_pos_screen: CanvasPoint,
 
     pub mouse_button_left: GameButton,
     pub mouse_button_middle: GameButton,
@@ -108,7 +109,7 @@ impl GameInput {
         GameInput {
             screen_dim: Vec2::zero(),
 
-            mouse_pos_screen: ScreenPoint::zero(),
+            mouse_pos_screen: CanvasPoint::zero(),
             mouse_button_left: GameButton::new(),
             mouse_button_middle: GameButton::new(),
             mouse_button_right: GameButton::new(),
@@ -241,11 +242,26 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         draw_commands.append(&mut initialization_commands);
     }
 
+    let texture_atlas = gamestate
+        .texture_atlas
+        .clone()
+        .expect("Texture atlas does not exist");
+    let canvas_framebuffer = gamestate
+        .canvas_framebuffer
+        .clone()
+        .expect("Canvas framebuffer does not exist");
+
     // TODO(JaSc): Change letterbox color based on debug/release
-    let letterbox_color = Color::new(1.0, 0.4, 0.7, 1.0);
+    let letterbox_color = Color::new(0.2, 0.9, 0.4, 1.0);
     draw_commands.push(DrawCommand::Clear {
         framebuffer: FramebufferTarget::Screen,
         color: letterbox_color,
+    });
+
+    let canvas_color = Color::new(1.0, 0.4, 0.7, 1.0);
+    draw_commands.push(DrawCommand::Clear {
+        framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+        color: canvas_color,
     });
 
     if gamestate.screen_dim != input.screen_dim {
@@ -258,7 +274,6 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         info!("Window resized: {:?}", screen_rect.dim);
         info!("Canvas size: {:?}", canvas_rect.dim);
         info!("Blit-rect: {:?}", blit_rect);
-
         info!(
             "Pixel scale factor: {} ",
             if blit_rect.pos.x == 0.0 {
@@ -288,22 +303,21 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     //
     let screen_rect = Rect::from_dimension(gamestate.screen_dim);
     let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
-    let canvas_cursor_pos =
+
+    // Canvas mouse position
+    let new_mouse_pos_canvas =
         screen_coord_to_canvas_coord(input.mouse_pos_screen, screen_rect, canvas_rect)
             + Vec2::new(0.5, 0.5);
-
-    // Screen mouse position
-    let new_mouse_pos_screen = input.mouse_pos_screen;
-    let mouse_delta_screen = new_mouse_pos_screen - gamestate.mouse_pos_screen;
-    gamestate.mouse_pos_screen = new_mouse_pos_screen;
+    let mouse_delta_canvas = new_mouse_pos_canvas - gamestate.mouse_pos_canvas;
+    gamestate.mouse_pos_canvas = new_mouse_pos_canvas;
 
     // World mouse position
-    let new_mouse_pos_world = gamestate.cam.screen_to_world(new_mouse_pos_screen);
+    let new_mouse_pos_world = gamestate.cam.canvas_to_world(new_mouse_pos_canvas);
     let _mouse_delta_world = new_mouse_pos_world - gamestate.mouse_pos_world;
     gamestate.mouse_pos_world = new_mouse_pos_world;
 
     if input.mouse_button_right.is_pressed {
-        gamestate.cam.pan(mouse_delta_screen);
+        gamestate.cam.pan(mouse_delta_canvas);
     }
 
     if input.mouse_button_middle.is_pressed {
@@ -346,7 +360,7 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         cursor_color.z = 1.0;
     }
     fill_batch.push_sprite(
-        gamestate.sprite_map["images/plain"].with_scale(Vec2::new(PIXEL_SIZE, PIXEL_SIZE)),
+        gamestate.sprite_map["images/plain"].with_scale(Vec2::new(1.0, 1.0) / UNIT_SIZE),
         new_mouse_pos_world.pixel_snapped(),
         -0.1,
         cursor_color,
@@ -357,7 +371,7 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
     for x in -10..10 {
         for diagonal in -10..10 {
-            let pos = Point::new((x + diagonal) as f32, diagonal as f32);
+            let pos = Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE;
             if x % 2 == 0 {
                 fill_batch.push_sprite(
                     gamestate.sprite_map["images/textured"],
@@ -371,16 +385,8 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         }
     }
 
-    let texture_atlas = gamestate
-        .texture_atlas
-        .clone()
-        .expect("Texture atlas does not exist");
-    let canvas_framebuffer = gamestate
-        .canvas_framebuffer
-        .clone()
-        .expect("Canvas framebuffer does not exist");
-
     let transform = gamestate.cam.proj_view_matrix();
+
     draw_commands.push(DrawCommand::from_lines(
         transform,
         texture_atlas.clone(),

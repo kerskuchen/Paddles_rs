@@ -1,5 +1,5 @@
 use common::*;
-use game_lib::{Bounds, Sprite, PIXELS_PER_UNIT};
+use game_lib::{Bounds, Sprite};
 
 use std;
 use std::collections::HashMap;
@@ -125,9 +125,9 @@ fn write_metadata(
             let rect = data.rect;
             let vertex_bounds = Bounds {
                 left: 0.0,
-                right: rect.width as f32 / PIXELS_PER_UNIT,
+                right: rect.width as f32,
                 bottom: 0.0,
-                top: rect.height as f32 / PIXELS_PER_UNIT,
+                top: rect.height as f32,
             };
             let uv_bounds = Bounds {
                 left: rect.x as f32 / image_width,
