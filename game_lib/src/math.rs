@@ -2,7 +2,7 @@ pub use cgmath;
 pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
-const EPSILON: f32 = 0.000001;
+const EPSILON: f32 = 0.000_001;
 
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
@@ -66,7 +66,7 @@ use std::ops::Neg;
 use std::ops::Sub;
 use std::ops::SubAssign;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
@@ -331,7 +331,7 @@ impl Rect {
     pub fn from_dimension(dim: Vec2) -> Rect {
         Rect {
             pos: Point::zero(),
-            dim: dim,
+            dim,
         }
     }
 

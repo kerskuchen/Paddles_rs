@@ -74,5 +74,16 @@
                 "$rustc"
             ]
         },
+        {
+            "type": "shell",
+            "label": "clippy",
+            "command": "cargo",
+            "args": [
+                "clippy",
+            ],
+            "problemMatcher": [
+                "$rustc"
+            ]
+        },
     ]
 }

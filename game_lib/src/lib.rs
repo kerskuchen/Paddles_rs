@@ -45,7 +45,6 @@ pub struct GameState {
     is_initialized: bool,
 
     screen_dim: Vec2,
-    blit_rect: Rect,
     canvas_framebuffer: Option<FramebufferInfo>,
 
     texture_atlas: Option<TextureInfo>,
@@ -64,7 +63,6 @@ impl GameState {
             is_initialized: false,
 
             screen_dim: Vec2::zero(),
-            blit_rect: Rect::zero(),
             canvas_framebuffer: None,
 
             texture_atlas: None,
@@ -87,6 +85,7 @@ impl GameState {
 // GameInput
 //==================================================================================================
 //
+#[derive(Default)]
 pub struct GameInput {
     pub screen_dim: Vec2,
 
@@ -125,6 +124,7 @@ impl GameInput {
     }
 }
 
+#[derive(Default)]
 pub struct GameButton {
     pub num_state_transitions: u32,
     pub is_pressed: bool,

@@ -120,10 +120,7 @@ fn main() -> Result<(), Error> {
     let monitor = events_loop
         .get_available_monitors()
         .nth(MONITOR_ID)
-        .ok_or(failure::err_msg(format!(
-            "No monitor with id {} found",
-            MONITOR_ID
-        )))?;
+        .ok_or_else(|| failure::err_msg(format!("No monitor with id {} found", MONITOR_ID)))?;
 
     let monitor_logical_dimensions = monitor
         .get_dimensions()

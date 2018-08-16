@@ -400,12 +400,12 @@ where
             1.0,
         );
 
-        let texture = source_framebuffer
-            .shader_resource_view
-            .ok_or(failure::err_msg(format!(
+        let texture = source_framebuffer.shader_resource_view.ok_or_else(|| {
+            failure::err_msg(format!(
             "Could not blit framebuffer because source {:?} does not have a shader resouce view",
-            source_framebuffer.info
-        )))?;
+            source_framebuffer_info
+        ))
+        })?;
 
         self.draw(
             projection_mat,
@@ -443,12 +443,12 @@ where
     fn delete_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
         debug!("Deleting framebuffer for {:?}", framebuffer_info);
 
-        self.framebuffers
-            .remove(&framebuffer_info)
-            .ok_or(failure::err_msg(format!(
+        self.framebuffers.remove(&framebuffer_info).ok_or_else(|| {
+            failure::err_msg(format!(
                 "Could not delete framebuffer because it did not exist for {:?}",
                 framebuffer_info
-            )))?;
+            ))
+        })?;
 
         Ok(())
     }
@@ -469,10 +469,12 @@ where
         Ok(self
             .framebuffers
             .get(framebuffer_info)
-            .ok_or(failure::err_msg(format!(
-                "Could not find framebuffer for {:?}",
-                framebuffer_info
-            )))?
+            .ok_or_else(|| {
+                failure::err_msg(format!(
+                    "Could not find framebuffer for {:?}",
+                    framebuffer_info
+                ))
+            })?
             .clone())
     }
 
@@ -523,39 +525,33 @@ where
     fn delete_texture(&mut self, texture_info: &TextureInfo) -> Result<(), Error> {
         debug!("Deleting texture for {:?}", texture_info);
 
-        self.textures
-            .remove(texture_info)
-            .ok_or(failure::err_msg(format!(
+        self.textures.remove(texture_info).ok_or_else(|| {
+            failure::err_msg(format!(
                 "Could not delete texture because it did not exist for {:?}",
                 texture_info
-            )))?;
+            ))
+        })?;
         self.textures_pixeldata
             .remove(texture_info)
-            .ok_or(failure::err_msg(format!(
-                "Could not delete pixeldata cache because it did not exist for {:?}",
-                texture_info
-            )))?;
+            .ok_or_else(|| {
+                failure::err_msg(format!(
+                    "Could not delete pixeldata cache because it did not exist for {:?}",
+                    texture_info
+                ))
+            })?;
         Ok(())
     }
 
     fn get_texture(&self, texture_info: &TextureInfo) -> Result<&ShaderResourceView<R>, Error> {
-        Ok(self
-            .textures
-            .get(texture_info)
-            .ok_or(failure::err_msg(format!(
-                "Could not find texture for {:?}",
-                texture_info
-            )))?)
+        Ok(self.textures.get(texture_info).ok_or_else(|| {
+            failure::err_msg(format!("Could not find texture for {:?}", texture_info))
+        })?)
     }
 
     fn _get_texture_pixeldata(&self, texture_info: &TextureInfo) -> Result<&Vec<Pixel>, Error> {
-        Ok(self
-            .textures_pixeldata
-            .get(texture_info)
-            .ok_or(failure::err_msg(format!(
-                "Could not find pixeldata for {:?}",
-                texture_info
-            )))?)
+        Ok(self.textures_pixeldata.get(texture_info).ok_or_else(|| {
+            failure::err_msg(format!("Could not find pixeldata for {:?}", texture_info))
+        })?)
     }
 }
 

@@ -202,6 +202,7 @@ impl DrawCommand {
 // Batch drawing
 //==================================================================================================
 //
+#[derive(Default)]
 pub struct QuadBatch {
     vertices: Vec<Vertex>,
 }
@@ -250,6 +251,7 @@ impl QuadBatch {
     }
 }
 
+#[derive(Default)]
 pub struct LineBatch {
     vertices: Vec<Vertex>,
 }
