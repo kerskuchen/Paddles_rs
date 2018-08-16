@@ -66,8 +66,6 @@ extern crate glutin;
 use gfx::Device;
 use glutin::GlContext;
 
-const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Trace;
-
 pub trait OptionHelper {
     fn none_or(self, err: Error) -> Result<(), Error>;
 }
@@ -81,6 +79,11 @@ impl<T> OptionHelper for Option<T> {
     }
 }
 
+const LOG_LEVEL_GENERAL: log::LevelFilter = log::LevelFilter::Trace;
+const LOG_LEVEL_MAIN: log::LevelFilter = log::LevelFilter::Info;
+const LOG_LEVEL_GAME_INTERFACE: log::LevelFilter = log::LevelFilter::Info;
+const LOG_LEVEL_GRAPHICS: log::LevelFilter = log::LevelFilter::Info;
+
 //==================================================================================================
 // Mainloop
 //==================================================================================================
@@ -90,7 +93,10 @@ fn main() -> Result<(), Error> {
     //
     fern::Dispatch::new()
         .format(|out, message, record| out.finish(format_args!("{}: {}", record.level(), message)))
-        .level(LOG_LEVEL)
+        .level(LOG_LEVEL_GENERAL)
+        .level_for("game_runtime", LOG_LEVEL_MAIN)
+        .level_for("game_runtime::graphics", LOG_LEVEL_GRAPHICS)
+        .level_for("game_runtime::game_interface", LOG_LEVEL_GAME_INTERFACE)
         .level_for("gfx_device_gl", log::LevelFilter::Warn)
         .level_for("winit", log::LevelFilter::Warn)
         .chain(std::io::stdout())
@@ -174,7 +180,7 @@ fn main() -> Result<(), Error> {
     //
 
     // State variables
-    let mut running = true;
+    let mut is_running = true;
     let mut screen_cursor_pos = Point::zero();
     let mut screen_dimensions = Vec2::zero();
     let mut window_entered_fullscreen = false;
@@ -187,10 +193,14 @@ fn main() -> Result<(), Error> {
     info!("Entering main event loop");
     info!("------------------------");
     //
-    while running {
+    while is_running {
         // Testing library hotreloading
         if game_lib.needs_reloading() {
             game_lib = game_lib.reload();
+            if !game_lib.needs_reloading() {
+                // The game actually reloaded
+                gamestate.notify_hotreload_happened();
+            }
         }
 
         input.clear_button_transitions();
@@ -199,7 +209,7 @@ fn main() -> Result<(), Error> {
         events_loop.poll_events(|event| {
             if let Event::WindowEvent { event, .. } = event {
                 match event {
-                    WindowEvent::CloseRequested => running = false,
+                    WindowEvent::CloseRequested => is_running = false,
                     WindowEvent::KeyboardInput {
                         input:
                             KeyboardInput {
@@ -212,7 +222,7 @@ fn main() -> Result<(), Error> {
                     } => {
                         use glutin::VirtualKeyCode::*;
                         match key {
-                            Escape => running = false,
+                            Escape => is_running = false,
                             _ => (),
                         }
                     }

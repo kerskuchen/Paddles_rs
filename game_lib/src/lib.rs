@@ -6,6 +6,7 @@ extern crate rgb;
 
 #[macro_use]
 extern crate log;
+extern crate fern;
 
 #[macro_use]
 extern crate serde_derive;
@@ -34,14 +35,23 @@ pub use math::{
 const CANVAS_WIDTH: i32 = 480;
 const CANVAS_HEIGHT: i32 = 270;
 
+const LOG_LEVEL_GENERAL: log::LevelFilter = log::LevelFilter::Trace;
+const LOG_LEVEL_GAME_LIB: log::LevelFilter = log::LevelFilter::Trace;
+const LOG_LEVEL_MATH: log::LevelFilter = log::LevelFilter::Trace;
+const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
+
 pub struct GameState {
     is_initialized: bool,
+
     screen_dim: Vec2,
-    canvas_framebuffer: FramebufferInfo,
-    texture_atlas: TextureInfo,
-    texture_font: TextureInfo,
+    blit_rect: Rect,
+    canvas_framebuffer: Option<FramebufferInfo>,
+
+    texture_atlas: Option<TextureInfo>,
+    texture_font: Option<TextureInfo>,
     sprite_map: HashMap<String, Sprite>,
     glyph_sprites: Vec<Sprite>,
+
     mouse_pos_screen: ScreenPoint,
     mouse_pos_world: WorldPoint,
     cam: Camera,
@@ -51,10 +61,13 @@ impl GameState {
     fn new() -> GameState {
         GameState {
             is_initialized: false,
+
             screen_dim: Vec2::zero(),
-            canvas_framebuffer: FramebufferInfo::empty(),
-            texture_atlas: TextureInfo::empty(),
-            texture_font: TextureInfo::empty(),
+            blit_rect: Rect::zero(),
+            canvas_framebuffer: None,
+
+            texture_atlas: None,
+            texture_font: None,
             sprite_map: HashMap::new(),
             glyph_sprites: Vec::new(),
             // TODO(JaSc): Fix and standardize z_near/z_far
@@ -62,6 +75,10 @@ impl GameState {
             mouse_pos_screen: ScreenPoint::zero(),
             mouse_pos_world: WorldPoint::zero(),
         }
+    }
+
+    pub fn notify_hotreload_happened(&mut self) {
+        self.is_initialized = false;
     }
 }
 
@@ -151,45 +168,66 @@ fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
     (texture_info, image.buffer)
 }
 
+fn reinitialize_after_hotreload() {
+    // Initializing logger
+    // NOTE: When hot reloading the game lib dll the logging must be reinitialized
+    //
+    fern::Dispatch::new()
+        .format(|out, message, record| out.finish(format_args!("{}: {}", record.level(), message)))
+        .level(LOG_LEVEL_GENERAL)
+        .level_for("game_lib", LOG_LEVEL_GAME_LIB)
+        .level_for("game_lib::math", LOG_LEVEL_MATH)
+        .level_for("game_lib::draw", LOG_LEVEL_DRAW)
+        .chain(std::io::stdout())
+        .apply()
+        .expect("Could not initialize logger");
+}
+
 fn initialize_gamestate(gamestate: &mut GameState) -> Vec<DrawCommand> {
+    reinitialize_after_hotreload();
+
     let mut draw_commands = Vec::new();
+    if gamestate.texture_atlas.is_none() {
+        // Load atlas texture and sprites
+        let (texture_info, pixels) = load_texture(0, "data/images/atlas.png");
+        gamestate.texture_atlas = Some(texture_info.clone());
+        draw_commands.push(DrawCommand::CreateTexture {
+            texture_info,
+            pixels,
+        });
+        let mut atlas_metafile =
+            File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
+        gamestate.sprite_map = bincode::deserialize_from(&mut atlas_metafile)
+            .expect("Could not deserialize sprite map");
+    }
 
-    // Load atlas texture and sprites
-    let (texture_info, pixels) = load_texture(0, "data/images/atlas.png");
-    gamestate.texture_atlas = texture_info.clone();
-    draw_commands.push(DrawCommand::CreateTexture {
-        texture_info,
-        pixels,
-    });
-    let mut atlas_metafile =
-        File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
-    gamestate.sprite_map =
-        bincode::deserialize_from(&mut atlas_metafile).expect("Could not deserialize sprite map");
+    if gamestate.texture_font.is_none() {
+        // Load font texture and sprites
+        let (texture_info, pixels) = load_texture(1, "data/fonts/04B_03__.png");
+        gamestate.texture_font = Some(texture_info.clone());
+        draw_commands.push(DrawCommand::CreateTexture {
+            texture_info,
+            pixels,
+        });
+        let mut font_metafile =
+            File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
+        gamestate.glyph_sprites = bincode::deserialize_from(&mut font_metafile)
+            .expect("Could not deserialize font glyphs");
+    }
 
-    // Load font texture and sprites
-    let (texture_info, pixels) = load_texture(1, "data/fonts/04B_03__.png");
-    gamestate.texture_font = texture_info.clone();
-    draw_commands.push(DrawCommand::CreateTexture {
-        texture_info,
-        pixels,
-    });
-    let mut font_metafile =
-        File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
-    gamestate.glyph_sprites =
-        bincode::deserialize_from(&mut font_metafile).expect("Could not deserialize font glyphs");
-
-    // Create new canvas framebuffer
-    let framebuffer_info = FramebufferInfo {
-        id: 0,
-        width: CANVAS_WIDTH as u16,
-        height: CANVAS_HEIGHT as u16,
-        name: String::from("Canvas"),
-    };
-    gamestate.canvas_framebuffer = framebuffer_info.clone();
-    draw_commands.push(DrawCommand::CreateFramebuffer {
-        framebuffer_info: framebuffer_info,
-    });
-
+    if gamestate.canvas_framebuffer.is_none() {
+        // Create new canvas framebuffer
+        let framebuffer_info = FramebufferInfo {
+            id: 0,
+            width: CANVAS_WIDTH as u16,
+            height: CANVAS_HEIGHT as u16,
+            name: String::from("Canvas"),
+        };
+        gamestate.canvas_framebuffer = Some(framebuffer_info.clone());
+        draw_commands.push(DrawCommand::CreateFramebuffer {
+            framebuffer_info: framebuffer_info,
+        });
+    }
     draw_commands
 }
 
@@ -197,6 +235,11 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
     //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
     let mut draw_commands = Vec::new();
+    if !gamestate.is_initialized {
+        gamestate.is_initialized = true;
+        let mut initialization_commands = initialize_gamestate(&mut gamestate);
+        draw_commands.append(&mut initialization_commands);
+    }
 
     // TODO(JaSc): Change letterbox color based on debug/release
     let letterbox_color = Color::new(1.0, 0.4, 0.7, 1.0);
@@ -205,42 +248,31 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         color: letterbox_color,
     });
 
-    // Load sprites if needed
-    if !gamestate.is_initialized {
-        gamestate.is_initialized = true;
-        let mut initialization_commands = initialize_gamestate(&mut gamestate);
-        draw_commands.append(&mut initialization_commands);
-    }
-
     if gamestate.screen_dim != input.screen_dim {
         gamestate.screen_dim = input.screen_dim;
         let screen_rect = Rect::from_dimension(gamestate.screen_dim);
+        let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
+        let blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
         info!("=====================");
+        info!("Window resized: {:?}", screen_rect.dim);
+        info!("Canvas size: {:?}", canvas_rect.dim);
+        info!("Blit-rect: {:?}", blit_rect);
+
         info!(
-            "Window resized: {} x {}",
-            screen_rect.width() as i32,
-            screen_rect.height() as i32
+            "Pixel scale factor: {} ",
+            if blit_rect.pos.x == 0.0 {
+                screen_rect.width() / canvas_rect.width()
+            } else {
+                screen_rect.height() / canvas_rect.height()
+            }
         );
-        info!("Canvas size: {} x {}", CANVAS_WIDTH, CANVAS_HEIGHT);
-
-        // TODO(JaSc): Calculate new blit rect
-
-        // info!("Blit-rect: {:?}", rc.canvas_blit_rect());
-        // info!(
-        //     "Pixel scale factor: {} ",
-        //     if rc.canvas_blit_rect().pos.x == 0.0 {
-        //         rc.screen_rect().width() / rc.canvas_rect().width()
-        //     } else {
-        //         rc.screen_rect().height() / rc.canvas_rect().height()
-        //     }
-        // );
-        // info!(
-        //     "Pixel waste: {} x {}",
-        //     rc.screen_rect().width() - rc.canvas_blit_rect().width(),
-        //     rc.screen_rect().height() - rc.canvas_blit_rect().height(),
-        // );
-        // info!("=====================");
+        info!(
+            "Pixel waste: {} x {}",
+            screen_rect.width() - blit_rect.width(),
+            screen_rect.height() - blit_rect.height(),
+        );
+        info!("=====================");
     }
 
     // TODO(JaSc): Re-evaluate the need for the +(0.5, 0.5) offset
@@ -339,22 +371,31 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         }
     }
 
+    let texture_atlas = gamestate
+        .texture_atlas
+        .clone()
+        .expect("Texture atlas does not exist");
+    let canvas_framebuffer = gamestate
+        .canvas_framebuffer
+        .clone()
+        .expect("Canvas framebuffer does not exist");
+
     let transform = gamestate.cam.proj_view_matrix();
     draw_commands.push(DrawCommand::from_lines(
         transform,
-        gamestate.texture_atlas.clone(),
-        FramebufferTarget::Offscreen(gamestate.canvas_framebuffer.clone()),
+        texture_atlas.clone(),
+        FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
         line_batch,
     ));
     draw_commands.push(DrawCommand::from_quads(
         transform,
-        gamestate.texture_atlas.clone(),
-        FramebufferTarget::Offscreen(gamestate.canvas_framebuffer.clone()),
+        texture_atlas.clone(),
+        FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
         fill_batch,
     ));
 
     draw_commands.push(DrawCommand::BlitFramebuffer {
-        source_framebuffer: gamestate.canvas_framebuffer.clone(),
+        source_framebuffer: canvas_framebuffer.clone(),
         target_framebuffer: FramebufferTarget::Screen,
         source_rect: canvas_rect,
         target_rect: canvas_blit_rect(screen_rect, canvas_rect),

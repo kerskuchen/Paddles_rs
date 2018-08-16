@@ -220,7 +220,6 @@ where
     C: gfx::CommandBuffer<R>,
     F: gfx::Factory<R>,
 {
-    // TODO(JaSc): Logging in all functions
     pub fn new(
         mut factory: F,
         encoder: gfx::Encoder<R, C>,
@@ -314,10 +313,12 @@ where
                 }
             }
         }
-
         Ok(())
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Drawing
+    //
     fn draw(
         &mut self,
         transform: Mat4,
@@ -351,7 +352,6 @@ where
                 &pipeline_data,
             ),
         }
-
         Ok(())
     }
 
@@ -419,6 +419,9 @@ where
         Ok(())
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Framebuffers
+    //
     fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
         debug!("Creating framebuffer for {:?}", framebuffer_info);
 
@@ -450,6 +453,32 @@ where
         Ok(())
     }
 
+    fn get_framebuffer(&self, framebuffer: &FramebufferTarget) -> Result<Framebuffer<R>, Error> {
+        match framebuffer {
+            FramebufferTarget::Screen => Ok(self.screen_framebuffer.clone()),
+            FramebufferTarget::Offscreen(framebuffer_info) => {
+                self.get_framebuffer_by_info(framebuffer_info)
+            }
+        }
+    }
+
+    fn get_framebuffer_by_info(
+        &self,
+        framebuffer_info: &FramebufferInfo,
+    ) -> Result<Framebuffer<R>, Error> {
+        Ok(self
+            .framebuffers
+            .get(framebuffer_info)
+            .ok_or(failure::err_msg(format!(
+                "Could not find framebuffer for {:?}",
+                framebuffer_info
+            )))?
+            .clone())
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Textures
+    //
     fn create_texture(
         &mut self,
         texture_info: &TextureInfo,
@@ -507,29 +536,6 @@ where
                 texture_info
             )))?;
         Ok(())
-    }
-
-    fn get_framebuffer(&self, framebuffer: &FramebufferTarget) -> Result<Framebuffer<R>, Error> {
-        match framebuffer {
-            FramebufferTarget::Screen => Ok(self.screen_framebuffer.clone()),
-            FramebufferTarget::Offscreen(framebuffer_info) => {
-                self.get_framebuffer_by_info(framebuffer_info)
-            }
-        }
-    }
-
-    fn get_framebuffer_by_info(
-        &self,
-        framebuffer_info: &FramebufferInfo,
-    ) -> Result<Framebuffer<R>, Error> {
-        Ok(self
-            .framebuffers
-            .get(framebuffer_info)
-            .ok_or(failure::err_msg(format!(
-                "Could not find framebuffer for {:?}",
-                framebuffer_info
-            )))?
-            .clone())
     }
 
     fn get_texture(&self, texture_info: &TextureInfo) -> Result<&ShaderResourceView<R>, Error> {
