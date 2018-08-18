@@ -62,7 +62,7 @@ pub enum DrawMode {
     Fill,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FramebufferTarget {
     Screen,
     Offscreen(FramebufferInfo),

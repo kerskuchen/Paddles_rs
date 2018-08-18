@@ -1,14 +1,14 @@
 #![feature(nll)]
 /*
 TODO(JaSc):
-  X Pixel perfect renderer with generalized (pixel independent) coordinate system
+  x Pixel perfect renderer 
     x Render to offscreen buffer and blit to main screen
-    X Static world camera 
-    X Transformation mouse <-> screen <-> world 
+    x Static world camera 
+    x Transformation screen <-> canvas <-> world 
   x Atlas packer
   x Font packer
   x Atlas textures and sprite/quad/line-batching
-  - Bitmap font rendering 
+  - Bitmap text rendering 
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
   - Audio playback
@@ -16,8 +16,8 @@ TODO(JaSc):
   - BG music with PHAT BEATSIES
 
 TODO(JaSc): (Bigger things for vacations)
-  - Throw out generalized coordinate system and replace by simple pixel-based coordinate system
-  - Make framebuffer handling client side. For this we need to create some new draw commands and 
+  x Throw out generalized coordinate system and replace by simple pixel-based coordinate system
+  x Make framebuffer handling client side. For this we need to create some new draw commands and 
     restructure the platform layer a little
   - Add system commands from client to platform that can change settings like vsync without 
     restart. This requires some major codeflow refactoring but would allow us to better modularize
@@ -32,7 +32,7 @@ BACKLOG(JaSc):
     - Texture array of atlases implementation
     - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
     - Gamepad input
-    x Mouse zooming
+    x Correct mouse zooming and panning
     - Raycasting and collision detection
     x Fixed sized pixel perfect canvase (framebuffer)
     - Flexible sized pixel perfect canvase (framebuffer)
@@ -200,11 +200,9 @@ fn main() -> Result<(), Error> {
             game_lib = game_lib.reload();
             if !game_lib.needs_reloading() {
                 // The game actually reloaded
-                gamestate.notify_hotreload_happened();
+                input.hotreload_happened = true;
             }
         }
-
-        input.clear_button_transitions();
 
         use glutin::{Event, KeyboardInput, WindowEvent};
         events_loop.poll_events(|event| {
@@ -224,6 +222,8 @@ fn main() -> Result<(), Error> {
                         use glutin::VirtualKeyCode::*;
                         match key {
                             Escape => is_running = false,
+                            F1 => input.do_reinit_gamestate = true,
+                            F2 => input.direct_screen_drawing = !input.direct_screen_drawing,
                             _ => (),
                         }
                     }
@@ -304,17 +304,22 @@ fn main() -> Result<(), Error> {
         let draw_commands = game_lib.update_and_draw(&input, &mut gamestate);
         input.time_update = timer_update.elapsed_time() as f32;
 
-        // Draw to screen and flip buffers
+        // Draw to screen
         let timer_draw = Timer::new();
         rc.process_draw_commands(draw_commands)
             .context("Could not to process a draw command")?;
         input.time_draw = timer_draw.elapsed_time() as f32;
 
+        // Flush and flip buffers
         rc.encoder.flush(&mut device);
         window
             .swap_buffers()
             .context("Could not to swap framebuffers")?;
         device.cleanup();
+
+        // Reset input
+        input.clear_button_transitions();
+        input.clear_flags();
     }
 
     Ok(())

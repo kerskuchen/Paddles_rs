@@ -42,8 +42,6 @@ const LOG_LEVEL_MATH: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
 pub struct GameState {
-    is_initialized: bool,
-
     screen_dim: Vec2,
     canvas_framebuffer: Option<FramebufferInfo>,
 
@@ -54,14 +52,14 @@ pub struct GameState {
 
     mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
+
+    origin: WorldPoint,
     cam: Camera,
 }
 
 impl GameState {
     fn new() -> GameState {
         GameState {
-            is_initialized: false,
-
             screen_dim: Vec2::zero(),
             canvas_framebuffer: None,
 
@@ -69,15 +67,14 @@ impl GameState {
             texture_font: None,
             sprite_map: HashMap::new(),
             glyph_sprites: Vec::new(),
-            // TODO(JaSc): Fix and standardize z_near/z_far
-            cam: Camera::new(CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0),
+
             mouse_pos_canvas: CanvasPoint::zero(),
             mouse_pos_world: WorldPoint::zero(),
-        }
-    }
 
-    pub fn notify_hotreload_happened(&mut self) {
-        self.is_initialized = false;
+            // TODO(JaSc): Fix and standardize z_near/z_far
+            cam: Camera::new(CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0),
+            origin: WorldPoint::zero(),
+        }
     }
 }
 
@@ -93,6 +90,11 @@ pub struct GameInput {
     pub time_draw: f32,
 
     pub screen_dim: Vec2,
+
+    pub do_reinit_gamestate: bool,
+    pub do_reinit_drawstate: bool,
+    pub hotreload_happened: bool,
+    pub direct_screen_drawing: bool,
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
@@ -118,12 +120,23 @@ impl GameInput {
 
             screen_dim: Vec2::zero(),
 
+            do_reinit_gamestate: true,
+            do_reinit_drawstate: true,
+            hotreload_happened: true,
+            direct_screen_drawing: false,
+
             mouse_pos_screen: CanvasPoint::zero(),
             mouse_button_left: GameButton::new(),
             mouse_button_middle: GameButton::new(),
             mouse_button_right: GameButton::new(),
             mouse_wheel_delta: 0,
         }
+    }
+
+    pub fn clear_flags(&mut self) {
+        self.do_reinit_gamestate = false;
+        self.do_reinit_drawstate = false;
+        self.hotreload_happened = false;
     }
 
     pub fn clear_button_transitions(&mut self) {
@@ -157,6 +170,14 @@ impl GameButton {
 
     pub fn clear_transitions(&mut self) {
         self.num_state_transitions = 0;
+    }
+
+    pub fn toggle(&mut self) {
+        if self.is_pressed {
+            self.set_state(false);
+        } else {
+            self.set_state(true);
+        }
     }
 }
 
@@ -194,9 +215,12 @@ fn reinitialize_after_hotreload() {
         .expect("Could not initialize logger");
 }
 
-fn initialize_gamestate(gamestate: &mut GameState) -> Vec<DrawCommand> {
-    reinitialize_after_hotreload();
+fn reinitialize_gamestate(gamestate: &mut GameState) {
+    gamestate.origin = WorldPoint::new((1 << 18) as f32, -(1 << 18) as f32);
+    gamestate.cam = Camera::with_position(gamestate.origin, CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0);
+}
 
+fn reinitialize_drawstate(gamestate: &mut GameState) -> Vec<DrawCommand> {
     let mut draw_commands = Vec::new();
     if gamestate.texture_atlas.is_none() {
         // Load atlas texture and sprites
@@ -242,25 +266,26 @@ fn initialize_gamestate(gamestate: &mut GameState) -> Vec<DrawCommand> {
     draw_commands
 }
 
-pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<DrawCommand> {
+pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<DrawCommand> {
     // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
     //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
     let mut draw_commands = Vec::new();
-    if !gamestate.is_initialized {
-        gamestate.is_initialized = true;
-        let mut initialization_commands = initialize_gamestate(&mut gamestate);
+
+    if input.hotreload_happened {
+        reinitialize_after_hotreload();
+    }
+    if input.do_reinit_gamestate {
+        reinitialize_gamestate(gamestate);
+    }
+    if input.do_reinit_drawstate {
+        let mut initialization_commands = reinitialize_drawstate(gamestate);
         draw_commands.append(&mut initialization_commands);
     }
 
-    let startup = pretty_format_duration_ms(input.time_since_startup);
     let delta = pretty_format_duration_ms(input.time_delta as f64);
     let draw = pretty_format_duration_ms(input.time_draw as f64);
     let update = pretty_format_duration_ms(input.time_update as f64);
-
-    dprintln!(startup);
-    dprintln!(delta);
-    dprintln!(draw);
-    dprintln!(update);
+    trace!("delta: {}, draw: {}, update: {}", delta, draw, update);
 
     let texture_atlas = gamestate
         .texture_atlas
@@ -310,6 +335,13 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
         info!("=====================");
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Mouse input
+    //
+    let screen_rect = Rect::from_dimension(gamestate.screen_dim);
+    let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
+
+    // Canvas mouse position
     // TODO(JaSc): Re-evaluate the need for the +(0.5, 0.5) offset
     //
     // NOTE: We add (0.5, 0,5) to the cursors' pixel-position as we want the cursor to be in the
@@ -321,13 +353,12 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     // (effectively flooring it), we would get (1.0, 0.0) which would be wrong.
     // Adding 0.5 gives us a correct flooring result.
     //
-    let screen_rect = Rect::from_dimension(gamestate.screen_dim);
-    let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
+    let new_mouse_pos_canvas = screen_coord_to_canvas_coord(
+        input.mouse_pos_screen + Vec2::new(0.5, 0.5),
+        screen_rect,
+        canvas_rect,
+    );
 
-    // Canvas mouse position
-    let new_mouse_pos_canvas =
-        screen_coord_to_canvas_coord(input.mouse_pos_screen, screen_rect, canvas_rect)
-            + Vec2::new(0.5, 0.5);
     let mouse_delta_canvas = new_mouse_pos_canvas - gamestate.mouse_pos_canvas;
     gamestate.mouse_pos_canvas = new_mouse_pos_canvas;
 
@@ -335,6 +366,9 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     let new_mouse_pos_world = gamestate.cam.canvas_to_world(new_mouse_pos_canvas);
     let _mouse_delta_world = new_mouse_pos_world - gamestate.mouse_pos_world;
     gamestate.mouse_pos_world = new_mouse_pos_world;
+
+    dprintln!(new_mouse_pos_world);
+    dprintln!(new_mouse_pos_world.pixel_snapped());
 
     if input.mouse_button_right.is_pressed {
         gamestate.cam.pan(mouse_delta_canvas);
@@ -364,7 +398,7 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     let mut fill_batch = QuadBatch::new();
 
     // Draw line from origin to cursor position
-    let line_start = WorldPoint::new(0.0, 0.0);
+    let line_start = gamestate.origin;
     let line_end = new_mouse_pos_world;
     line_batch.push_line(line_start, line_end, 0.0, Color::new(1.0, 0.0, 0.0, 1.0));
 
@@ -391,7 +425,8 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
     let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
     for x in -30..30 {
         for diagonal in -20..20 {
-            let pos = Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE;
+            let pos =
+                Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE + gamestate.origin;
             if x % 2 == 0 {
                 fill_batch.push_sprite(
                     gamestate.sprite_map["images/textured"],
@@ -407,25 +442,33 @@ pub fn update_and_draw(input: &GameInput, mut gamestate: &mut GameState) -> Vec<
 
     let transform = gamestate.cam.proj_view_matrix();
 
+    let draw_target = if input.direct_screen_drawing {
+        FramebufferTarget::Screen
+    } else {
+        FramebufferTarget::Offscreen(canvas_framebuffer.clone())
+    };
+
     draw_commands.push(DrawCommand::from_lines(
         transform,
         texture_atlas.clone(),
-        FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+        draw_target.clone(),
         line_batch,
     ));
     draw_commands.push(DrawCommand::from_quads(
         transform,
         texture_atlas.clone(),
-        FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+        draw_target,
         fill_batch,
     ));
 
-    draw_commands.push(DrawCommand::BlitFramebuffer {
-        source_framebuffer: canvas_framebuffer.clone(),
-        target_framebuffer: FramebufferTarget::Screen,
-        source_rect: canvas_rect,
-        target_rect: canvas_blit_rect(screen_rect, canvas_rect),
-    });
+    if !input.direct_screen_drawing {
+        draw_commands.push(DrawCommand::BlitFramebuffer {
+            source_framebuffer: canvas_framebuffer.clone(),
+            target_framebuffer: FramebufferTarget::Screen,
+            source_rect: canvas_rect,
+            target_rect: canvas_blit_rect(screen_rect, canvas_rect),
+        });
+    }
 
     draw_commands
 }

@@ -507,22 +507,23 @@ impl WorldPoint {
 /// ```
 /// # use game_lib::math::*;
 ///
-/// let canvas_dim = Vec2::new(320.0, 180.0);
-/// let mut cam = Camera::new(canvas_dim.x as i32, canvas_dim.y as i32, -1.0, 1.0);
+/// // Canvas and camera setup
+/// let canvas_width = 320;
+/// let canvas_height = 180;
+/// let mut cam = Camera::new(canvas_width, canvas_height, -1.0, 1.0);
 ///
-/// // Canvas mouse position and delta
-/// let old_mouse_pos_canvas = Point::new(50.0, 130.0) / canvas_dim;
-/// let new_mouse_pos_canvas = Point::new(60.0, 130.0) / canvas_dim;
-/// let mouse_delta_canvas = new_mouse_pos_canvas - old_mouse_pos_canvas;
-///
-/// // World mouse position and delta
-/// let old_mouse_pos_world = cam.canvas_to_world(old_mouse_pos_canvas);
-/// let new_mouse_pos_world = cam.canvas_to_world(new_mouse_pos_canvas);
-/// let _mouse_delta_world = new_mouse_pos_world - old_mouse_pos_world;
-///
+/// // Current and old mouse state
+/// let old_mouse_pos_canvas = Point::new(50.0, 130.0);
+/// let new_mouse_pos_canvas = Point::new(60.0, 130.0);
 /// let mouse_button_right_pressed = true;
 /// let mouse_button_middle_pressed = false;
 /// let mouse_wheel_delta = 0;
+///
+/// // World mouse position and delta
+/// let mouse_delta_canvas = new_mouse_pos_canvas - old_mouse_pos_canvas;
+/// let old_mouse_pos_world = cam.canvas_to_world(old_mouse_pos_canvas);
+/// let new_mouse_pos_world = cam.canvas_to_world(new_mouse_pos_canvas);
+/// let _mouse_delta_world = new_mouse_pos_world - old_mouse_pos_world;
 ///
 /// // Pan camera
 /// if mouse_button_right_pressed {
@@ -534,17 +535,19 @@ impl WorldPoint {
 /// }
 /// // Zoom in or out by factors of two
 /// if mouse_wheel_delta > 0 {
-///     // Magnify up to 8x
+///     // Magnify up till 8x
 ///     let new_zoom_level = f32::min(cam.zoom_level * 2.0, 8.0);
 ///     cam.zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
 /// } else if mouse_wheel_delta < 0 {
-///     // Minify down to 1/8
+///     // Minify down till 1/8
 ///     let new_zoom_level = f32::max(cam.zoom_level / 2.0, 1.0 / 8.0);
 ///     cam.zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
 /// }
 ///
 /// // Get project-view-matrix from cam and use it for drawing
 /// let transform = cam.proj_view_matrix();
+///
+/// // ..
 /// ```
 pub struct Camera {
     pub world_rect: Rect,
