@@ -388,7 +388,7 @@ where
         );
 
         // TODO(JaSc): Incorporate source_rect into blit_quad calculation
-        let blit_quad = Quad::new(target_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
+        let blit_quad = Quad::from_rect(target_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
         let vertices = blit_quad.into_vertices();
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
 

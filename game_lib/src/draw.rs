@@ -221,11 +221,6 @@ impl QuadBatch {
         self.vertices.extend_from_slice(&quad.into_vertices());
     }
 
-    pub fn push_quad_centered(&mut self, quad: Quad) {
-        self.vertices
-            .extend_from_slice(&quad.into_vertices_centered());
-    }
-
     pub fn push_sprite(&mut self, sprite: Sprite, pos: WorldPoint, depth: f32, color: Color) {
         self.vertices
             .extend_from_slice(&sprite.into_vertices(pos, depth, color));
@@ -266,19 +261,27 @@ impl LineBatch {
         }
     }
 
-    pub fn push_line(&mut self, start: Point, end: Point, depth: f32, color: Color) {
+    pub fn push_line(
+        &mut self,
+        sprite: Sprite,
+        start: Point,
+        end: Point,
+        depth: f32,
+        color: Color,
+    ) {
         let color = color.into();
 
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
+        // NOTE: Only the x-axis of the sprite is used as texure. It can
+        //       be interpreted as 'gradient texture'.
         let line_vertices = [
             Vertex {
                 pos: [start.x, start.y, depth, 1.0],
-                uv: [0.0, 1.0],
+                uv: [sprite.uv_bounds.left, sprite.uv_bounds.bottom],
                 color,
             },
             Vertex {
                 pos: [end.x, end.y, depth, 1.0],
-                uv: [1.0, 0.0],
+                uv: [sprite.uv_bounds.right, sprite.uv_bounds.bottom],
                 color,
             },
         ];
@@ -354,48 +357,38 @@ impl Sprite {
 //
 #[derive(Debug, Clone, Copy)]
 pub struct Quad {
-    pub rect: Rect,
+    pub bounds: Bounds,
     pub depth: f32,
     pub color: Color,
 }
 
 impl Quad {
-    pub fn new(rect: Rect, depth: f32, color: Color) -> Quad {
-        Quad { rect, depth, color }
+    pub fn from_rect(rect: Rect, depth: f32, color: Color) -> Quad {
+        Quad {
+            bounds: rect.to_bounds(),
+            depth,
+            color,
+        }
+    }
+
+    pub fn from_rect_centered(rect: Rect, depth: f32, color: Color) -> Quad {
+        Quad {
+            bounds: rect.to_bounds_centered(),
+            depth,
+            color,
+        }
+    }
+
+    pub fn from_bounds(bounds: Bounds, depth: f32, color: Color) -> Quad {
+        Quad {
+            bounds,
+            depth,
+            color,
+        }
     }
 
     pub fn into_vertices(self) -> [Vertex; 4] {
-        let bounds = self.rect.to_bounds();
-        let color = self.color.into();
-        let depth = self.depth;
-
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        [
-            Vertex {
-                pos: [bounds.left, bounds.bottom, depth, 1.0],
-                uv: [0.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.right, bounds.bottom, depth, 1.0],
-                uv: [1.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.right, bounds.top, depth, 1.0],
-                uv: [1.0, 0.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.left, bounds.top, depth, 1.0],
-                uv: [0.0, 0.0],
-                color,
-            },
-        ]
-    }
-
-    pub fn into_vertices_centered(self) -> [Vertex; 4] {
-        let bounds = self.rect.to_bounds_centered();
+        let bounds = self.bounds;
         let color = self.color.into();
         let depth = self.depth;
 

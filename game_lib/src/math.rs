@@ -73,12 +73,24 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
+    pub fn new(x: f32, y: f32) -> Vec2 {
+        Vec2 { x, y }
+    }
+
     pub fn zero() -> Vec2 {
         Vec2 { x: 0.0, y: 0.0 }
     }
 
-    pub fn new(x: f32, y: f32) -> Vec2 {
-        Vec2 { x, y }
+    pub fn ones() -> Vec2 {
+        Vec2 { x: 1.0, y: 1.0 }
+    }
+
+    pub fn unit_x() -> Vec2 {
+        Vec2 { x: 1.0, y: 0.0 }
+    }
+
+    pub fn unit_y() -> Vec2 {
+        Vec2 { x: 0.0, y: 1.0 }
     }
 
     pub fn distance_squared(a: Vec2, b: Vec2) -> f32 {
@@ -291,7 +303,7 @@ impl Mat4Helper for Mat4 {
 }
 
 //==================================================================================================
-// Rect
+// Geometry
 //==================================================================================================
 //
 #[derive(Debug, Clone, Copy)]
@@ -422,6 +434,29 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    pub fn pos(&self) -> Point {
+        Point::new(self.left, self.bottom)
+    }
+
+    pub fn pos_centered(&self) -> Point {
+        Point::new(
+            self.left + 0.5 * (self.right - self.left),
+            self.bottom + 0.5 * (self.top - self.bottom),
+        )
+    }
+
+    pub fn dim(&self) -> Vec2 {
+        Vec2::new(self.right - self.left, self.top - self.bottom)
+    }
+
+    pub fn from_rect(rect: Rect) -> Bounds {
+        rect.to_bounds()
+    }
+
+    pub fn from_rect_centered(rect: Rect) -> Bounds {
+        rect.to_bounds_centered()
+    }
+
     pub fn to_rect(&self) -> Rect {
         Rect {
             pos: Point::new(self.left, self.right),
@@ -439,6 +474,56 @@ impl Bounds {
             top: self.top * scale.y,
         }
     }
+
+    pub fn to_border_lines(&self) -> [Line; 4] {
+        [
+            Line {
+                start: Point {
+                    x: self.left,
+                    y: self.bottom,
+                },
+                end: Point {
+                    x: self.right,
+                    y: self.bottom,
+                },
+            },
+            Line {
+                start: Point {
+                    x: self.right,
+                    y: self.bottom,
+                },
+                end: Point {
+                    x: self.right,
+                    y: self.top,
+                },
+            },
+            Line {
+                start: Point {
+                    x: self.right,
+                    y: self.top,
+                },
+                end: Point {
+                    x: self.left,
+                    y: self.top,
+                },
+            },
+            Line {
+                start: Point {
+                    x: self.left,
+                    y: self.top,
+                },
+                end: Point {
+                    x: self.left,
+                    y: self.bottom,
+                },
+            },
+        ]
+    }
+}
+
+pub struct Line {
+    pub start: Point,
+    pub end: Point,
 }
 
 //==================================================================================================

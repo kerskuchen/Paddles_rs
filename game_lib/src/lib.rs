@@ -216,7 +216,7 @@ fn reinitialize_after_hotreload() {
 }
 
 fn reinitialize_gamestate(gamestate: &mut GameState) {
-    gamestate.origin = WorldPoint::new((1 << 18) as f32, -(1 << 18) as f32);
+    gamestate.origin = WorldPoint::zero();
     gamestate.cam = Camera::with_position(gamestate.origin, CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0);
 }
 
@@ -342,23 +342,8 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
     let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
 
     // Canvas mouse position
-    // TODO(JaSc): Re-evaluate the need for the +(0.5, 0.5) offset
-    //
-    // NOTE: We add (0.5, 0,5) to the cursors' pixel-position as we want the cursor to be in the
-    //       center of the canvas' pixel. This prevents artifacts when pixel-snapping the
-    //       cursor world-position later.
-    // Example:
-    // If we transform canvas cursor pixel-position (2,0) to its world position and back to its
-    // canvas pixel-position we get (1.9999981, 0.0). If we would pixel-snap this coordinate
-    // (effectively flooring it), we would get (1.0, 0.0) which would be wrong.
-    // Adding 0.5 gives us a correct flooring result.
-    //
-    let new_mouse_pos_canvas = screen_coord_to_canvas_coord(
-        input.mouse_pos_screen + Vec2::new(0.5, 0.5),
-        screen_rect,
-        canvas_rect,
-    );
-
+    let new_mouse_pos_canvas =
+        screen_pos_to_canvas_pos(input.mouse_pos_screen, screen_rect, canvas_rect);
     let mouse_delta_canvas = new_mouse_pos_canvas - gamestate.mouse_pos_canvas;
     gamestate.mouse_pos_canvas = new_mouse_pos_canvas;
 
@@ -400,7 +385,13 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
     // Draw line from origin to cursor position
     let line_start = gamestate.origin;
     let line_end = new_mouse_pos_world;
-    line_batch.push_line(line_start, line_end, 0.0, Color::new(1.0, 0.0, 0.0, 1.0));
+    line_batch.push_line(
+        gamestate.sprite_map["images/plain"],
+        line_start,
+        line_end,
+        0.0,
+        Color::new(1.0, 0.0, 0.0, 1.0),
+    );
 
     // Cursor
     let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
@@ -414,7 +405,7 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
         cursor_color.z = 1.0;
     }
     fill_batch.push_sprite(
-        gamestate.sprite_map["images/plain"].with_scale(Vec2::new(1.0, 1.0) / UNIT_SIZE),
+        gamestate.sprite_map["images/plain"].with_scale(Vec2::new(1.0, 1.0)),
         new_mouse_pos_world.pixel_snapped(),
         -0.1,
         cursor_color,
@@ -429,36 +420,99 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
                 Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE + gamestate.origin;
             if x % 2 == 0 {
                 fill_batch.push_sprite(
-                    gamestate.sprite_map["images/textured"],
+                    gamestate.sprite_map["images/plain"].with_scale(Vec2::ones() * UNIT_SIZE),
                     pos,
-                    -0.2,
+                    -0.9,
                     grid_dark,
                 );
             } else {
-                fill_batch.push_sprite(gamestate.sprite_map["images/plain"], pos, -0.2, grid_light);
+                fill_batch.push_sprite(
+                    gamestate.sprite_map["images/plain"].with_scale(Vec2::ones() * UNIT_SIZE),
+                    pos,
+                    -0.9,
+                    grid_light,
+                );
             }
         }
     }
 
-    let transform = gamestate.cam.proj_view_matrix();
+    // Playing field
+    let field_bounds = Bounds {
+        left: -11.0 * UNIT_SIZE,
+        right: 11.0 * UNIT_SIZE,
+        bottom: -7.0 * UNIT_SIZE,
+        top: 7.0 * UNIT_SIZE,
+    };
 
+    let field_depth = -0.8;
+    let field_border_color = Color::new(0.7, 0.3, 0.3, 1.0);
+    let field_border_line_color = Color::new(1.0, 0.0, 0.0, 1.0);
+    let field_border_lines = field_bounds.to_border_lines();
+    for line in field_border_lines.iter() {
+        line_batch.push_line(
+            gamestate.sprite_map["images/plain"],
+            line.start,
+            line.end,
+            field_depth,
+            field_border_line_color,
+        );
+    }
+
+    let field_border_left = Bounds {
+        left: field_bounds.left - UNIT_SIZE,
+        right: field_bounds.left,
+        bottom: field_bounds.bottom,
+        top: field_bounds.top,
+    };
+    let field_border_right = Bounds {
+        left: field_bounds.right,
+        right: field_bounds.right + UNIT_SIZE,
+        bottom: field_bounds.bottom,
+        top: field_bounds.top,
+    };
+    let field_border_top = Bounds {
+        left: field_bounds.left - UNIT_SIZE,
+        right: field_bounds.right + UNIT_SIZE,
+        bottom: field_bounds.top,
+        top: field_bounds.top + UNIT_SIZE,
+    };
+    let field_border_bottom = Bounds {
+        left: field_bounds.left - UNIT_SIZE,
+        right: field_bounds.right + UNIT_SIZE,
+        bottom: field_bounds.bottom - UNIT_SIZE,
+        top: field_bounds.bottom,
+    };
+
+    let field_borders = vec![
+        field_border_left,
+        field_border_right,
+        field_border_top,
+        field_border_bottom,
+    ];
+
+    field_borders
+        .iter()
+        .map(|&border| Quad::from_bounds(border, field_depth, field_border_color))
+        .for_each(|quad| fill_batch.push_quad(quad));
+
+    let transform = gamestate.cam.proj_view_matrix();
     let draw_target = if input.direct_screen_drawing {
         FramebufferTarget::Screen
     } else {
         FramebufferTarget::Offscreen(canvas_framebuffer.clone())
     };
 
-    draw_commands.push(DrawCommand::from_lines(
-        transform,
-        texture_atlas.clone(),
-        draw_target.clone(),
-        line_batch,
-    ));
     draw_commands.push(DrawCommand::from_quads(
         transform,
         texture_atlas.clone(),
-        draw_target,
+        draw_target.clone(),
         fill_batch,
+    ));
+    draw_commands.push(DrawCommand::from_lines(
+        transform,
+        texture_atlas.clone(),
+        draw_target,
+        line_batch,
     ));
 
     if !input.direct_screen_drawing {
@@ -495,11 +549,7 @@ pub fn canvas_blit_rect(screen_rect: Rect, canvas_rect: Rect) -> Rect {
 /// a canvas-position in the following interval:
 /// `[0..canvas_rect.width-1]x[0..canvas_rect.height-1]`
 /// where `(0,0)` is the bottom left of the canvas.
-fn screen_coord_to_canvas_coord(
-    screen_point: Point,
-    screen_rect: Rect,
-    canvas_rect: Rect,
-) -> Point {
+fn screen_pos_to_canvas_pos(screen_point: Point, screen_rect: Rect, canvas_rect: Rect) -> Point {
     // NOTE: Clamping the point needs to use integer arithmetic such that
     //          x != canvas.rect.width and y != canvas.rect.height
     //       holds. We therefore need to subtract one from the blit_rect's dimension and then

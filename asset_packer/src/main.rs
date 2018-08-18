@@ -41,7 +41,7 @@ fn main() -> Result<(), Error> {
 
     debug!("Packing fonts");
     let font_height = 8.0;
-    let show_debug_colors = true;
+    let show_debug_colors = false;
     let do_draw_border = true;
     let font_filelist = common::collect_all_files_with_extension(common::ASSETS_DIR, "ttf");
 
