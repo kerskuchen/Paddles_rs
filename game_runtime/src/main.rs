@@ -224,7 +224,10 @@ fn main() -> Result<(), Error> {
                             Escape => is_running = false,
                             F1 => input.do_reinit_gamestate = true,
                             F5 => input.do_reinit_drawstate = true,
-                            F9 => input.direct_screen_drawing = !input.direct_screen_drawing,
+                            F9 => {
+                                input.direct_screen_drawing = !input.direct_screen_drawing;
+                                input.do_reinit_drawstate = true;
+                            }
                             _ => (),
                         }
                     }

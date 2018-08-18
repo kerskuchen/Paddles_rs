@@ -163,12 +163,12 @@ fn pack_glyph<'a>(
     // Calculate the outer rect / packed rect
     let pack_width = advance_width + 2 * padding;
     let pack_height = text_height + 2 * padding;
-    let outer_rect = packer
-        .pack(pack_width, pack_height, false)
-        .ok_or(failure::err_msg(format!(
+    let outer_rect = packer.pack(pack_width, pack_height, false).ok_or_else(|| {
+        failure::err_msg(format!(
             "Not enough space to pack glyph for code_point: '{}'",
             code_point
-        )))?;
+        ))
+    })?;
 
     Ok(GlyphData {
         code_point,
@@ -223,7 +223,7 @@ fn write_metadata(
         // After prepending 32 empty codepoints into the vector we have 'A' at vector index 65,
         // which is now equal to its ASCII-index.
         let num_code_points_before_first_code_point = (FIRST_VISIBLE_ASCII_CODE_POINT as usize) - 1;
-        let index_for_space_code_point = (' ' as u8 - FIRST_VISIBLE_ASCII_CODE_POINT) as usize;
+        let index_for_space_code_point = (b' ' - FIRST_VISIBLE_ASCII_CODE_POINT) as usize;
         let space_code_point_sprite = sprites[index_for_space_code_point];
         let mut sprites_till_first_codepoint: Vec<_> = std::iter::repeat(space_code_point_sprite)
             .take(num_code_points_before_first_code_point)

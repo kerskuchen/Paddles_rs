@@ -23,10 +23,8 @@ impl PathHelper for OsStr {
     fn to_string(&self) -> Result<String, Error> {
         Ok(self
             .to_str()
-            .ok_or(failure::err_msg(format!(
-                "Could not convert path to string {:?}",
-                self
-            )))?
+// TODO(JaSc): Report rustfmt bug
+            .ok_or_else(|| failure::err_msg(format!("Could not convert path to string {:?}", self)))?
             .to_owned())
     }
 }
@@ -34,10 +32,12 @@ impl PathHelper for OsStr {
 pub fn filepath_to_filename_string(filepath: &Path) -> Result<String, Error> {
     Ok(filepath
         .file_name()
-        .ok_or(failure::err_msg(format!(
-            "Could not retrieve filename from path {}",
-            filepath.display()
-        )))?
+        .ok_or_else(|| {
+            failure::err_msg(format!(
+                "Could not retrieve filename from path {}",
+                filepath.display()
+            ))
+        })?
         .to_string()?)
 }
 

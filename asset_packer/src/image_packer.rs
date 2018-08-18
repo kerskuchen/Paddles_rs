@@ -59,10 +59,12 @@ pub fn pack_images(image_filelist: &[PathBuf], show_debug_colors: bool) -> Resul
 
         let dest_region = packer
             .pack(width as i32, height as i32, false)
-            .ok_or(failure::err_msg(format!(
-                "Not enough space to pack image: '{}'",
-                image_filepath.display()
-            )))?;
+            .ok_or_else(|| {
+                failure::err_msg(format!(
+                    "Not enough space to pack image: '{}'",
+                    image_filepath.display()
+                ))
+            })?;
         let source_region = Rect {
             x: 0,
             y: 0,

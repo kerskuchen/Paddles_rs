@@ -306,6 +306,8 @@ impl Mat4Helper for Mat4 {
 // Geometry
 //==================================================================================================
 //
+
+// TODO(JaSc): Evaluate if it would be better to have the fields of Bounds directly in rect
 #[derive(Debug, Clone, Copy)]
 pub struct Rect {
     pub pos: Point,
@@ -434,6 +436,15 @@ pub struct Bounds {
 }
 
 impl Bounds {
+    pub fn new(left: f32, right: f32, bottom: f32, top: f32) -> Bounds {
+        Bounds {
+            left,
+            right,
+            bottom,
+            top,
+        }
+    }
+
     pub fn pos(&self) -> Point {
         Point::new(self.left, self.bottom)
     }
@@ -521,9 +532,16 @@ impl Bounds {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct Line {
     pub start: Point,
     pub end: Point,
+}
+
+impl Line {
+    pub fn new(start: Point, end: Point) -> Line {
+        Line { start, end }
+    }
 }
 
 //==================================================================================================

@@ -1,8 +1,13 @@
-use math::{Bounds, Color, Mat4, Point, Rect, Vec2, WorldPoint};
+use math::{Bounds, Color, Line, Mat4, Point, Rect, Vec2, WorldPoint};
 
+use bincode;
+use lodepng;
 use rgb;
 pub use rgb::ComponentBytes;
+
 use std;
+use std::collections::HashMap;
+use std::fs::File;
 
 pub type Pixel = rgb::RGBA8;
 pub type VertexIndex = u16;
@@ -14,60 +19,211 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TextureInfo {
-    pub id: u32,
-    pub width: u16,
-    pub height: u16,
-    pub name: String,
+//==================================================================================================
+// DrawContext
+//==================================================================================================
+//
+
+// TODO(JaSc): Change screen color based on debug/release to better see
+//             letterboxing in windowed mode
+const CLEAR_COLOR_SCREEN: [f32; 4] = [0.2, 0.9, 0.4, 1.0];
+const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
+
+#[derive(Default)]
+pub struct DrawContext {
+    texture_atlas: Option<TextureInfo>,
+    texture_font: Option<TextureInfo>,
+    sprite_map: HashMap<String, Sprite>,
+    glyph_sprites: Vec<Sprite>,
+
+    canvas_framebuffer: Option<FramebufferInfo>,
+
+    line_batch: LineBatch,
+    fill_batch: QuadBatch,
+
+    draw_commands: Vec<DrawCommand>,
 }
 
-impl TextureInfo {
-    pub fn empty() -> TextureInfo {
-        TextureInfo {
-            id: 0,
-            width: 0,
-            height: 0,
-            name: String::from(""),
+impl DrawContext {
+    pub fn new() -> DrawContext {
+        DrawContext {
+            texture_atlas: None,
+            texture_font: None,
+            sprite_map: HashMap::new(),
+            glyph_sprites: Vec::new(),
+
+            canvas_framebuffer: None,
+
+            line_batch: LineBatch::new(),
+            fill_batch: QuadBatch::new(),
+
+            draw_commands: Vec::new(),
         }
+    }
+
+    pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
+        // TODO(JaSc): Cache the plain texture uv for reuse
+        let plain_uv = self.sprite_map["images/plain"].uv_bounds;
+        let line_uv = sprite_uv_to_line_uv(plain_uv);
+        self.line_batch.push_line(line, line_uv, depth, color);
+    }
+
+    pub fn draw_rect_filled(&mut self, bounds: Bounds, depth: f32, color: Color) {
+        // TODO(JaSc): Cache the plain texture uv for reuse
+        let plain_uv = self.sprite_map["images/plain"].uv_bounds;
+        self.fill_batch.push_quad(bounds, plain_uv, depth, color);
+    }
+
+    pub fn start_drawing(&mut self) {
+        self.fill_batch.clear();
+        self.line_batch.clear();
+    }
+
+    // TODO(JaSc): Get rid of screen_rect/canvas_rect here
+    pub fn finish_drawing(
+        &mut self,
+        transform: Mat4,
+        canvas_rect: Rect,
+        canvas_blit_rect: Rect,
+    ) -> Vec<DrawCommand> {
+        let canvas_framebuffer = self
+            .canvas_framebuffer
+            .clone()
+            .expect("Canvas framebuffer does not exist");
+        let texture_atlas = self
+            .texture_atlas
+            .clone()
+            .expect("Texture atlas does not exist");
+
+        // Clear screen and canvas
+        self.draw_commands.push(DrawCommand::Clear {
+            framebuffer: FramebufferTarget::Screen,
+            color: Color::from(CLEAR_COLOR_SCREEN),
+        });
+        self.draw_commands.push(DrawCommand::Clear {
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            color: Color::from(CLEAR_COLOR_CANVAS),
+        });
+
+        // Draw batches
+        let (vertices, indices) = self.fill_batch.extract_vertices_indices();
+        self.draw_commands.push(DrawCommand::Draw {
+            transform,
+            texture_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            vertices,
+            indices,
+            draw_mode: DrawMode::Fill,
+        });
+        let (vertices, indices) = self.line_batch.extract_vertices_indices();
+        self.draw_commands.push(DrawCommand::Draw {
+            transform,
+            texture_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            vertices,
+            indices,
+            draw_mode: DrawMode::Lines,
+        });
+
+        // Blit canvas to screen
+        self.draw_commands.push(DrawCommand::BlitFramebuffer {
+            source_framebuffer: canvas_framebuffer.clone(),
+            target_framebuffer: FramebufferTarget::Screen,
+            source_rect: canvas_rect,
+            target_rect: canvas_blit_rect,
+        });
+
+        std::mem::replace(&mut self.draw_commands, Vec::new())
+    }
+
+    pub fn reinitialize(&mut self, canvas_width: u16, canvas_height: u16) {
+        // -----------------------------------------------------------------------------------------
+        // Sprite creation
+        //
+
+        // Create atlas sprites from metafile
+        let mut atlas_metafile =
+            File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
+        self.sprite_map = bincode::deserialize_from(&mut atlas_metafile)
+            .expect("Could not deserialize sprite map");
+
+        // Delete old texture if it exists
+        if let Some(old_atlas_texture_info) = self.texture_atlas.take() {
+            self.draw_commands.push(DrawCommand::DeleteTexture {
+                texture_info: old_atlas_texture_info,
+            });
+        }
+        // Create atlas texture
+        let (texture_info, pixels) = load_texture(0, "data/images/atlas.png");
+        self.texture_atlas = Some(texture_info.clone());
+        self.draw_commands.push(DrawCommand::CreateTexture {
+            texture_info,
+            pixels,
+        });
+
+        // -----------------------------------------------------------------------------------------
+        // Font creation
+        //
+
+        // Create font-glyph sprites from metafile
+        let mut font_metafile =
+            File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
+        self.glyph_sprites = bincode::deserialize_from(&mut font_metafile)
+            .expect("Could not deserialize font glyphs");
+
+        // Delete old texture if it exists
+        if let Some(old_font_texture_info) = self.texture_font.take() {
+            self.draw_commands.push(DrawCommand::DeleteTexture {
+                texture_info: old_font_texture_info,
+            });
+        }
+        // Create font texture
+        let (texture_info, pixels) = load_texture(1, "data/fonts/04B_03__.png");
+        self.texture_font = Some(texture_info.clone());
+        self.draw_commands.push(DrawCommand::CreateTexture {
+            texture_info,
+            pixels,
+        });
+
+        // -----------------------------------------------------------------------------------------
+        // Framebuffer creation
+        //
+
+        // Delete old framebuffer if it exists
+        if let Some(old_canvas_framebuffer_info) = self.canvas_framebuffer.take() {
+            self.draw_commands.push(DrawCommand::DeleteFramebuffer {
+                framebuffer_info: old_canvas_framebuffer_info,
+            });
+        }
+
+        // Create new canvas framebuffer
+        let framebuffer_info = FramebufferInfo {
+            id: 0,
+            width: canvas_width,
+            height: canvas_height,
+            name: String::from("Canvas"),
+        };
+        self.canvas_framebuffer = Some(framebuffer_info.clone());
+        self.draw_commands
+            .push(DrawCommand::CreateFramebuffer { framebuffer_info });
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FramebufferInfo {
-    pub id: u32,
-    pub width: u16,
-    pub height: u16,
-    pub name: String,
+fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
+    let image = lodepng::decode32_file(file_name).unwrap();
+    let texture_info = TextureInfo {
+        id,
+        width: image.width as u16,
+        height: image.height as u16,
+        name: String::from(file_name),
+    };
+    (texture_info, image.buffer)
 }
 
-impl FramebufferInfo {
-    pub fn empty() -> FramebufferInfo {
-        FramebufferInfo {
-            id: 0,
-            width: 0,
-            height: 0,
-            name: String::from(""),
-        }
-    }
-}
 //==================================================================================================
 // DrawCommand
 //==================================================================================================
 //
-
-#[derive(Debug, Copy, Clone)]
-pub enum DrawMode {
-    Lines,
-    Fill,
-}
-
-#[derive(Debug, Clone)]
-pub enum FramebufferTarget {
-    Screen,
-    Offscreen(FramebufferInfo),
-}
-
 pub enum DrawCommand {
     Draw {
         transform: Mat4,
@@ -162,38 +318,52 @@ impl std::fmt::Debug for DrawCommand {
     }
 }
 
-impl DrawCommand {
-    pub fn from_quads(
-        transform: Mat4,
-        texture_info: TextureInfo,
-        framebuffer: FramebufferTarget,
-        batch: QuadBatch,
-    ) -> DrawCommand {
-        let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand::Draw {
-            transform,
-            vertices,
-            indices,
-            texture_info,
-            framebuffer,
-            draw_mode: DrawMode::Fill,
+#[derive(Debug, Copy, Clone)]
+pub enum DrawMode {
+    Lines,
+    Fill,
+}
+
+#[derive(Debug, Clone)]
+pub enum FramebufferTarget {
+    Screen,
+    Offscreen(FramebufferInfo),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TextureInfo {
+    pub id: u32,
+    pub width: u16,
+    pub height: u16,
+    pub name: String,
+}
+
+impl TextureInfo {
+    pub fn empty() -> TextureInfo {
+        TextureInfo {
+            id: 0,
+            width: 0,
+            height: 0,
+            name: String::from(""),
         }
     }
+}
 
-    pub fn from_lines(
-        transform: Mat4,
-        texture_info: TextureInfo,
-        framebuffer: FramebufferTarget,
-        batch: LineBatch,
-    ) -> DrawCommand {
-        let (vertices, indices) = batch.into_vertices_indices();
-        DrawCommand::Draw {
-            transform,
-            vertices,
-            indices,
-            texture_info,
-            framebuffer,
-            draw_mode: DrawMode::Lines,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FramebufferInfo {
+    pub id: u32,
+    pub width: u16,
+    pub height: u16,
+    pub name: String,
+}
+
+impl FramebufferInfo {
+    pub fn empty() -> FramebufferInfo {
+        FramebufferInfo {
+            id: 0,
+            width: 0,
+            height: 0,
+            name: String::from(""),
         }
     }
 }
@@ -202,9 +372,14 @@ impl DrawCommand {
 // Batch drawing
 //==================================================================================================
 //
+
+// -------------------------------------------------------------------------------------------------
+// Quads
+//
 #[derive(Default)]
 pub struct QuadBatch {
     vertices: Vec<Vertex>,
+    indices: Vec<VertexIndex>,
 }
 
 impl QuadBatch {
@@ -214,41 +389,84 @@ impl QuadBatch {
     pub fn new() -> QuadBatch {
         QuadBatch {
             vertices: Vec::new(),
+            indices: Vec::new(),
         }
     }
 
-    pub fn push_quad(&mut self, quad: Quad) {
-        self.vertices.extend_from_slice(&quad.into_vertices());
+    pub fn clear(&mut self) {
+        // NOTE: We don't clear the indices as we want to reuse them. This is possible because we
+        //       know that we always will only store quads in this batch.
+        self.vertices.clear();
     }
 
-    pub fn push_sprite(&mut self, sprite: Sprite, pos: WorldPoint, depth: f32, color: Color) {
-        self.vertices
-            .extend_from_slice(&sprite.into_vertices(pos, depth, color));
+    pub fn push_quad(&mut self, bounds: Bounds, bounds_uv: Bounds, depth: f32, color: Color) {
+        let color = color.into();
+
+        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
+        let quad_vertices = [
+            Vertex {
+                pos: [bounds.left, bounds.bottom, depth, 1.0],
+                uv: [bounds_uv.left, bounds_uv.top],
+                color,
+            },
+            Vertex {
+                pos: [bounds.right, bounds.bottom, depth, 1.0],
+                uv: [bounds_uv.right, bounds_uv.top],
+                color,
+            },
+            Vertex {
+                pos: [bounds.right, bounds.top, depth, 1.0],
+                uv: [bounds_uv.right, bounds_uv.bottom],
+                color,
+            },
+            Vertex {
+                pos: [bounds.left, bounds.top, depth, 1.0],
+                uv: [bounds_uv.left, bounds_uv.bottom],
+                color,
+            },
+        ];
+        self.vertices.extend_from_slice(&quad_vertices);
     }
 
-    pub fn into_vertices_indices(self) -> (Vec<Vertex>, Vec<VertexIndex>) {
+    pub fn extract_vertices_indices(&mut self) -> (Vec<Vertex>, Vec<VertexIndex>) {
         let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
-        let num_indices = num_quads * QuadBatch::INDICES_PER_QUAD;
+        let num_indices_to_fill = (num_quads * QuadBatch::INDICES_PER_QUAD) as VertexIndex;
+        let num_indices_already_filled = self.indices.len() as VertexIndex;
 
-        let mut indices = Vec::with_capacity(num_indices);
-        for quad_index in 0..(num_indices as VertexIndex) {
-            let quad_indices = [
-                4 * quad_index,
-                4 * quad_index + 1,
-                4 * quad_index + 2,
-                4 * quad_index + 2,
-                4 * quad_index + 3,
-                4 * quad_index,
-            ];
-            indices.extend(&quad_indices);
+        // Fill our indices vector if needed
+        if num_indices_already_filled < num_indices_to_fill {
+            for quad_index in num_indices_already_filled..num_indices_to_fill {
+                let quad_indices = [
+                    4 * quad_index,
+                    4 * quad_index + 1,
+                    4 * quad_index + 2,
+                    4 * quad_index + 2,
+                    4 * quad_index + 3,
+                    4 * quad_index,
+                ];
+                self.indices.extend(&quad_indices);
+            }
         }
-        (self.vertices, indices)
+
+        // TODO(JaSc): Return references
+        (
+            self.vertices.clone(),
+            self.indices
+                .clone()
+                .into_iter()
+                .take(num_indices_to_fill as usize)
+                .collect(),
+        )
     }
 }
 
+// -------------------------------------------------------------------------------------------------
+// Lines
+//
 #[derive(Default)]
 pub struct LineBatch {
     vertices: Vec<Vertex>,
+    indices: Vec<VertexIndex>,
 }
 
 impl LineBatch {
@@ -258,46 +476,54 @@ impl LineBatch {
     pub fn new() -> LineBatch {
         LineBatch {
             vertices: Vec::new(),
+            indices: Vec::new(),
         }
     }
+    pub fn clear(&mut self) {
+        // NOTE: We don't clear the indices as we want to reuse them. This is possible because we
+        //       know that we always will store only line in this batch.
+        self.vertices.clear();
+    }
 
-    pub fn push_line(
-        &mut self,
-        sprite: Sprite,
-        start: Point,
-        end: Point,
-        depth: f32,
-        color: Color,
-    ) {
+    pub fn push_line(&mut self, line: Line, line_uv: Line, depth: f32, color: Color) {
         let color = color.into();
-
-        // NOTE: Only the x-axis of the sprite is used as texure. It can
-        //       be interpreted as 'gradient texture'.
         let line_vertices = [
             Vertex {
-                pos: [start.x, start.y, depth, 1.0],
-                uv: [sprite.uv_bounds.left, sprite.uv_bounds.bottom],
+                pos: [line.start.x, line.start.y, depth, 1.0],
+                uv: [line_uv.start.x, line_uv.start.y],
                 color,
             },
             Vertex {
-                pos: [end.x, end.y, depth, 1.0],
-                uv: [sprite.uv_bounds.right, sprite.uv_bounds.bottom],
+                pos: [line.end.x, line.end.y, depth, 1.0],
+                uv: [line_uv.end.x, line_uv.end.y],
                 color,
             },
         ];
         self.vertices.extend_from_slice(&line_vertices);
     }
 
-    pub fn into_vertices_indices(self) -> (Vec<Vertex>, Vec<VertexIndex>) {
+    pub fn extract_vertices_indices(&mut self) -> (Vec<Vertex>, Vec<VertexIndex>) {
         let num_lines = self.vertices.len() / LineBatch::VERTICES_PER_LINE;
-        let num_indices = num_lines * LineBatch::INDICES_PER_LINE;
+        let num_indices_to_fill = (num_lines * LineBatch::INDICES_PER_LINE) as VertexIndex;
+        let num_indices_already_filled = self.indices.len() as VertexIndex;
 
-        let mut indices = Vec::with_capacity(num_indices);
-        for line_index in 0..(num_indices as VertexIndex) {
-            let line_indices = [2 * line_index, 2 * line_index + 1];
-            indices.extend(&line_indices);
+        // Fill our indices vector if needed
+        if num_indices_already_filled < num_indices_to_fill {
+            for line_index in num_indices_already_filled..num_indices_to_fill {
+                let line_indices = [2 * line_index, 2 * line_index + 1];
+                self.indices.extend(&line_indices);
+            }
         }
-        (self.vertices, indices)
+
+        // TODO(JaSc): Return references
+        (
+            self.vertices.clone(),
+            self.indices
+                .clone()
+                .into_iter()
+                .take(num_indices_to_fill as usize)
+                .collect(),
+        )
     }
 }
 
@@ -306,6 +532,7 @@ impl LineBatch {
 //==================================================================================================
 //
 
+// TODO(JaSc): Evaluate if we still need this struct or a better alternative/name
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Sprite {
     pub vertex_bounds: Bounds,
@@ -355,6 +582,7 @@ impl Sprite {
 // Quad
 //==================================================================================================
 //
+// TODO(JaSc): Evaluate if we still need this struct
 #[derive(Debug, Clone, Copy)]
 pub struct Quad {
     pub bounds: Bounds,
@@ -416,4 +644,17 @@ impl Quad {
             },
         ]
     }
+}
+
+//==================================================================================================
+// Helper functions
+//==================================================================================================
+//
+// TODO(JaSc): Find a place for these graphic/geometry helper functions
+fn sprite_uv_to_line_uv(sprite_uv: Bounds) -> Line {
+    // NOTE: We use only the horizontal axis of a sprite's uv
+    Line::new(
+        Point::new(sprite_uv.left, sprite_uv.bottom),
+        Point::new(sprite_uv.right, sprite_uv.top),
+    )
 }

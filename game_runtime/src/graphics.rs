@@ -363,8 +363,11 @@ where
         let target = self.get_framebuffer(framebuffer_target)?;
         self.encoder
             .clear(&target.color_render_target_view, clear_color.into());
+
+        // TODO(JaSc): Get the clear depth value from the command as well
+        let clear_depth_value = 1.0;
         self.encoder
-            .clear_depth(&target.depth_render_target_view, 1.0);
+            .clear_depth(&target.depth_render_target_view, clear_depth_value);
 
         Ok(())
     }
