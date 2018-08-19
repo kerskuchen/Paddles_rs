@@ -18,22 +18,6 @@ pub struct GameLib {
 }
 
 impl GameLib {
-    /// Forwards to the dynamic libraries' corresponding `create_gamestate` function
-    pub fn create_gamestate(&self) -> GameState {
-        unsafe {
-            let f = self
-                .lib
-                .get::<fn() -> GameState>(b"create_gamestate\0")
-                .unwrap_or_else(|error| {
-                    panic!(
-                        "Could not load `create_gamestate` function from GameLib: {}",
-                        error
-                    )
-                });
-            f()
-        }
-    }
-
     /// Forwards to the dynamic libraries' corresponding `update_and_draw` function
     pub fn update_and_draw(
         &self,

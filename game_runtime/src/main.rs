@@ -43,7 +43,7 @@ BACKLOG(JaSc):
 
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{GameInput, Point, Vec2};
+use game_lib::{GameInput, GameState, Point, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -186,7 +186,7 @@ fn main() -> Result<(), Error> {
 
     let mut input = GameInput::new();
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
-    let mut gamestate = game_lib.create_gamestate();
+    let mut gamestate = GameState::new();
 
     let timer_startup = Timer::new();
     let mut timer_delta = Timer::new();

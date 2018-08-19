@@ -51,7 +51,7 @@ pub struct GameState {
 }
 
 impl GameState {
-    fn new() -> GameState {
+    pub fn new() -> GameState {
         GameState {
             screen_dim: Vec2::zero(),
 
@@ -174,10 +174,6 @@ impl GameButton {
 // Game
 //==================================================================================================
 //
-pub fn create_gamestate() -> GameState {
-    GameState::new()
-}
-
 fn reinitialize_after_hotreload() {
     // Initializing logger
     // NOTE: When hot reloading the game lib dll the logging must be reinitialized
@@ -398,6 +394,10 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
     let transform = gamestate.cam.proj_view_matrix();
     drawcontext.finish_drawing(transform, canvas_rect, canvas_blit_rect)
 }
+
+// =================================================================================================
+// TODO(JaSc): Find a better place for the following two functions
+// =================================================================================================
 
 /// Returns the `blit_rectangle` of for given canvas and screen rectangles.
 /// The `blit-rectange` is the area of the screen where the content of the canvas is drawn onto.
