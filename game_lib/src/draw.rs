@@ -29,6 +29,7 @@ pub struct Vertex {
 const CLEAR_COLOR_SCREEN: [f32; 4] = [0.2, 0.9, 0.4, 1.0];
 const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
 
+#[derive(Default)]
 pub struct DrawContext<'drawcontext> {
     texture_atlas: Option<TextureInfo>,
     texture_font: Option<TextureInfo>,
@@ -45,19 +46,7 @@ pub struct DrawContext<'drawcontext> {
 
 impl<'drawcontext> DrawContext<'drawcontext> {
     pub fn new() -> DrawContext<'drawcontext> {
-        DrawContext {
-            texture_atlas: None,
-            texture_font: None,
-            sprite_map: HashMap::new(),
-            glyph_sprites: Vec::new(),
-
-            canvas_framebuffer: None,
-
-            lines: LineMesh::new(),
-            polygons: PolygonMesh::new(),
-
-            draw_commands: Vec::new(),
-        }
+        Default::default()
     }
 
     pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
@@ -105,17 +94,17 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         });
 
         // Draw batches
-        self.draw_commands.push(DrawCommand::DrawLines {
-            transform,
-            texture_info: texture_atlas.clone(),
-            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh: &self.lines,
-        });
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             mesh: &self.polygons,
+        });
+        self.draw_commands.push(DrawCommand::DrawLines {
+            transform,
+            texture_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            mesh: &self.lines,
         });
 
         // Blit canvas to screen
@@ -382,6 +371,7 @@ pub trait Mesh {
 // -------------------------------------------------------------------------------------------------
 // LineMesh
 //
+#[derive(Default)]
 pub struct LineMesh {
     vertices: Vec<Vertex>,
     indices: Vec<VertexIndex>,
@@ -389,10 +379,7 @@ pub struct LineMesh {
 
 impl Mesh for LineMesh {
     fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-        }
+        Default::default()
     }
 
     fn clear(&mut self) {
@@ -432,6 +419,7 @@ impl LineMesh {
 // -------------------------------------------------------------------------------------------------
 // PolygonMesh
 //
+#[derive(Default)]
 pub struct PolygonMesh {
     vertices: Vec<Vertex>,
     indices: Vec<VertexIndex>,
@@ -439,10 +427,7 @@ pub struct PolygonMesh {
 
 impl Mesh for PolygonMesh {
     fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-        }
+        Default::default()
     }
 
     fn clear(&mut self) {

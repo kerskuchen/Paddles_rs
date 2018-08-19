@@ -38,6 +38,7 @@ const LOG_LEVEL_GAME_LIB: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_MATH: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
+#[derive(Default)]
 pub struct GameState<'gamestate> {
     screen_dim: Vec2,
 
@@ -51,23 +52,12 @@ pub struct GameState<'gamestate> {
 }
 
 impl<'gamestate> GameState<'gamestate> {
-    pub fn new() -> GameState<'gamestate> {
-        GameState {
-            screen_dim: Vec2::zero(),
-
-            drawcontext: DrawContext::new(),
-
-            mouse_pos_canvas: CanvasPoint::zero(),
-            mouse_pos_world: WorldPoint::zero(),
-
-            // TODO(JaSc): Fix and standardize z_near/z_far
-            cam: Camera::new(CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0),
-            origin: WorldPoint::zero(),
-        }
-    }
-
     pub fn get_draw_commands(&mut self) -> Vec<DrawCommand> {
         std::mem::replace(&mut self.drawcontext.draw_commands, Vec::new())
+    }
+
+    pub fn new() -> GameState<'gamestate> {
+        Default::default()
     }
 }
 
@@ -105,25 +95,7 @@ pub struct GameInput {
 
 impl GameInput {
     pub fn new() -> GameInput {
-        GameInput {
-            time_since_startup: 0.0,
-            time_delta: 0.0,
-            time_update: 0.0,
-            time_draw: 0.0,
-
-            screen_dim: Vec2::zero(),
-
-            do_reinit_gamestate: true,
-            do_reinit_drawstate: true,
-            hotreload_happened: true,
-            direct_screen_drawing: false,
-
-            mouse_pos_screen: CanvasPoint::zero(),
-            mouse_button_left: GameButton::new(),
-            mouse_button_middle: GameButton::new(),
-            mouse_button_right: GameButton::new(),
-            mouse_wheel_delta: 0,
-        }
+        Default::default()
     }
 
     pub fn clear_flags(&mut self) {
@@ -148,10 +120,7 @@ pub struct GameButton {
 
 impl GameButton {
     pub fn new() -> GameButton {
-        GameButton {
-            num_state_transitions: 0,
-            is_pressed: false,
-        }
+        Default::default()
     }
 
     pub fn set_state(&mut self, is_pressed: bool) {

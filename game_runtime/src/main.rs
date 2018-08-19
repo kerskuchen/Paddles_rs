@@ -185,6 +185,10 @@ fn main() -> Result<(), Error> {
     let mut window_entered_fullscreen = false;
 
     let mut input = GameInput::new();
+    input.do_reinit_gamestate = true;
+    input.do_reinit_drawstate = true;
+    input.hotreload_happened = true;
+
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     let mut gamestate = GameState::new();
 

@@ -66,10 +66,16 @@ use std::ops::Neg;
 use std::ops::Sub;
 use std::ops::SubAssign;
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vec2 {
     pub x: f32,
     pub y: f32,
+}
+
+impl Default for Vec2 {
+    fn default() -> Vec2 {
+        Vec2::zero()
+    }
 }
 
 impl Vec2 {
@@ -312,6 +318,12 @@ impl Mat4Helper for Mat4 {
 pub struct Rect {
     pub pos: Point,
     pub dim: Vec2,
+}
+
+impl Default for Rect {
+    fn default() -> Rect {
+        Rect::zero()
+    }
 }
 
 impl Rect {
@@ -652,11 +664,23 @@ impl WorldPoint {
 ///
 /// // ..
 /// ```
+
 pub struct Camera {
     pub world_rect: Rect,
     pub zoom_level: f32,
     pub z_near: f32,
     pub z_far: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Camera {
+        Camera {
+            world_rect: Default::default(),
+            zoom_level: 1.0,
+            z_near: -1.0,
+            z_far: 1.0,
+        }
+    }
 }
 
 impl Camera {
