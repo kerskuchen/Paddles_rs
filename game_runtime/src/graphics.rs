@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use failure;
 use failure::{Error, ResultExt};
 
+use std;
+
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::DepthStencil;
 
@@ -176,7 +178,7 @@ where
 
     fn create_pipeline_data(
         &self,
-        transform: Mat4,
+        transform: &Mat4,
         texture: ShaderResourceView<R>,
         vertex_buffer: VertexBuffer<R>,
     ) -> pipe::Data<R>
@@ -186,7 +188,7 @@ where
         pipe::Data {
             vertex_buffer,
             texture: (texture, self.texture_sampler.clone()),
-            transform: transform.into(),
+            transform: (*transform).into(),
             out_color: self.color_render_target_view.clone(),
             out_depth: self.depth_render_target_view.clone(),
         }
@@ -262,9 +264,8 @@ where
     pub fn process_draw_commands(&mut self, draw_commands: Vec<DrawCommand>) -> Result<(), Error> {
         trace!("Processing {:?} draw commands", draw_commands.len());
 
-        for draw_command in draw_commands {
-            trace!("Processing draw command: {:?}", draw_command);
-            match draw_command {
+        for ref mut draw_command in draw_commands {
+            let processing_result = match draw_command {
                 DrawCommand::DrawLines {
                     transform,
                     mesh,
@@ -277,9 +278,9 @@ where
                         self.get_texture(&texture_info)?.clone(),
                         vertices,
                         indices,
-                        &framebuffer,
+                        framebuffer,
                         DrawMode::Lines,
-                    ).context("Could not execute draw command 'DrawLines'")?;
+                    )
                 }
                 DrawCommand::DrawPolys {
                     transform,
@@ -293,47 +294,40 @@ where
                         self.get_texture(&texture_info)?.clone(),
                         vertices,
                         indices,
-                        &framebuffer,
+                        framebuffer,
                         DrawMode::Fill,
-                    ).context("Could not execute draw command 'DrawPolys'")?;
+                    )
                 }
-                DrawCommand::Clear { framebuffer, color } => {
-                    self.clear(&framebuffer, color)
-                        .context("Could not execute draw command 'Clear'")?;
-                }
+                DrawCommand::Clear { framebuffer, color } => self.clear(&framebuffer, *color),
                 DrawCommand::BlitFramebuffer {
                     source_framebuffer,
                     target_framebuffer,
                     source_rect,
                     target_rect,
-                } => {
-                    self.blit_framebuffer(
-                        &source_framebuffer,
-                        &target_framebuffer,
-                        source_rect,
-                        target_rect,
-                    ).context("Could not execute draw command 'BlitFramebuffer'")?;
-                }
+                } => self.blit_framebuffer(
+                    source_framebuffer,
+                    target_framebuffer,
+                    *source_rect,
+                    *target_rect,
+                ),
                 DrawCommand::CreateFramebuffer { framebuffer_info } => {
-                    self.create_framebuffer(&framebuffer_info)
-                        .context("Could not execute draw command 'CreateFramebuffer'")?;
+                    self.create_framebuffer(framebuffer_info)
                 }
                 DrawCommand::DeleteFramebuffer { framebuffer_info } => {
-                    self.delete_framebuffer(&framebuffer_info)
-                        .context("Could not execute draw command 'DeleteFramebuffer'")?;
+                    self.delete_framebuffer(framebuffer_info)
                 }
                 DrawCommand::CreateTexture {
                     texture_info,
                     pixels,
                 } => {
-                    self.create_texture(&texture_info, pixels)
-                        .context("Could not execute draw command 'CreateTexture'")?;
+                    // NOTE: We take the pixeldata out of the drawcommand as we need ownership
+                    let taken_pixels = std::mem::replace(pixels, Vec::new());
+                    self.create_texture(texture_info, taken_pixels)
                 }
-                DrawCommand::DeleteTexture { texture_info } => {
-                    self.delete_texture(&texture_info)
-                        .context("Could not execute draw command 'DeleteTexture'")?;
-                }
-            }
+                DrawCommand::DeleteTexture { texture_info } => self.delete_texture(&texture_info),
+            };
+            processing_result
+                .context(format!("Could not execute draw command {:?}", draw_command))?;
         }
         Ok(())
     }
@@ -343,7 +337,7 @@ where
     //
     fn draw(
         &mut self,
-        transform: Mat4,
+        transform: &Mat4,
         texture: ShaderResourceView<R>,
         vertices: &[Vertex],
         indices: &[VertexIndex],
@@ -433,7 +427,7 @@ where
         })?;
 
         self.draw(
-            projection_mat,
+            &projection_mat,
             texture,
             &vertices,
             &indices,
