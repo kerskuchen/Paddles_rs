@@ -1,3 +1,4 @@
+#[macro_use]
 extern crate game_lib;
 
 extern crate image;
@@ -9,6 +10,8 @@ extern crate rusttype;
 extern crate log;
 extern crate fern;
 
+#[macro_use]
+extern crate serde_derive;
 extern crate bincode;
 extern crate serde;
 
@@ -17,6 +20,7 @@ use failure::{Error, ResultExt};
 
 extern crate walkdir;
 
+pub mod aseprite;
 pub mod common;
 pub mod font_packer;
 pub mod image_packer;
@@ -64,6 +68,8 @@ fn main() -> Result<(), Error> {
         .context("Could not pack atlases")?;
 
     info!("Successfully packed images");
+
+    aseprite::test_read_aseprite_file();
 
     Ok(())
 }

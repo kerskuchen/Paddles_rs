@@ -181,15 +181,14 @@ pub fn update_and_draw<'gamestate>(
     }
 
     if input.do_reinit_drawstate {
-        if !input.direct_screen_drawing {
-            gamestate
-                .drawcontext
-                .reinitialize(CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16);
+        let canvas_dim = if !input.direct_screen_drawing {
+            (CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16)
         } else {
-            gamestate
-                .drawcontext
-                .reinitialize(input.screen_dim.x as u16, input.screen_dim.y as u16);
-        }
+            (input.screen_dim.x as u16, input.screen_dim.y as u16)
+        };
+        gamestate
+            .drawcontext
+            .reinitialize(canvas_dim.0, canvas_dim.1);
     }
 
     let delta = pretty_format_duration_ms(f64::from(input.time_delta));
@@ -197,6 +196,9 @@ pub fn update_and_draw<'gamestate>(
     let update = pretty_format_duration_ms(f64::from(input.time_update));
     trace!("delta: {}, draw: {}, update: {}", delta, draw, update);
 
+    // ---------------------------------------------------------------------------------------------
+    // Screen size changed
+    //
     if gamestate.screen_dim != input.screen_dim {
         gamestate.screen_dim = input.screen_dim;
         let screen_rect = Rect::from_dimension(gamestate.screen_dim);
