@@ -1,6 +1,6 @@
 use game_lib::{
-    Color, ComponentBytes, DrawCommand, DrawMode, FramebufferInfo, FramebufferTarget, Mat4,
-    Mat4Helper, Pixel, Quad, Rect, TextureInfo, Vertex, VertexIndex,
+    Color, ComponentBytes, DrawCommand, FramebufferInfo, FramebufferTarget, Mat4, Mat4Helper, Mesh,
+    Pixel, Quad, Rect, TextureInfo, Vertex, VertexIndex,
 };
 
 use OptionHelper;
@@ -197,6 +197,13 @@ where
 // RenderingContext
 //==================================================================================================
 //
+
+#[derive(Debug, Copy, Clone)]
+pub enum DrawMode {
+    Lines,
+    Fill,
+}
+
 pub struct RenderingContext<C, R, F>
 where
     R: gfx::Resources,
@@ -260,11 +267,11 @@ where
             match draw_command {
                 DrawCommand::DrawLines {
                     transform,
-                    mesh_lines,
+                    mesh,
                     texture_info,
                     framebuffer,
                 } => {
-                    let (vertices, indices) = mesh_lines.to_vertices_indices();
+                    let (vertices, indices) = mesh.to_vertices_indices();
                     self.draw(
                         transform,
                         self.get_texture(&texture_info)?.clone(),
@@ -276,11 +283,11 @@ where
                 }
                 DrawCommand::DrawPolys {
                     transform,
-                    mesh_polys,
+                    mesh,
                     texture_info,
                     framebuffer,
                 } => {
-                    let (vertices, indices) = mesh_polys.to_vertices_indices();
+                    let (vertices, indices) = mesh.to_vertices_indices();
                     self.draw(
                         transform,
                         self.get_texture(&texture_info)?.clone(),

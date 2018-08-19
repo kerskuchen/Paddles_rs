@@ -37,8 +37,8 @@ pub struct DrawContext<'drawcontext> {
 
     canvas_framebuffer: Option<FramebufferInfo>,
 
-    mesh_lines: MeshLines,
-    mesh_polys: MeshPolys,
+    lines: LineMesh,
+    polygons: PolygonMesh,
 
     pub draw_commands: Vec<DrawCommand<'drawcontext>>,
 }
@@ -53,8 +53,8 @@ impl<'drawcontext> DrawContext<'drawcontext> {
 
             canvas_framebuffer: None,
 
-            mesh_lines: MeshLines::new(),
-            mesh_polys: MeshPolys::new(),
+            lines: LineMesh::new(),
+            polygons: PolygonMesh::new(),
 
             draw_commands: Vec::new(),
         }
@@ -64,18 +64,18 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
         let line_uv = sprite_uv_to_line_uv(plain_uv);
-        self.mesh_lines.push_line(line, line_uv, depth, color);
+        self.lines.push_line(line, line_uv, depth, color);
     }
 
     pub fn draw_rect_filled(&mut self, bounds: Bounds, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
-        self.mesh_polys.push_quad(bounds, plain_uv, depth, color);
+        self.polygons.push_quad(bounds, plain_uv, depth, color);
     }
 
     pub fn start_drawing(&mut self) {
-        self.mesh_polys.clear();
-        self.mesh_lines.clear();
+        self.polygons.clear();
+        self.lines.clear();
     }
 
     // TODO(JaSc): Get rid of screen_rect/canvas_rect here
@@ -109,13 +109,13 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh_lines: &self.mesh_lines,
+            mesh: &self.lines,
         });
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh_polys: &self.mesh_polys,
+            mesh: &self.polygons,
         });
 
         // Blit canvas to screen
@@ -217,13 +217,13 @@ fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
 pub enum DrawCommand<'drawcontext> {
     DrawLines {
         transform: Mat4,
-        mesh_lines: &'drawcontext Mesh<GeometryTypeLines>,
+        mesh: &'drawcontext LineMesh,
         texture_info: TextureInfo,
         framebuffer: FramebufferTarget,
     },
     DrawPolys {
         transform: Mat4,
-        mesh_polys: &'drawcontext Mesh<GeometryTypePolys>,
+        mesh: &'drawcontext PolygonMesh,
         texture_info: TextureInfo,
         framebuffer: FramebufferTarget,
     },
@@ -257,7 +257,7 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
         match self {
             DrawCommand::DrawLines {
                 transform,
-                mesh_lines,
+                mesh,
                 texture_info,
                 framebuffer,
                 ..
@@ -265,13 +265,13 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
                 f,
                 "\n  DrawLines:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
                 transform,
-                mesh_lines.vertices.len(),
+                mesh.vertices.len(),
                 texture_info,
                 framebuffer
             ),
             DrawCommand::DrawPolys {
                 transform,
-                mesh_polys,
+                mesh,
                 texture_info,
                 framebuffer,
                 ..
@@ -279,7 +279,7 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
                 f,
                 "\n  DrawPolys:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
                 transform,
-                mesh_polys.vertices.len(),
+                mesh.vertices.len(),
                 texture_info,
                 framebuffer
             ),
@@ -322,12 +322,6 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
             }
         }
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum DrawMode {
-    Lines,
-    Fill,
 }
 
 #[derive(Debug, Clone)]
@@ -379,39 +373,39 @@ impl FramebufferInfo {
 //==================================================================================================
 //
 
-pub type MeshLines = Mesh<GeometryTypeLines>;
-pub type MeshPolys = Mesh<GeometryTypePolys>;
-
-pub struct GeometryTypeLines;
-pub struct GeometryTypePolys;
-
-#[derive(Clone)]
-pub struct Mesh<T> {
-    vertices: Vec<Vertex>,
-    indices: Vec<VertexIndex>,
-    geometry_type: std::marker::PhantomData<T>,
+pub trait Mesh {
+    fn new() -> Self;
+    fn clear(&mut self);
+    fn to_vertices_indices(&self) -> (&[Vertex], &[VertexIndex]);
 }
 
-impl<T> Mesh<T> {
-    pub fn new() -> Mesh<T> {
-        Mesh {
+// -------------------------------------------------------------------------------------------------
+// LineMesh
+//
+pub struct LineMesh {
+    vertices: Vec<Vertex>,
+    indices: Vec<VertexIndex>,
+}
+
+impl Mesh for LineMesh {
+    fn new() -> Self {
+        Self {
             vertices: Vec::new(),
             indices: Vec::new(),
-            geometry_type: std::marker::PhantomData,
         }
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
     }
 
-    pub fn to_vertices_indices(&self) -> (&[Vertex], &[VertexIndex]) {
+    fn to_vertices_indices(&self) -> (&[Vertex], &[VertexIndex]) {
         (&self.vertices, &self.indices)
     }
 }
 
-impl Mesh<GeometryTypeLines> {
+impl LineMesh {
     pub fn push_line(&mut self, line: Line, line_uv: Line, depth: f32, color: Color) {
         let color = color.into();
         let line_vertices = [
@@ -435,7 +429,33 @@ impl Mesh<GeometryTypeLines> {
     }
 }
 
-impl Mesh<GeometryTypePolys> {
+// -------------------------------------------------------------------------------------------------
+// PolygonMesh
+//
+pub struct PolygonMesh {
+    vertices: Vec<Vertex>,
+    indices: Vec<VertexIndex>,
+}
+
+impl Mesh for PolygonMesh {
+    fn new() -> Self {
+        Self {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.vertices.clear();
+        self.indices.clear();
+    }
+
+    fn to_vertices_indices(&self) -> (&[Vertex], &[VertexIndex]) {
+        (&self.vertices, &self.indices)
+    }
+}
+
+impl PolygonMesh {
     pub fn push_quad(&mut self, bounds: Bounds, bounds_uv: Bounds, depth: f32, color: Color) {
         // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
         let color = color.into();
