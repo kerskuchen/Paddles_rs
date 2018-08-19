@@ -41,10 +41,13 @@
 //! [`game_runtime`]: ../game_runtime/index.html
 //!
 extern crate game_lib;
-use game_lib::{DrawCommand, GameInput, GameState};
+use game_lib::{GameInput, GameState};
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]
-pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<DrawCommand> {
-    game_lib::update_and_draw(input, gamestate)
+pub fn update_and_draw<'gamestate>(
+    input: &GameInput,
+    gamestate: &'gamestate mut GameState<'gamestate>,
+) {
+    game_lib::update_and_draw(input, gamestate);
 }

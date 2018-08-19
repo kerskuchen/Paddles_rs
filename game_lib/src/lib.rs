@@ -38,10 +38,10 @@ const LOG_LEVEL_GAME_LIB: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_MATH: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
-pub struct GameState {
+pub struct GameState<'gamestate> {
     screen_dim: Vec2,
 
-    drawcontext: DrawContext,
+    drawcontext: DrawContext<'gamestate>,
 
     mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
@@ -50,8 +50,8 @@ pub struct GameState {
     cam: Camera,
 }
 
-impl GameState {
-    pub fn new() -> GameState {
+impl<'gamestate> GameState<'gamestate> {
+    pub fn new() -> GameState<'gamestate> {
         GameState {
             screen_dim: Vec2::zero(),
 
@@ -64,6 +64,10 @@ impl GameState {
             cam: Camera::new(CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0),
             origin: WorldPoint::zero(),
         }
+    }
+
+    pub fn get_draw_commands(&mut self) -> Vec<DrawCommand> {
+        std::mem::replace(&mut self.drawcontext.draw_commands, Vec::new())
     }
 }
 
@@ -196,7 +200,10 @@ fn reinitialize_gamestate(gamestate: &mut GameState) {
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
 //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
-pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<DrawCommand> {
+pub fn update_and_draw<'gamestate>(
+    input: &GameInput,
+    gamestate: &'gamestate mut GameState<'gamestate>,
+) {
     if input.hotreload_happened {
         reinitialize_after_hotreload();
     }
@@ -392,7 +399,7 @@ pub fn update_and_draw(input: &GameInput, gamestate: &mut GameState) -> Vec<Draw
         }
     }
     let transform = gamestate.cam.proj_view_matrix();
-    drawcontext.finish_drawing(transform, canvas_rect, canvas_blit_rect)
+    drawcontext.finish_drawing(transform, canvas_rect, canvas_blit_rect);
 }
 
 // =================================================================================================

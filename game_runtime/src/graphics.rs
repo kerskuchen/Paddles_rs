@@ -260,8 +260,7 @@ where
             match draw_command {
                 DrawCommand::Draw {
                     transform,
-                    vertices,
-                    indices,
+                    geometry: (vertices, indices),
                     texture_info,
                     framebuffer,
                     draw_mode,

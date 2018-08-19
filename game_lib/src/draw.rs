@@ -30,7 +30,7 @@ const CLEAR_COLOR_SCREEN: [f32; 4] = [0.2, 0.9, 0.4, 1.0];
 const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
 
 #[derive(Default)]
-pub struct DrawContext {
+pub struct DrawContext<'drawcontext> {
     texture_atlas: Option<TextureInfo>,
     texture_font: Option<TextureInfo>,
     sprite_map: HashMap<String, Sprite>,
@@ -41,11 +41,11 @@ pub struct DrawContext {
     line_batch: LineBatch,
     fill_batch: QuadBatch,
 
-    draw_commands: Vec<DrawCommand>,
+    pub draw_commands: Vec<DrawCommand<'drawcontext>>,
 }
 
-impl DrawContext {
-    pub fn new() -> DrawContext {
+impl<'drawcontext> DrawContext<'drawcontext> {
+    pub fn new() -> DrawContext<'drawcontext> {
         DrawContext {
             texture_atlas: None,
             texture_font: None,
@@ -81,11 +81,11 @@ impl DrawContext {
 
     // TODO(JaSc): Get rid of screen_rect/canvas_rect here
     pub fn finish_drawing(
-        &mut self,
+        &'drawcontext mut self,
         transform: Mat4,
         canvas_rect: Rect,
         canvas_blit_rect: Rect,
-    ) -> Vec<DrawCommand> {
+    ) {
         let canvas_framebuffer = self
             .canvas_framebuffer
             .clone()
@@ -106,22 +106,18 @@ impl DrawContext {
         });
 
         // Draw batches
-        let (vertices, indices) = self.fill_batch.extract_vertices_indices();
         self.draw_commands.push(DrawCommand::Draw {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            vertices,
-            indices,
+            geometry: self.fill_batch.extract_vertices_indices(),
             draw_mode: DrawMode::Fill,
         });
-        let (vertices, indices) = self.line_batch.extract_vertices_indices();
         self.draw_commands.push(DrawCommand::Draw {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            vertices,
-            indices,
+            geometry: self.line_batch.extract_vertices_indices(),
             draw_mode: DrawMode::Lines,
         });
 
@@ -132,15 +128,14 @@ impl DrawContext {
             source_rect: canvas_rect,
             target_rect: canvas_blit_rect,
         });
-
-        std::mem::replace(&mut self.draw_commands, Vec::new())
     }
 
     pub fn reinitialize(&mut self, canvas_width: u16, canvas_height: u16) {
+        self.draw_commands.clear();
+
         // -----------------------------------------------------------------------------------------
         // Sprite creation
         //
-
         // Create atlas sprites from metafile
         let mut atlas_metafile =
             File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
@@ -164,7 +159,6 @@ impl DrawContext {
         // -----------------------------------------------------------------------------------------
         // Font creation
         //
-
         // Create font-glyph sprites from metafile
         let mut font_metafile =
             File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
@@ -188,7 +182,6 @@ impl DrawContext {
         // -----------------------------------------------------------------------------------------
         // Framebuffer creation
         //
-
         // Delete old framebuffer if it exists
         if let Some(old_canvas_framebuffer_info) = self.canvas_framebuffer.take() {
             self.draw_commands.push(DrawCommand::DeleteFramebuffer {
@@ -224,11 +217,10 @@ fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
 // DrawCommand
 //==================================================================================================
 //
-pub enum DrawCommand {
+pub enum DrawCommand<'drawbuffer> {
     Draw {
         transform: Mat4,
-        vertices: Vec<Vertex>,
-        indices: Vec<VertexIndex>,
+        geometry: (&'drawbuffer [Vertex], &'drawbuffer [VertexIndex]),
         texture_info: TextureInfo,
         framebuffer: FramebufferTarget,
         draw_mode: DrawMode,
@@ -258,12 +250,12 @@ pub enum DrawCommand {
     },
 }
 
-impl std::fmt::Debug for DrawCommand {
+impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             DrawCommand::Draw {
                 transform,
-                vertices,
+                geometry: (vertices, _indices),
                 texture_info,
                 framebuffer,
                 draw_mode,
@@ -428,7 +420,7 @@ impl QuadBatch {
         self.vertices.extend_from_slice(&quad_vertices);
     }
 
-    pub fn extract_vertices_indices(&mut self) -> (Vec<Vertex>, Vec<VertexIndex>) {
+    pub fn extract_vertices_indices(&mut self) -> (&[Vertex], &[VertexIndex]) {
         let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
         let num_indices_to_fill = (num_quads * QuadBatch::INDICES_PER_QUAD) as VertexIndex;
         let num_indices_already_filled = self.indices.len() as VertexIndex;
@@ -448,14 +440,9 @@ impl QuadBatch {
             }
         }
 
-        // TODO(JaSc): Return references
         (
-            self.vertices.clone(),
-            self.indices
-                .clone()
-                .into_iter()
-                .take(num_indices_to_fill as usize)
-                .collect(),
+            &self.vertices,
+            &self.indices[..(num_indices_to_fill as usize)],
         )
     }
 }
@@ -502,7 +489,7 @@ impl LineBatch {
         self.vertices.extend_from_slice(&line_vertices);
     }
 
-    pub fn extract_vertices_indices(&mut self) -> (Vec<Vertex>, Vec<VertexIndex>) {
+    pub fn extract_vertices_indices(&mut self) -> (&[Vertex], &[VertexIndex]) {
         let num_lines = self.vertices.len() / LineBatch::VERTICES_PER_LINE;
         let num_indices_to_fill = (num_lines * LineBatch::INDICES_PER_LINE) as VertexIndex;
         let num_indices_already_filled = self.indices.len() as VertexIndex;
@@ -515,14 +502,9 @@ impl LineBatch {
             }
         }
 
-        // TODO(JaSc): Return references
         (
-            self.vertices.clone(),
-            self.indices
-                .clone()
-                .into_iter()
-                .take(num_indices_to_fill as usize)
-                .collect(),
+            &self.vertices,
+            &self.indices[..(num_indices_to_fill as usize)],
         )
     }
 }

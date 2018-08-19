@@ -299,18 +299,17 @@ fn main() -> Result<(), Error> {
         // Prepare input and update game
         input.mouse_pos_screen = screen_cursor_pos;
         input.screen_dim = screen_dimensions;
-
         input.time_since_startup = timer_startup.elapsed_time();
         input.time_delta = timer_delta.elapsed_time() as f32;
         timer_delta.reset();
 
         let timer_update = Timer::new();
-        let draw_commands = game_lib.update_and_draw(&input, &mut gamestate);
+        game_lib.update_and_draw(&input, &mut gamestate);
         input.time_update = timer_update.elapsed_time() as f32;
 
         // Draw to screen
         let timer_draw = Timer::new();
-        rc.process_draw_commands(draw_commands)
+        rc.process_draw_commands(gamestate.get_draw_commands())
             .context("Could not to process a draw command")?;
         input.time_draw = timer_draw.elapsed_time() as f32;
 
