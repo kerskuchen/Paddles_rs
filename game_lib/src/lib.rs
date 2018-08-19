@@ -22,7 +22,7 @@ pub mod math;
 //             gamestate and not game_state?
 pub use draw::{
     ComponentBytes, DrawCommand, DrawContext, DrawMode, FramebufferInfo, FramebufferTarget,
-    LineBatch, Pixel, Quad, QuadBatch, Sprite, TextureInfo, Vertex, VertexIndex,
+    MeshLines, MeshPolys, Pixel, Quad, Sprite, TextureInfo, Vertex, VertexIndex,
 };
 pub use math::{
     Bounds, Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2,

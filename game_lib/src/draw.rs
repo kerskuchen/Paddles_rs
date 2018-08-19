@@ -29,7 +29,6 @@ pub struct Vertex {
 const CLEAR_COLOR_SCREEN: [f32; 4] = [0.2, 0.9, 0.4, 1.0];
 const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
 
-#[derive(Default)]
 pub struct DrawContext<'drawcontext> {
     texture_atlas: Option<TextureInfo>,
     texture_font: Option<TextureInfo>,
@@ -38,8 +37,8 @@ pub struct DrawContext<'drawcontext> {
 
     canvas_framebuffer: Option<FramebufferInfo>,
 
-    line_batch: LineBatch,
-    fill_batch: QuadBatch,
+    mesh_lines: MeshLines,
+    mesh_polys: MeshPolys,
 
     pub draw_commands: Vec<DrawCommand<'drawcontext>>,
 }
@@ -54,8 +53,8 @@ impl<'drawcontext> DrawContext<'drawcontext> {
 
             canvas_framebuffer: None,
 
-            line_batch: LineBatch::new(),
-            fill_batch: QuadBatch::new(),
+            mesh_lines: MeshLines::new(),
+            mesh_polys: MeshPolys::new(),
 
             draw_commands: Vec::new(),
         }
@@ -65,18 +64,18 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
         let line_uv = sprite_uv_to_line_uv(plain_uv);
-        self.line_batch.push_line(line, line_uv, depth, color);
+        self.mesh_lines.push_line(line, line_uv, depth, color);
     }
 
     pub fn draw_rect_filled(&mut self, bounds: Bounds, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
-        self.fill_batch.push_quad(bounds, plain_uv, depth, color);
+        self.mesh_polys.push_quad(bounds, plain_uv, depth, color);
     }
 
     pub fn start_drawing(&mut self) {
-        self.fill_batch.clear();
-        self.line_batch.clear();
+        self.mesh_polys.clear();
+        self.mesh_lines.clear();
     }
 
     // TODO(JaSc): Get rid of screen_rect/canvas_rect here
@@ -106,19 +105,17 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         });
 
         // Draw batches
-        self.draw_commands.push(DrawCommand::Draw {
+        self.draw_commands.push(DrawCommand::DrawLines {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            geometry: self.fill_batch.extract_vertices_indices(),
-            draw_mode: DrawMode::Fill,
+            mesh_lines: &self.mesh_lines,
         });
-        self.draw_commands.push(DrawCommand::Draw {
+        self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
             texture_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            geometry: self.line_batch.extract_vertices_indices(),
-            draw_mode: DrawMode::Lines,
+            mesh_polys: &self.mesh_polys,
         });
 
         // Blit canvas to screen
@@ -217,13 +214,18 @@ fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
 // DrawCommand
 //==================================================================================================
 //
-pub enum DrawCommand<'drawbuffer> {
-    Draw {
+pub enum DrawCommand<'drawcontext> {
+    DrawLines {
         transform: Mat4,
-        geometry: (&'drawbuffer [Vertex], &'drawbuffer [VertexIndex]),
+        mesh_lines: &'drawcontext Mesh<GeometryTypeLines>,
         texture_info: TextureInfo,
         framebuffer: FramebufferTarget,
-        draw_mode: DrawMode,
+    },
+    DrawPolys {
+        transform: Mat4,
+        mesh_polys: &'drawcontext Mesh<GeometryTypePolys>,
+        texture_info: TextureInfo,
+        framebuffer: FramebufferTarget,
     },
     Clear {
         framebuffer: FramebufferTarget,
@@ -253,19 +255,31 @@ pub enum DrawCommand<'drawbuffer> {
 impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            DrawCommand::Draw {
+            DrawCommand::DrawLines {
                 transform,
-                geometry: (vertices, _indices),
+                mesh_lines,
                 texture_info,
                 framebuffer,
-                draw_mode,
                 ..
             } => write!(
                 f,
-                "\n  Draw:\n  {:?}\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
-                draw_mode,
+                "\n  DrawLines:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
                 transform,
-                vertices.len(),
+                mesh_lines.vertices.len(),
+                texture_info,
+                framebuffer
+            ),
+            DrawCommand::DrawPolys {
+                transform,
+                mesh_polys,
+                texture_info,
+                framebuffer,
+                ..
+            } => write!(
+                f,
+                "\n  DrawPolys:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
+                transform,
+                mesh_polys.vertices.len(),
                 texture_info,
                 framebuffer
             ),
@@ -361,40 +375,70 @@ impl FramebufferInfo {
 }
 
 //==================================================================================================
-// Batch drawing
+// Mesh
 //==================================================================================================
 //
 
-// -------------------------------------------------------------------------------------------------
-// Quads
-//
-#[derive(Default)]
-pub struct QuadBatch {
+pub type MeshLines = Mesh<GeometryTypeLines>;
+pub type MeshPolys = Mesh<GeometryTypePolys>;
+
+pub struct GeometryTypeLines;
+pub struct GeometryTypePolys;
+
+#[derive(Clone)]
+pub struct Mesh<T> {
     vertices: Vec<Vertex>,
     indices: Vec<VertexIndex>,
+    geometry_type: std::marker::PhantomData<T>,
 }
 
-impl QuadBatch {
-    const VERTICES_PER_QUAD: usize = 4;
-    const INDICES_PER_QUAD: usize = 6;
-
-    pub fn new() -> QuadBatch {
-        QuadBatch {
+impl<T> Mesh<T> {
+    pub fn new() -> Mesh<T> {
+        Mesh {
             vertices: Vec::new(),
             indices: Vec::new(),
+            geometry_type: std::marker::PhantomData,
         }
     }
 
     pub fn clear(&mut self) {
-        // NOTE: We don't clear the indices as we want to reuse them. This is possible because we
-        //       know that we always will only store quads in this batch.
         self.vertices.clear();
+        self.indices.clear();
     }
 
-    pub fn push_quad(&mut self, bounds: Bounds, bounds_uv: Bounds, depth: f32, color: Color) {
-        let color = color.into();
+    pub fn to_vertices_indices(&self) -> (&[Vertex], &[VertexIndex]) {
+        (&self.vertices, &self.indices)
+    }
+}
 
+impl Mesh<GeometryTypeLines> {
+    pub fn push_line(&mut self, line: Line, line_uv: Line, depth: f32, color: Color) {
+        let color = color.into();
+        let line_vertices = [
+            Vertex {
+                pos: [line.start.x, line.start.y, depth, 1.0],
+                uv: [line_uv.start.x, line_uv.start.y],
+                color,
+            },
+            Vertex {
+                pos: [line.end.x, line.end.y, depth, 1.0],
+                uv: [line_uv.end.x, line_uv.end.y],
+                color,
+            },
+        ];
+
+        let line_vertex_index = self.vertices.len() as VertexIndex;
+        let line_indices = [line_vertex_index, line_vertex_index + 1];
+
+        self.vertices.extend_from_slice(&line_vertices);
+        self.indices.extend(&line_indices);
+    }
+}
+
+impl Mesh<GeometryTypePolys> {
+    pub fn push_quad(&mut self, bounds: Bounds, bounds_uv: Bounds, depth: f32, color: Color) {
         // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
+        let color = color.into();
         let quad_vertices = [
             Vertex {
                 pos: [bounds.left, bounds.bottom, depth, 1.0],
@@ -417,95 +461,19 @@ impl QuadBatch {
                 color,
             },
         ];
-        self.vertices.extend_from_slice(&quad_vertices);
-    }
 
-    pub fn extract_vertices_indices(&mut self) -> (&[Vertex], &[VertexIndex]) {
-        let num_quads = self.vertices.len() / QuadBatch::VERTICES_PER_QUAD;
-        let num_indices_to_fill = (num_quads * QuadBatch::INDICES_PER_QUAD) as VertexIndex;
-        let num_indices_already_filled = self.indices.len() as VertexIndex;
-
-        // Fill our indices vector if needed
-        if num_indices_already_filled < num_indices_to_fill {
-            for quad_index in num_indices_already_filled..num_indices_to_fill {
-                let quad_indices = [
-                    4 * quad_index,
-                    4 * quad_index + 1,
-                    4 * quad_index + 2,
-                    4 * quad_index + 2,
-                    4 * quad_index + 3,
-                    4 * quad_index,
-                ];
-                self.indices.extend(&quad_indices);
-            }
-        }
-
-        (
-            &self.vertices,
-            &self.indices[..(num_indices_to_fill as usize)],
-        )
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-// Lines
-//
-#[derive(Default)]
-pub struct LineBatch {
-    vertices: Vec<Vertex>,
-    indices: Vec<VertexIndex>,
-}
-
-impl LineBatch {
-    const VERTICES_PER_LINE: usize = 2;
-    const INDICES_PER_LINE: usize = 2;
-
-    pub fn new() -> LineBatch {
-        LineBatch {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-        }
-    }
-    pub fn clear(&mut self) {
-        // NOTE: We don't clear the indices as we want to reuse them. This is possible because we
-        //       know that we always will store only line in this batch.
-        self.vertices.clear();
-    }
-
-    pub fn push_line(&mut self, line: Line, line_uv: Line, depth: f32, color: Color) {
-        let color = color.into();
-        let line_vertices = [
-            Vertex {
-                pos: [line.start.x, line.start.y, depth, 1.0],
-                uv: [line_uv.start.x, line_uv.start.y],
-                color,
-            },
-            Vertex {
-                pos: [line.end.x, line.end.y, depth, 1.0],
-                uv: [line_uv.end.x, line_uv.end.y],
-                color,
-            },
+        let quad_vertex_index = self.vertices.len() as VertexIndex;
+        let quad_indices = [
+            quad_vertex_index,
+            quad_vertex_index + 1,
+            quad_vertex_index + 2,
+            quad_vertex_index + 2,
+            quad_vertex_index + 3,
+            quad_vertex_index,
         ];
-        self.vertices.extend_from_slice(&line_vertices);
-    }
 
-    pub fn extract_vertices_indices(&mut self) -> (&[Vertex], &[VertexIndex]) {
-        let num_lines = self.vertices.len() / LineBatch::VERTICES_PER_LINE;
-        let num_indices_to_fill = (num_lines * LineBatch::INDICES_PER_LINE) as VertexIndex;
-        let num_indices_already_filled = self.indices.len() as VertexIndex;
-
-        // Fill our indices vector if needed
-        if num_indices_already_filled < num_indices_to_fill {
-            for line_index in num_indices_already_filled..num_indices_to_fill {
-                let line_indices = [2 * line_index, 2 * line_index + 1];
-                self.indices.extend(&line_indices);
-            }
-        }
-
-        (
-            &self.vertices,
-            &self.indices[..(num_indices_to_fill as usize)],
-        )
+        self.vertices.extend_from_slice(&quad_vertices);
+        self.indices.extend(&quad_indices);
     }
 }
 

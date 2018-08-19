@@ -258,21 +258,37 @@ where
         for draw_command in draw_commands {
             trace!("Processing draw command: {:?}", draw_command);
             match draw_command {
-                DrawCommand::Draw {
+                DrawCommand::DrawLines {
                     transform,
-                    geometry: (vertices, indices),
+                    mesh_lines,
                     texture_info,
                     framebuffer,
-                    draw_mode,
                 } => {
+                    let (vertices, indices) = mesh_lines.to_vertices_indices();
                     self.draw(
                         transform,
                         self.get_texture(&texture_info)?.clone(),
-                        &vertices,
-                        &indices,
+                        vertices,
+                        indices,
                         &framebuffer,
-                        draw_mode,
-                    ).context("Could not execute draw command 'Draw'")?;
+                        DrawMode::Lines,
+                    ).context("Could not execute draw command 'DrawLines'")?;
+                }
+                DrawCommand::DrawPolys {
+                    transform,
+                    mesh_polys,
+                    texture_info,
+                    framebuffer,
+                } => {
+                    let (vertices, indices) = mesh_polys.to_vertices_indices();
+                    self.draw(
+                        transform,
+                        self.get_texture(&texture_info)?.clone(),
+                        vertices,
+                        indices,
+                        &framebuffer,
+                        DrawMode::Fill,
+                    ).context("Could not execute draw command 'DrawPolys'")?;
                 }
                 DrawCommand::Clear { framebuffer, color } => {
                     self.clear(&framebuffer, color)
