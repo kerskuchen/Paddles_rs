@@ -42,7 +42,7 @@ impl Point {
     /// # use game_lib::math::*;
     ///
     /// let point = Point::new(1.0, 2.5);
-    /// let rect = Rect::new(0.0, 0.0, 1.5, 1.5);
+    /// let rect = Rect::from_xy_width_height(0.0, 0.0, 1.5, 1.5);
     /// assert_eq!(Point::new(1.0, 1.5), point.clamped_in_rect(rect));
     ///
     /// ```
@@ -313,6 +313,7 @@ impl Mat4Helper for Mat4 {
 //==================================================================================================
 //
 
+// TODO(JaSc): Write some docs, unittests/examples for these
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect {
     pub left: f32,
@@ -402,14 +403,7 @@ impl Rect {
     // ---------------------------------------------------------------------------------------------
     // Modify geometry
     //
-    pub fn translate(&mut self, translation: Vec2) {
-        self.left += translation.x;
-        self.right += translation.x;
-        self.bottom += translation.y;
-        self.top += translation.y;
-    }
-
-    pub fn translated(self, translation: Vec2) -> Rect {
+    pub fn translated_by(self, translation: Vec2) -> Rect {
         Rect {
             left: self.left + translation.x,
             right: self.right + translation.x,
@@ -418,9 +412,52 @@ impl Rect {
         }
     }
 
+    pub fn translated_to_origin(self) -> Rect {
+        self.translated_by(-self.pos())
+    }
+
+    pub fn translated_to_pos(self, pos: Point) -> Rect {
+        self.translated_to_origin().translated_by(pos)
+    }
+
     pub fn centered(self) -> Rect {
         let half_dim = 0.5 * self.dim();
-        self.translated(-half_dim)
+        self.translated_by(-half_dim)
+    }
+
+    pub fn centered_in_origin(self) -> Rect {
+        self.translated_to_origin().centered()
+    }
+
+    pub fn centered_in_position(self, pos: Point) -> Rect {
+        self.translated_to_pos(pos).centered()
+    }
+
+    pub fn scaled_from_origin(self, scale: Vec2) -> Rect {
+        debug_assert!(is_positive(scale.x));
+        debug_assert!(is_positive(scale.y));
+        Rect {
+            left: self.left * scale.x,
+            right: self.right * scale.x,
+            bottom: self.bottom * scale.y,
+            top: self.top * scale.y,
+        }
+    }
+
+    pub fn scaled_from_center(self, scale: Vec2) -> Rect {
+        debug_assert!(is_positive(scale.x));
+        debug_assert!(is_positive(scale.y));
+
+        let center = self.center();
+        self.centered_in_origin()
+            .scaled_from_origin(scale)
+            .centered_in_position(center)
+    }
+
+    /// Returns a version of the rectangle that is centered in a given rect
+    pub fn centered_in_rect(self, target: Rect) -> Rect {
+        let offset_centered = target.pos() + 0.5 * (target.dim() - self.dim());
+        Rect::from_point_dimension(offset_centered, self.dim())
     }
 
     /// Returns the biggest proportionally stretched version of the rectangle that can fit
@@ -441,24 +478,6 @@ impl Rect {
         let stretched_height = self.height() * scale_factor;
 
         Rect::from_point(self.pos(), stretched_width, stretched_height)
-    }
-
-    /// Returns a version of the rectangle that is centered in `target`.
-    pub fn centered_in_rect(self, target: Rect) -> Rect {
-        let offset_centered = target.pos() + (target.dim() - self.dim()) / 2.0;
-
-        Rect::from_point_dimension(offset_centered, self.dim())
-    }
-
-    pub fn scaled_from_origin(self, scale: Vec2) -> Rect {
-        debug_assert!(is_positive(scale.x));
-        debug_assert!(is_positive(scale.y));
-        Rect {
-            left: self.left * scale.x,
-            right: self.right * scale.x,
-            bottom: self.bottom * scale.y,
-            top: self.top * scale.y,
-        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -565,18 +584,31 @@ impl WorldPoint {
 /// ```
 /// # use game_lib::math::*;
 ///
-/// let cam = Camera::new(320, 180, -1.0, 1.0);
+/// let pos = Point::new(50.0, -50.0);
+/// let dim = Vec2::new(200.0, 100.0);
+/// let zoom = 2.0;
 ///
-/// let pos = cam.world_rect.pos;
-/// let dim = cam.world_rect.dim / cam.zoom_level;
-/// assert_eq!(dim, cam.dim_zoomed());
 ///
-/// let left =   pos.x - 0.5 * dim.x;
-/// let right =  pos.x + 0.5 * dim.x;
-/// let bottom = pos.y - 0.5 * dim.y;
-/// let top =    pos.y + 0.5 * dim.y;
+/// let cam_origin = Point::new(12.0, 34.0);
+/// let mut cam = Camera::new(cam_origin, dim.x, dim.y, -1.0, 1.0);
 ///
-/// let bounds = cam.bounds_worldspace();
+/// // NOTE: Our panning vector is the negative of our move vector. This is to simulate the
+/// //       mouse grabbing and panning of the canvas, like i.e. touch-navigation on mobile devices.
+/// let move_vec = pos - cam_origin;
+/// let panning_vec = -move_vec;
+/// cam.pan(panning_vec);
+/// assert_eq!(cam.pos(), pos);
+///
+/// cam.zoom_to_world_point(pos, zoom);
+/// assert_eq!(cam.zoom_level, zoom);
+/// assert_eq!(cam.dim_zoomed(), dim / zoom);
+///
+/// let left =   pos.x - 0.5 * dim.x / zoom;
+/// let right =  pos.x + 0.5 * dim.x / zoom;
+/// let bottom = pos.y - 0.5 * dim.y / zoom;
+/// let top =    pos.y + 0.5 * dim.y / zoom;
+///
+/// let bounds = cam.frustum();
 /// assert_eq!(bounds.left, left);
 /// assert_eq!(bounds.right, right);
 /// assert_eq!(bounds.bottom, bottom);
@@ -589,9 +621,9 @@ impl WorldPoint {
 /// # use game_lib::math::*;
 ///
 /// // Canvas and camera setup
-/// let canvas_width = 320;
-/// let canvas_height = 180;
-/// let mut cam = Camera::new(canvas_width, canvas_height, -1.0, 1.0);
+/// let canvas_width = 320.0;
+/// let canvas_height = 180.0;
+/// let mut cam = Camera::new(Point::zero(), canvas_width, canvas_height, -1.0, 1.0);
 ///
 /// // Current and old mouse state
 /// let old_mouse_pos_canvas = Point::new(50.0, 130.0);
@@ -632,7 +664,7 @@ impl WorldPoint {
 /// ```
 
 pub struct Camera {
-    pub world_rect: Rect,
+    frustum: Rect,
     pub zoom_level: f32,
     pub z_near: f32,
     pub z_far: f32,
@@ -641,7 +673,7 @@ pub struct Camera {
 impl Default for Camera {
     fn default() -> Camera {
         Camera {
-            world_rect: Default::default(),
+            frustum: Default::default(),
             zoom_level: 1.0,
             z_near: -1.0,
             z_far: 1.0,
@@ -652,13 +684,13 @@ impl Default for Camera {
 impl Camera {
     pub fn new(
         pos: WorldPoint,
-        canvas_width: i32,
-        canvas_height: i32,
+        frustum_width: f32,
+        frustum_height: f32,
         z_near: f32,
         z_far: f32,
     ) -> Camera {
         Camera {
-            world_rect: Rect::from_point(pos, canvas_width as f32, canvas_height as f32),
+            frustum: Rect::from_point(pos, frustum_width, frustum_height).centered(),
             zoom_level: 1.0,
             z_near,
             z_far,
@@ -666,21 +698,26 @@ impl Camera {
     }
 
     pub fn pos(&self) -> WorldPoint {
-        self.world_rect.pos()
+        self.frustum.center()
     }
 
     pub fn dim_zoomed(&self) -> WorldVec {
-        self.world_rect.dim() / self.zoom_level
+        self.frustum.dim() / self.zoom_level
+    }
+
+    pub fn frustum(&self) -> Rect {
+        self.frustum
+            .scaled_from_center(Vec2::ones() / self.zoom_level)
     }
 
     /// Converts a [`CanvasPoint`] into a [`WorldPoint`]
     pub fn canvas_to_world(&self, point: CanvasPoint) -> WorldPoint {
-        (point - 0.5 * self.world_rect.dim()) / self.zoom_level + self.pos().pixel_snapped()
+        (point - 0.5 * self.frustum.dim()) / self.zoom_level + self.pos().pixel_snapped()
     }
 
     /// Converts a [`WorldPoint`] into a [`CanvasPoint`]
     pub fn world_to_canvas(&self, point: WorldPoint) -> CanvasPoint {
-        (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.world_rect.dim()
+        (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.frustum.dim()
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -690,39 +727,37 @@ impl Camera {
     pub fn zoom_to_world_point(&mut self, world_point: WorldPoint, new_zoom_level: f32) {
         let old_zoom_level = self.zoom_level;
         self.zoom_level = new_zoom_level;
-        self.world_rect.translated(
-            (self.world_rect.pos() - world_point) * (old_zoom_level / new_zoom_level) + world_point,
+        self.frustum = self.frustum.centered_in_position(
+            (self.pos() - world_point) * (old_zoom_level / new_zoom_level) + world_point,
         );
+
+        dprintln!(self.pos());
+        dprintln!(self.frustum);
+        dprintln!(self.dim_zoomed());
     }
 
     /// Pans the camera using cursor movement distance on the canvas
     pub fn pan(&mut self, canvas_move_distance: CanvasVec) {
-        self.world_rect
-            .translate(-canvas_move_distance / self.zoom_level);
+        self.frustum = self
+            .frustum
+            .translated_by(-canvas_move_distance / self.zoom_level);
     }
 
     /// Returns a project-view-matrix that can transform vertices into camera-view-space
     pub fn proj_view_matrix(&self) -> Mat4 {
         use cgmath::Vector3;
 
-        let translation = -self.world_rect.pos().pixel_snapped();
+        let translation = -self.pos().pixel_snapped();
         let view_mat = Mat4::from_nonuniform_scale(self.zoom_level, self.zoom_level, 1.0)
             * Mat4::from_translation(Vector3::new(translation.x, translation.y, 0.0));
 
         let proj_mat = Mat4::ortho_centered(
-            self.world_rect.dim().x,
-            self.world_rect.dim().y,
+            self.frustum.dim().x,
+            self.frustum.dim().y,
             self.z_near,
             self.z_far,
         );
         proj_mat * view_mat
-    }
-
-    /// Returns the [`Bounds`] of the cameras view in world-space
-    pub fn bounds_worldspace(&self) -> Rect {
-        let world_rect_zoomed =
-            Rect::from_point_dimension(self.world_rect.pos(), self.dim_zoomed());
-        world_rect_zoomed.centered()
     }
 }
 
@@ -732,7 +767,7 @@ mod tests {
 
     #[test]
     fn converting_between_canvas_and_world_coordinates_and_back() {
-        let cam = Camera::new(WorldPoint::zero(), 100, 100, -1.0, 1.0);
+        let cam = Camera::new(WorldPoint::zero(), 100.0, 100.0, -1.0, 1.0);
 
         let canvas_point = CanvasPoint::new(0.75, -0.23);
         assert!(is_effectively_zero(CanvasPoint::distance(

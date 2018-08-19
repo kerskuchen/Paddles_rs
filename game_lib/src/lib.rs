@@ -30,8 +30,8 @@ pub use math::{
 };
 
 const UNIT_SIZE: f32 = 16.0;
-const CANVAS_WIDTH: i32 = 480;
-const CANVAS_HEIGHT: i32 = 270;
+const CANVAS_WIDTH: f32 = 480.0;
+const CANVAS_HEIGHT: f32 = 270.0;
 
 const LOG_LEVEL_GENERAL: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_GAME_LIB: log::LevelFilter = log::LevelFilter::Trace;
@@ -200,7 +200,7 @@ pub fn update_and_draw<'gamestate>(
     if gamestate.screen_dim != input.screen_dim {
         gamestate.screen_dim = input.screen_dim;
         let screen_rect = Rect::from_dimension(gamestate.screen_dim);
-        let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
+        let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
         let blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
         info!("=====================");
@@ -227,7 +227,7 @@ pub fn update_and_draw<'gamestate>(
     // Mouse input
     //
     let screen_rect = Rect::from_dimension(gamestate.screen_dim);
-    let canvas_rect = Rect::from_width_height(CANVAS_WIDTH as f32, CANVAS_HEIGHT as f32);
+    let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
     let canvas_blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
     // Canvas mouse position

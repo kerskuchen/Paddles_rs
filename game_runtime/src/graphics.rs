@@ -265,7 +265,8 @@ where
     pub fn process_draw_commands(&mut self, draw_commands: Vec<DrawCommand>) -> Result<(), Error> {
         trace!("Processing {:?} draw commands", draw_commands.len());
 
-        for ref mut draw_command in draw_commands {
+        for mut draw_command in draw_commands {
+            let draw_command = &mut draw_command;
             let processing_result = match draw_command {
                 DrawCommand::DrawLines {
                     transform,
