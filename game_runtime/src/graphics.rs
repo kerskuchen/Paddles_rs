@@ -1,6 +1,7 @@
+use game_lib;
 use game_lib::{
     Color, ComponentBytes, DrawCommand, FramebufferInfo, FramebufferTarget, Mat4, Mat4Helper, Mesh,
-    Pixel, Quad, Rect, TextureInfo, Vertex, VertexIndex,
+    Pixel, Rect, TextureInfo, Vertex, VertexIndex,
 };
 
 use OptionHelper;
@@ -407,8 +408,12 @@ where
         );
 
         // TODO(JaSc): Incorporate source_rect into blit_quad calculation
-        let blit_quad = Quad::from_rect(target_rect, 0.0, Color::new(1.0, 1.0, 1.0, 1.0));
-        let vertices = blit_quad.into_vertices();
+        let vertices = game_lib::vertices_from_rects(
+            target_rect,
+            Rect::unit_rect(),
+            0.0,
+            Color::new(1.0, 1.0, 1.0, 1.0),
+        );
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
 
         // NOTE: The projection matrix is flipped upside-down for correct blitting

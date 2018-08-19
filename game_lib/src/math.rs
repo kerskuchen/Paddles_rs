@@ -48,8 +48,8 @@ impl Point {
     /// ```
     pub fn clamped_in_rect(self, rect: Rect) -> Point {
         Point::new(
-            clamp(self.x, rect.pos.x, rect.pos.x + rect.dim.x),
-            clamp(self.y, rect.pos.y, rect.pos.y + rect.dim.x),
+            clamp(self.x, rect.left, rect.right),
+            clamp(self.y, rect.bottom, rect.top),
         )
     }
 }
@@ -313,84 +313,114 @@ impl Mat4Helper for Mat4 {
 //==================================================================================================
 //
 
-// TODO(JaSc): Evaluate if it would be better to have the fields of Bounds directly in rect
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect {
-    pub pos: Point,
-    pub dim: Vec2,
-}
-
-impl Default for Rect {
-    fn default() -> Rect {
-        Rect::zero()
-    }
+    pub left: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub top: f32,
 }
 
 impl Rect {
+    // ---------------------------------------------------------------------------------------------
+    // Constructors
+    //
     pub fn zero() -> Rect {
+        Default::default()
+    }
+
+    pub fn from_bounds(left: f32, right: f32, bottom: f32, top: f32) -> Rect {
         Rect {
-            pos: Point::zero(),
-            dim: Vec2::zero(),
+            left,
+            right,
+            bottom,
+            top,
         }
     }
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Rect {
+
+    pub fn from_xy_width_height(x: f32, y: f32, width: f32, height: f32) -> Rect {
         Rect {
-            pos: Point::new(x, y),
-            dim: Vec2::new(width, height),
+            left: x,
+            right: x + width,
+            bottom: y,
+            top: y + height,
         }
     }
 
     pub fn from_width_height(width: f32, height: f32) -> Rect {
-        Rect {
-            pos: Point::zero(),
-            dim: Vec2::new(width, height),
-        }
+        Rect::from_xy_width_height(0.0, 0.0, width, height)
     }
 
     pub fn from_point(pos: Point, width: f32, height: f32) -> Rect {
-        Rect {
-            pos,
-            dim: Vec2::new(width, height),
-        }
+        Rect::from_xy_width_height(pos.x, pos.y, width, height)
     }
 
     pub fn from_dimension(dim: Vec2) -> Rect {
-        Rect {
-            pos: Point::zero(),
-            dim,
-        }
+        Rect::from_xy_width_height(0.0, 0.0, dim.x, dim.y)
     }
 
     pub fn from_point_dimension(pos: Point, dim: Vec2) -> Rect {
-        Rect { pos, dim }
+        Rect::from_xy_width_height(pos.x, pos.y, dim.x, dim.y)
     }
 
-    pub fn from_corners(bottom_left: Point, top_right: Point) -> Rect {
+    pub fn unit_rect() -> Rect {
         Rect {
-            pos: Point {
-                x: bottom_left.x,
-                y: bottom_left.y,
-            },
-            dim: Vec2 {
-                x: top_right.x - bottom_left.x,
-                y: top_right.y - bottom_left.y,
-            },
+            left: 0.0,
+            right: 1.0,
+            bottom: 0.0,
+            top: 1.0,
         }
     }
 
     pub fn unit_rect_centered() -> Rect {
-        Rect {
-            pos: Point { x: -0.5, y: -0.5 },
-            dim: Vec2 { x: 1.0, y: 1.0 },
-        }
+        Rect::unit_rect().centered()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Accessors
+    //
+    pub fn pos(&self) -> Point {
+        Point::new(self.left, self.bottom)
+    }
+
+    pub fn center(&self) -> Point {
+        self.pos() + 0.5 * self.dim()
+    }
+
+    pub fn dim(&self) -> Vec2 {
+        Vec2::new(self.right - self.left, self.top - self.bottom)
     }
 
     pub fn width(&self) -> f32 {
-        self.dim.x
+        self.right - self.left
     }
 
     pub fn height(&self) -> f32 {
-        self.dim.y
+        self.top - self.bottom
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Modify geometry
+    //
+    pub fn translate(&mut self, translation: Vec2) {
+        self.left += translation.x;
+        self.right += translation.x;
+        self.bottom += translation.y;
+        self.top += translation.y;
+    }
+
+    pub fn translated(self, translation: Vec2) -> Rect {
+        Rect {
+            left: self.left + translation.x,
+            right: self.right + translation.x,
+            bottom: self.bottom + translation.y,
+            top: self.top + translation.y,
+        }
+    }
+
+    pub fn centered(self) -> Rect {
+        let half_dim = 0.5 * self.dim();
+        self.translated(-half_dim)
     }
 
     /// Returns the biggest proportionally stretched version of the rectangle that can fit
@@ -410,87 +440,20 @@ impl Rect {
         let stretched_width = self.width() * scale_factor;
         let stretched_height = self.height() * scale_factor;
 
-        Rect::from_point(self.pos, stretched_width, stretched_height)
+        Rect::from_point(self.pos(), stretched_width, stretched_height)
     }
 
     /// Returns a version of the rectangle that is centered in `target`.
-    pub fn centered_in(self, target: Rect) -> Rect {
-        let offset_centered = target.pos + (target.dim - self.dim) / 2.0;
+    pub fn centered_in_rect(self, target: Rect) -> Rect {
+        let offset_centered = target.pos() + (target.dim() - self.dim()) / 2.0;
 
-        Rect::from_point_dimension(offset_centered, self.dim)
+        Rect::from_point_dimension(offset_centered, self.dim())
     }
 
-    pub fn to_bounds(&self) -> Bounds {
-        Bounds {
-            left: self.pos.x,
-            right: self.pos.x + self.dim.x,
-            bottom: self.pos.y,
-            top: self.pos.y + self.dim.y,
-        }
-    }
-
-    pub fn to_bounds_centered(&self) -> Bounds {
-        Bounds {
-            left: self.pos.x - 0.5 * self.dim.x,
-            right: self.pos.x + 0.5 * self.dim.x,
-            bottom: self.pos.y - 0.5 * self.dim.y,
-            top: self.pos.y + 0.5 * self.dim.y,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct Bounds {
-    pub left: f32,
-    pub right: f32,
-    pub bottom: f32,
-    pub top: f32,
-}
-
-impl Bounds {
-    pub fn new(left: f32, right: f32, bottom: f32, top: f32) -> Bounds {
-        Bounds {
-            left,
-            right,
-            bottom,
-            top,
-        }
-    }
-
-    pub fn pos(&self) -> Point {
-        Point::new(self.left, self.bottom)
-    }
-
-    pub fn pos_centered(&self) -> Point {
-        Point::new(
-            self.left + 0.5 * (self.right - self.left),
-            self.bottom + 0.5 * (self.top - self.bottom),
-        )
-    }
-
-    pub fn dim(&self) -> Vec2 {
-        Vec2::new(self.right - self.left, self.top - self.bottom)
-    }
-
-    pub fn from_rect(rect: Rect) -> Bounds {
-        rect.to_bounds()
-    }
-
-    pub fn from_rect_centered(rect: Rect) -> Bounds {
-        rect.to_bounds_centered()
-    }
-
-    pub fn to_rect(&self) -> Rect {
-        Rect {
-            pos: Point::new(self.left, self.right),
-            dim: Vec2::new(self.right - self.left, self.top - self.bottom),
-        }
-    }
-
-    pub fn scaled_from_origin(self, scale: Vec2) -> Bounds {
+    pub fn scaled_from_origin(self, scale: Vec2) -> Rect {
         debug_assert!(is_positive(scale.x));
         debug_assert!(is_positive(scale.y));
-        Bounds {
+        Rect {
             left: self.left * scale.x,
             right: self.right * scale.x,
             bottom: self.bottom * scale.y,
@@ -498,6 +461,9 @@ impl Bounds {
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Conversions
+    //
     pub fn to_border_lines(&self) -> [Line; 4] {
         [
             Line {
@@ -684,17 +650,7 @@ impl Default for Camera {
 }
 
 impl Camera {
-    pub fn new(canvas_width: i32, canvas_height: i32, z_near: f32, z_far: f32) -> Camera {
-        Camera::with_position(
-            WorldPoint::zero(),
-            canvas_width,
-            canvas_height,
-            z_near,
-            z_far,
-        )
-    }
-
-    pub fn with_position(
+    pub fn new(
         pos: WorldPoint,
         canvas_width: i32,
         canvas_height: i32,
@@ -702,7 +658,7 @@ impl Camera {
         z_far: f32,
     ) -> Camera {
         Camera {
-            world_rect: Rect::new(pos.x, pos.y, canvas_width as f32, canvas_height as f32),
+            world_rect: Rect::from_point(pos, canvas_width as f32, canvas_height as f32),
             zoom_level: 1.0,
             z_near,
             z_far,
@@ -710,21 +666,21 @@ impl Camera {
     }
 
     pub fn pos(&self) -> WorldPoint {
-        self.world_rect.pos
+        self.world_rect.pos()
     }
 
     pub fn dim_zoomed(&self) -> WorldVec {
-        self.world_rect.dim / self.zoom_level
+        self.world_rect.dim() / self.zoom_level
     }
 
     /// Converts a [`CanvasPoint`] into a [`WorldPoint`]
     pub fn canvas_to_world(&self, point: CanvasPoint) -> WorldPoint {
-        (point - 0.5 * self.world_rect.dim) / self.zoom_level + self.pos().pixel_snapped()
+        (point - 0.5 * self.world_rect.dim()) / self.zoom_level + self.pos().pixel_snapped()
     }
 
     /// Converts a [`WorldPoint`] into a [`CanvasPoint`]
     pub fn world_to_canvas(&self, point: WorldPoint) -> CanvasPoint {
-        (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.world_rect.dim
+        (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.world_rect.dim()
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -734,26 +690,28 @@ impl Camera {
     pub fn zoom_to_world_point(&mut self, world_point: WorldPoint, new_zoom_level: f32) {
         let old_zoom_level = self.zoom_level;
         self.zoom_level = new_zoom_level;
-        self.world_rect.pos =
-            (self.world_rect.pos - world_point) * (old_zoom_level / new_zoom_level) + world_point;
+        self.world_rect.translated(
+            (self.world_rect.pos() - world_point) * (old_zoom_level / new_zoom_level) + world_point,
+        );
     }
 
     /// Pans the camera using cursor movement distance on the canvas
     pub fn pan(&mut self, canvas_move_distance: CanvasVec) {
-        self.world_rect.pos -= canvas_move_distance / self.zoom_level;
+        self.world_rect
+            .translate(-canvas_move_distance / self.zoom_level);
     }
 
     /// Returns a project-view-matrix that can transform vertices into camera-view-space
     pub fn proj_view_matrix(&self) -> Mat4 {
         use cgmath::Vector3;
 
-        let translation = -self.world_rect.pos.pixel_snapped();
+        let translation = -self.world_rect.pos().pixel_snapped();
         let view_mat = Mat4::from_nonuniform_scale(self.zoom_level, self.zoom_level, 1.0)
             * Mat4::from_translation(Vector3::new(translation.x, translation.y, 0.0));
 
         let proj_mat = Mat4::ortho_centered(
-            self.world_rect.dim.x,
-            self.world_rect.dim.y,
+            self.world_rect.dim().x,
+            self.world_rect.dim().y,
             self.z_near,
             self.z_far,
         );
@@ -761,9 +719,10 @@ impl Camera {
     }
 
     /// Returns the [`Bounds`] of the cameras view in world-space
-    pub fn bounds_worldspace(&self) -> Bounds {
-        let world_rect_zoomed = Rect::from_point_dimension(self.world_rect.pos, self.dim_zoomed());
-        world_rect_zoomed.to_bounds_centered()
+    pub fn bounds_worldspace(&self) -> Rect {
+        let world_rect_zoomed =
+            Rect::from_point_dimension(self.world_rect.pos(), self.dim_zoomed());
+        world_rect_zoomed.centered()
     }
 }
 
@@ -773,7 +732,7 @@ mod tests {
 
     #[test]
     fn converting_between_canvas_and_world_coordinates_and_back() {
-        let cam = Camera::new(100, 100, -1.0, 1.0);
+        let cam = Camera::new(WorldPoint::zero(), 100, 100, -1.0, 1.0);
 
         let canvas_point = CanvasPoint::new(0.75, -0.23);
         assert!(is_effectively_zero(CanvasPoint::distance(
@@ -787,4 +746,5 @@ mod tests {
             cam.canvas_to_world(cam.world_to_canvas(world_point))
         )));
     }
+
 }

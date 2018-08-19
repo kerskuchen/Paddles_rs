@@ -1,5 +1,6 @@
 use common::*;
-use game_lib::{Bounds, Sprite};
+use game_lib;
+use game_lib::Sprite;
 
 use std;
 use std::fs::File;
@@ -193,13 +194,13 @@ fn write_metadata(
         .iter()
         .map(|data| {
             let rect = data.outer_rect;
-            let vertex_bounds = Bounds {
+            let vertex_bounds = game_lib::Rect {
                 left: 0.0,
                 right: rect.width as f32,
                 bottom: 0.0,
                 top: rect.height as f32,
             };
-            let uv_bounds = Bounds {
+            let uv_bounds = game_lib::Rect {
                 left: rect.x as f32 / image_width,
                 right: (rect.x + rect.width) as f32 / image_width,
                 bottom: rect.y as f32 / image_height,

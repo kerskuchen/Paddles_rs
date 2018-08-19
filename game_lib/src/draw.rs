@@ -1,4 +1,4 @@
-use math::{Bounds, Color, Line, Mat4, Point, Rect, Vec2, WorldPoint};
+use math::{Color, Line, Mat4, Point, Rect, Vec2, WorldPoint};
 
 use bincode;
 use lodepng;
@@ -52,14 +52,14 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
-        let line_uv = sprite_uv_to_line_uv(plain_uv);
+        let line_uv = rect_uv_to_line_uv(plain_uv);
         self.lines.push_line(line, line_uv, depth, color);
     }
 
-    pub fn draw_rect_filled(&mut self, bounds: Bounds, depth: f32, color: Color) {
+    pub fn draw_rect_filled(&mut self, rect: Rect, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let plain_uv = self.sprite_map["images/plain"].uv_bounds;
-        self.polygons.push_quad(bounds, plain_uv, depth, color);
+        self.polygons.push_quad(rect, plain_uv, depth, color);
     }
 
     pub fn start_drawing(&mut self) {
@@ -441,28 +441,28 @@ impl Mesh for PolygonMesh {
 }
 
 impl PolygonMesh {
-    pub fn push_quad(&mut self, bounds: Bounds, bounds_uv: Bounds, depth: f32, color: Color) {
+    pub fn push_quad(&mut self, rect: Rect, rect_uv: Rect, depth: f32, color: Color) {
         // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
         let color = color.into();
         let quad_vertices = [
             Vertex {
-                pos: [bounds.left, bounds.bottom, depth, 1.0],
-                uv: [bounds_uv.left, bounds_uv.top],
+                pos: [rect.left, rect.bottom, depth, 1.0],
+                uv: [rect_uv.left, rect_uv.top],
                 color,
             },
             Vertex {
-                pos: [bounds.right, bounds.bottom, depth, 1.0],
-                uv: [bounds_uv.right, bounds_uv.top],
+                pos: [rect.right, rect.bottom, depth, 1.0],
+                uv: [rect_uv.right, rect_uv.top],
                 color,
             },
             Vertex {
-                pos: [bounds.right, bounds.top, depth, 1.0],
-                uv: [bounds_uv.right, bounds_uv.bottom],
+                pos: [rect.right, rect.top, depth, 1.0],
+                uv: [rect_uv.right, rect_uv.bottom],
                 color,
             },
             Vertex {
-                pos: [bounds.left, bounds.top, depth, 1.0],
-                uv: [bounds_uv.left, bounds_uv.bottom],
+                pos: [rect.left, rect.top, depth, 1.0],
+                uv: [rect_uv.left, rect_uv.bottom],
                 color,
             },
         ];
@@ -490,8 +490,8 @@ impl PolygonMesh {
 // TODO(JaSc): Evaluate if we still need this struct or a better alternative/name
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Sprite {
-    pub vertex_bounds: Bounds,
-    pub uv_bounds: Bounds,
+    pub vertex_bounds: Rect,
+    pub uv_bounds: Rect,
 }
 
 impl Sprite {
@@ -534,82 +534,43 @@ impl Sprite {
 }
 
 //==================================================================================================
-// Quad
-//==================================================================================================
-//
-// TODO(JaSc): Evaluate if we still need this struct
-#[derive(Debug, Clone, Copy)]
-pub struct Quad {
-    pub bounds: Bounds,
-    pub depth: f32,
-    pub color: Color,
-}
-
-impl Quad {
-    pub fn from_rect(rect: Rect, depth: f32, color: Color) -> Quad {
-        Quad {
-            bounds: rect.to_bounds(),
-            depth,
-            color,
-        }
-    }
-
-    pub fn from_rect_centered(rect: Rect, depth: f32, color: Color) -> Quad {
-        Quad {
-            bounds: rect.to_bounds_centered(),
-            depth,
-            color,
-        }
-    }
-
-    pub fn from_bounds(bounds: Bounds, depth: f32, color: Color) -> Quad {
-        Quad {
-            bounds,
-            depth,
-            color,
-        }
-    }
-
-    pub fn into_vertices(self) -> [Vertex; 4] {
-        let bounds = self.bounds;
-        let color = self.color.into();
-        let depth = self.depth;
-
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-        [
-            Vertex {
-                pos: [bounds.left, bounds.bottom, depth, 1.0],
-                uv: [0.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.right, bounds.bottom, depth, 1.0],
-                uv: [1.0, 1.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.right, bounds.top, depth, 1.0],
-                uv: [1.0, 0.0],
-                color,
-            },
-            Vertex {
-                pos: [bounds.left, bounds.top, depth, 1.0],
-                uv: [0.0, 0.0],
-                color,
-            },
-        ]
-    }
-}
-
-//==================================================================================================
 // Helper functions
 //==================================================================================================
 //
 // TODO(JaSc): Find a place for these graphic/geometry helper functions
-fn sprite_uv_to_line_uv(sprite_uv: Bounds) -> Line {
+fn rect_uv_to_line_uv(rect_uv: Rect) -> Line {
     // NOTE: We use only the horizontal axis of a sprite's uv
     Line::new(
-        Point::new(sprite_uv.left, sprite_uv.bottom),
-        Point::new(sprite_uv.right, sprite_uv.top),
+        Point::new(rect_uv.left, rect_uv.bottom),
+        Point::new(rect_uv.right, rect_uv.top),
     )
+}
+
+pub fn vertices_from_rects(rect: Rect, rect_uv: Rect, depth: f32, color: Color) -> [Vertex; 4] {
+    let color = color.into();
+
+    // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
+    // TODO(JaSc): Maybe we should change just change the shaders to flip y??
+    [
+        Vertex {
+            pos: [rect.left, rect.bottom, depth, 1.0],
+            uv: [rect_uv.left, rect_uv.top],
+            color,
+        },
+        Vertex {
+            pos: [rect.right, rect.bottom, depth, 1.0],
+            uv: [rect_uv.right, rect_uv.top],
+            color,
+        },
+        Vertex {
+            pos: [rect.right, rect.top, depth, 1.0],
+            uv: [rect_uv.right, rect_uv.bottom],
+            color,
+        },
+        Vertex {
+            pos: [rect.left, rect.top, depth, 1.0],
+            uv: [rect_uv.left, rect_uv.bottom],
+            color,
+        },
+    ]
 }

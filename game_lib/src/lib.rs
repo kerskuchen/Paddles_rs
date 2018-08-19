@@ -21,12 +21,12 @@ pub mod math;
 //             Is it GameState or Gamestate? When its GameState why do variables are then called
 //             gamestate and not game_state?
 pub use draw::{
-    ComponentBytes, DrawCommand, DrawContext, FramebufferInfo, FramebufferTarget, LineMesh, Mesh,
-    Pixel, PolygonMesh, Quad, Sprite, TextureInfo, Vertex, VertexIndex,
+    vertices_from_rects, ComponentBytes, DrawCommand, DrawContext, FramebufferInfo,
+    FramebufferTarget, LineMesh, Mesh, Pixel, PolygonMesh, Sprite, TextureInfo, Vertex,
+    VertexIndex,
 };
 pub use math::{
-    Bounds, Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2,
-    WorldPoint,
+    Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2, WorldPoint,
 };
 
 const UNIT_SIZE: f32 = 16.0;
@@ -164,7 +164,7 @@ fn reinitialize_after_hotreload() {
 
 fn reinitialize_gamestate(gamestate: &mut GameState) {
     gamestate.origin = WorldPoint::zero();
-    gamestate.cam = Camera::with_position(gamestate.origin, CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0);
+    gamestate.cam = Camera::new(gamestate.origin, CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0);
 }
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
@@ -204,12 +204,12 @@ pub fn update_and_draw<'gamestate>(
         let blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
         info!("=====================");
-        info!("Window resized: {:?}", screen_rect.dim);
-        info!("Canvas size: {:?}", canvas_rect.dim);
+        info!("Window resized: {:?}", screen_rect.dim());
+        info!("Canvas size: {:?}", canvas_rect.dim());
         info!("Blit-rect: {:?}", blit_rect);
         info!(
             "Pixel scale factor: {} ",
-            if blit_rect.pos.x == 0.0 {
+            if blit_rect.left == 0.0 {
                 screen_rect.width() / canvas_rect.width()
             } else {
                 screen_rect.height() / canvas_rect.height()
@@ -290,8 +290,7 @@ pub fn update_and_draw<'gamestate>(
             cursor_color.z = 1.0;
         }
         drawcontext.draw_rect_filled(
-            Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones())
-                .to_bounds(),
+            Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
             -0.1,
             cursor_color,
         );
@@ -305,13 +304,13 @@ pub fn update_and_draw<'gamestate>(
                     + gamestate.origin;
                 if x % 2 == 0 {
                     drawcontext.draw_rect_filled(
-                        Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE).to_bounds(),
+                        Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
                         -0.9,
                         grid_light,
                     );
                 } else {
                     drawcontext.draw_rect_filled(
-                        Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE).to_bounds(),
+                        Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
                         -0.9,
                         grid_dark,
                     );
@@ -320,7 +319,7 @@ pub fn update_and_draw<'gamestate>(
         }
 
         // Playing field
-        let field_bounds = Bounds {
+        let field_bounds = Rect {
             left: -11.0 * UNIT_SIZE,
             right: 11.0 * UNIT_SIZE,
             bottom: -7.0 * UNIT_SIZE,
@@ -334,25 +333,25 @@ pub fn update_and_draw<'gamestate>(
         for &line in &field_border_lines {
             drawcontext.draw_line(line, field_depth, field_border_line_color);
         }
-        let field_border_left = Bounds {
+        let field_border_left = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.left,
             bottom: field_bounds.bottom,
             top: field_bounds.top,
         };
-        let field_border_right = Bounds {
+        let field_border_right = Rect {
             left: field_bounds.right,
             right: field_bounds.right + UNIT_SIZE,
             bottom: field_bounds.bottom,
             top: field_bounds.top,
         };
-        let field_border_top = Bounds {
+        let field_border_top = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.right + UNIT_SIZE,
             bottom: field_bounds.top,
             top: field_bounds.top + UNIT_SIZE,
         };
-        let field_border_bottom = Bounds {
+        let field_border_bottom = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.right + UNIT_SIZE,
             bottom: field_bounds.bottom - UNIT_SIZE,
@@ -423,7 +422,7 @@ pub fn update_and_draw<'gamestate>(
 pub fn canvas_blit_rect(screen_rect: Rect, canvas_rect: Rect) -> Rect {
     canvas_rect
         .stretched_to_fit(screen_rect)
-        .centered_in(screen_rect)
+        .centered_in_rect(screen_rect)
 }
 
 // TODO(JaSc): Proofread and refactor this
@@ -438,11 +437,13 @@ fn screen_pos_to_canvas_pos(screen_point: Point, screen_rect: Rect, canvas_rect:
     //       add one again after clamping to achieve the desired effect.
     // TODO(JaSc): Maybe make this more self documenting via integer rectangles
     let mut blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
-    blit_rect.dim -= 1.0;
+    blit_rect.right -= 1.0;
+    blit_rect.top -= 1.0;
     let clamped_point = screen_point.clamped_in_rect(blit_rect);
-    blit_rect.dim += 1.0;
+    blit_rect.right += 1.0;
+    blit_rect.top += 1.0;
 
-    let result = canvas_rect.dim * ((clamped_point - blit_rect.pos) / blit_rect.dim);
+    let result = canvas_rect.dim() * ((clamped_point - blit_rect.pos()) / blit_rect.dim());
     Point::new(f32::floor(result.x), f32::floor(result.y))
 }
 
