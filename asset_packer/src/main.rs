@@ -6,6 +6,8 @@ extern crate rand;
 extern crate rect_packer;
 extern crate rusttype;
 
+extern crate inflate;
+
 #[macro_use]
 extern crate log;
 extern crate fern;

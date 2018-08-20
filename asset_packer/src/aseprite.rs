@@ -6,6 +6,7 @@ use std::io::SeekFrom;
 
 use failure;
 use failure::{Error, ResultExt};
+use inflate;
 
 const MAGIC_NUMBER_HEADER: u16 = 0xA5E0;
 const MAGIC_NUMBER_FRAME: u16 = 0xF1FA;
@@ -104,6 +105,63 @@ pub fn test_read_aseprite_file() {
         read_chunk_layer(&mut file).expect("Could not read layer chunk")
     }
 
+    // Layer chunk
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_LAYER {
+        read_chunk_layer(&mut file).expect("Could not read layer chunk")
+    }
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_FRAME_TAGS {
+        read_chunk_frame_tags(&mut file).expect("Could not read frame tags chunk");
+    }
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
+    let frame: FrameC = deserialize_from(&mut file).expect("Could not deserialize frame info");
+    assert_eq!(frame.magic_number, MAGIC_NUMBER_FRAME);
+    dprintln!(frame);
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
+    let frame: FrameC = deserialize_from(&mut file).expect("Could not deserialize frame info");
+    assert_eq!(frame.magic_number, MAGIC_NUMBER_FRAME);
+    dprintln!(frame);
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
+    let chunk_header: ChunkHeaderC =
+        deserialize_from(&mut file).expect("Could not deserialize chunk header");
+    if chunk_header.chunk_type == CHUNKTYPE_CELL {
+        read_chunk_cell(&mut file, chunk_header.chunk_size).expect("Could not read cell chunk");
+    }
+
     //let mut buf = Vec::new();
     //file.read_to_end(&mut buf);
     //println!("end {:?}", buf);
@@ -188,4 +246,136 @@ fn deserialize_string(mut file: &mut File) -> Result<String, Error> {
     file.read_exact(&mut bytes)?;
     let result = std::str::from_utf8(&bytes)?.to_owned();
     Ok(result)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Frame tag chunk
+//
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FrameTag {
+    begin_frame: u16,
+    end_frame: u16,
+    tag_color: [u8; 3],
+    animation_loop_direction: AnimationLoopDirection,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum AnimationLoopDirection {
+    Forward,
+    Reverse,
+    PingPong,
+}
+
+const ANIMATION_LOOP_DIRECTION_FORWARD: u8 = 0;
+const ANIMATION_LOOP_DIRECTION_REVERSE: u8 = 1;
+const ANIMATION_LOOP_DIRECTION_PINGPONG: u8 = 2;
+
+fn read_chunk_frame_tags(mut file: &mut File) -> Result<Vec<FrameTag>, Error> {
+    let num_tags: u16 = deserialize_from(&mut file)?;
+    let _reserved: [u8; 8] = deserialize_from(&mut file)?;
+
+    let mut tags = Vec::new();
+    for _ in 0..num_tags {
+        let begin_frame: u16 = deserialize_from(&mut file)?;
+        let end_frame: u16 = deserialize_from(&mut file)?;
+        let animation_loop_direction: u8 = deserialize_from(&mut file)?;
+        let _reserved: [u8; 8] = deserialize_from(&mut file)?;
+        let tag_color: [u8; 3] = deserialize_from(&mut file)?;
+        let _extra_zero_byte: u8 = deserialize_from(&mut file)?;
+
+        let name = deserialize_string(file)?;
+        let animation_loop_direction = match animation_loop_direction {
+            ANIMATION_LOOP_DIRECTION_FORWARD => AnimationLoopDirection::Forward,
+            ANIMATION_LOOP_DIRECTION_REVERSE => AnimationLoopDirection::Reverse,
+            ANIMATION_LOOP_DIRECTION_PINGPONG => AnimationLoopDirection::PingPong,
+            _ => AnimationLoopDirection::Forward, // TODO(JaSc): Do real error handling here
+        };
+
+        let tag = FrameTag {
+            begin_frame,
+            end_frame,
+            tag_color,
+            animation_loop_direction,
+            name,
+        };
+        tags.push(tag);
+    }
+
+    Ok(tags)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Cell chunk
+//
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CellChunk {
+    begin_frame: u16,
+    end_frame: u16,
+    tag_color: [u8; 3],
+    animation_loop_direction: AnimationLoopDirection,
+    name: String,
+}
+const CEL_TYPE_RAW: u16 = 0;
+const CEL_TYPE_LINKED: u16 = 1;
+const CEL_TYPE_COMPRESSED: u16 = 2;
+
+fn read_chunk_cell(mut file: &mut File, chunk_size: u32) -> Result<(), Error> {
+    let layer_index: u16 = deserialize_from(&mut file)?;
+    let x_pos: i16 = deserialize_from(&mut file)?;
+    let y_pos: i16 = deserialize_from(&mut file)?;
+    let opacity: u8 = deserialize_from(&mut file)?;
+    let cel_type: u16 = deserialize_from(&mut file)?;
+    let _reserved: [u8; 7] = deserialize_from(&mut file)?;
+
+    dprintln!(layer_index);
+    dprintln!(x_pos);
+    dprintln!(y_pos);
+    dprintln!(opacity);
+    dprintln!(cel_type);
+
+    match cel_type {
+        CEL_TYPE_RAW => {
+            let width: u16 = deserialize_from(&mut file)?;
+            let height: u16 = deserialize_from(&mut file)?;
+
+            dprintln!(width);
+            dprintln!(height);
+
+            let num_bytes_in_raw_image =
+                chunk_size - (CHUNKHEADER_SIZE + 2 + 2 + 2 + 1 + 2 + 7 + 2 + 2);
+            dprintln!(num_bytes_in_raw_image);
+            let mut bytes = vec![0u8; num_bytes_in_raw_image as usize];
+            file.read_exact(&mut bytes)?;
+            dprintln!(bytes);
+        }
+        CEL_TYPE_LINKED => {
+            let frame_to_link_with: u16 = deserialize_from(&mut file)?;
+            dprintln!(frame_to_link_with);
+        }
+        CEL_TYPE_COMPRESSED => {
+            let width: u16 = deserialize_from(&mut file)?;
+            let height: u16 = deserialize_from(&mut file)?;
+
+            dprintln!(width);
+            dprintln!(height);
+
+            let num_bytes_in_compressed_image =
+                chunk_size - (CHUNKHEADER_SIZE + 2 + 2 + 2 + 1 + 2 + 7 + 2 + 2);
+            dprintln!(num_bytes_in_compressed_image);
+
+            let mut bytes = vec![0u8; num_bytes_in_compressed_image as usize];
+            file.read_exact(&mut bytes)?;
+            let decompressed = inflate::inflate_bytes_zlib(&bytes).unwrap();
+            dprintln!(decompressed);
+            dprintln!(decompressed.len());
+        }
+        _ => {
+            // TODO(JaSc): Error handling
+        }
+    }
+
+    Ok(())
 }
