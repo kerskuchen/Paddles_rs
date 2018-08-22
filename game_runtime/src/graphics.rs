@@ -216,6 +216,7 @@ where
     factory: F,
     // NOTE: `encoder` and `screen_framebuffer` need to be public for direct access from
     //        gfx_glutin in the mainloop
+    // TODO(JaSc): Evaluate if we can contain this with accessor functions
     pub encoder: gfx::Encoder<R, C>,
     pub screen_framebuffer: Framebuffer<R>,
 
