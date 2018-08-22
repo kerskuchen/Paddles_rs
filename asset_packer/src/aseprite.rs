@@ -50,6 +50,19 @@ pub struct HeaderC {
     pub _reserved2: [u8; 28],
 }
 
+pub struct Image {
+    width: u16,
+    height: u16,
+    color_depth: ColorDepth,
+    frames: Vec<Frame>, // TODO(JaSc): Implement this
+}
+
+pub enum ColorDepth {
+    Rgba,
+    Greyscale,
+    Indexed(u8),
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[repr(C)]
 pub struct FrameC {
@@ -75,6 +88,18 @@ pub fn test_read_aseprite_file() {
 
     let header: HeaderC = deserialize_from(&mut file).expect("Could not deserialize header");
     assert_eq!(header.magic_number, MAGIC_NUMBER_HEADER);
+
+    let color_depth = match header.color_depth {
+        COLOR_DEPTH_RGBA => ColorDepth::Rgba,
+        COLOR_DEPTH_GREYSCALE => ColorDepth::Greyscale,
+        COLOR_DEPTH_INDEXED => ColorDepth::Indexed(header.indexed_color_transparent),
+    };
+    let mut image = Image {
+        width: header.image_width_in_pixels,
+        height: header.image_height_in_pixels,
+        color_depth,
+        frames: Vec::new(),
+    };
 
     let frame: FrameC = deserialize_from(&mut file).expect("Could not deserialize frame info");
     assert_eq!(frame.magic_number, MAGIC_NUMBER_FRAME);
