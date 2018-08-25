@@ -13,7 +13,7 @@ TODO(JaSc):
     font-sprites into Vectors which can be accessed via hashmap.
 */
 
-//#[macro_use]
+#[macro_use]
 extern crate game_lib;
 use game_lib::AtlasMeta;
 
@@ -30,16 +30,18 @@ extern crate fern;
 
 #[macro_use]
 extern crate serde_derive;
+extern crate aseprite;
 extern crate bincode;
 extern crate ron;
 extern crate serde;
+extern crate serde_json;
 
 extern crate failure;
 use failure::{Error, ResultExt};
 
 extern crate walkdir;
 
-pub mod aseprite;
+pub mod aseprite_packer;
 pub mod common;
 pub mod font_packer;
 pub mod image_packer;
@@ -74,9 +76,13 @@ fn main() -> Result<(), Error> {
     let font_map = font_packer::pack_fonts(&mut packer)?;
     info!("Successfully packed fonts");
 
-    debug!("Packing images");
+    debug!("Packing images and animations");
+    let (animations_map, sprite_map) = aseprite_packer::pack_animations_and_sprites(&mut packer)?;
+    info!("Successfully packed images and animations");
+
+    debug!("Packing png images");
     let sprite_map = image_packer::pack_sprites(&mut packer)?;
-    info!("Successfully packed images");
+    info!("Successfully packed png images");
 
     debug!("Saving atlas textures");
     let atlases = packer.into_atlas_textures();

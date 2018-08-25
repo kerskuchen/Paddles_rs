@@ -26,26 +26,33 @@ pub const FONTS_PATH: &str = "assets/fonts/";
 pub const IMAGES_DIR: &str = "images";
 
 pub trait PathHelper {
-    fn to_string(&self) -> Result<String, Error>;
+    fn to_string_owned(&self) -> String;
+    fn to_string(&self) -> &str;
 }
 
 impl PathHelper for Path {
-    fn to_string(&self) -> Result<String, Error> {
-        Ok(self
-            .to_str()
-// TODO(JaSc): Report rustfmt bug
-            .ok_or_else(|| failure::err_msg(format!("Could not convert path to string {:?}", self)))?
-            .to_owned())
+    fn to_string_owned(&self) -> String {
+        self.to_str()
+            .unwrap_or_else(|| panic!("Could not convert path to String {:?}", self))
+            .to_owned()
+    }
+
+    fn to_string(&self) -> &str {
+        self.to_str()
+            .unwrap_or_else(|| panic!("Could not convert path to &str {:?}", self))
     }
 }
 
 impl PathHelper for OsStr {
-    fn to_string(&self) -> Result<String, Error> {
-        Ok(self
-            .to_str()
-// TODO(JaSc): Report rustfmt bug
-            .ok_or_else(|| failure::err_msg(format!("Could not convert path to string {:?}", self)))?
-            .to_owned())
+    fn to_string_owned(&self) -> String {
+        self.to_str()
+            .unwrap_or_else(|| panic!("Could not convert path to String {:?}", self))
+            .to_owned()
+    }
+
+    fn to_string(&self) -> &str {
+        self.to_str()
+            .unwrap_or_else(|| panic!("Could not convert path to &str {:?}", self))
     }
 }
 
@@ -58,7 +65,7 @@ pub fn filepath_to_filename_string(filepath: &Path) -> Result<String, Error> {
                 filepath.display()
             ))
         })?
-        .to_string()?)
+        .to_string_owned())
 }
 
 pub fn filepath_to_filename_string_without_extension(filepath: &Path) -> Result<String, Error> {
@@ -69,7 +76,7 @@ pub fn filepath_to_string_without_extension(filepath: &Path) -> Result<String, E
     Ok(filepath
         .with_extension("")
         .as_os_str()
-        .to_string()?
+        .to_string_owned()
         .replace("\\", "/"))
 }
 
