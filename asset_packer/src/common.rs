@@ -3,20 +3,40 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use image;
+use image::DynamicImage;
 use image::Rgba;
-use rect_packer::Rect;
+use rand::prelude::*;
+use rect_packer::{DensePacker, Rect};
 use walkdir::WalkDir;
 
 use failure;
 use failure::Error;
 
+use game_lib;
+use game_lib::{Sprite, Vec2};
+
+//==================================================================================================
+// Paths
+//==================================================================================================
+//
 pub const ASSETS_DIR: &str = "assets";
 pub const DATA_DIR: &str = "data";
 pub const FONTS_DIR: &str = "fonts";
+pub const FONTS_PATH: &str = "assets/fonts/";
 pub const IMAGES_DIR: &str = "images";
 
 pub trait PathHelper {
     fn to_string(&self) -> Result<String, Error>;
+}
+
+impl PathHelper for Path {
+    fn to_string(&self) -> Result<String, Error> {
+        Ok(self
+            .to_str()
+// TODO(JaSc): Report rustfmt bug
+            .ok_or_else(|| failure::err_msg(format!("Could not convert path to string {:?}", self)))?
+            .to_owned())
+    }
 }
 
 impl PathHelper for OsStr {
@@ -70,6 +90,10 @@ pub fn collect_all_files_with_extension(root_folder: &str, extension: &str) -> V
         .collect()
 }
 
+//==================================================================================================
+// Image
+//==================================================================================================
+//
 pub type Image = image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>;
 
 pub trait ImageHelper {
@@ -77,7 +101,7 @@ pub trait ImageHelper {
     fn draw_rect(&mut self, rect: Rect, border_color: [u8; 4]);
     fn fill_rect(&mut self, rect: Rect, fill_color: [u8; 4]);
     fn copy_region(
-        source_image: &mut Image,
+        source_image: &Image,
         source_region: Rect,
         dest_image: &mut Image,
         dest_region: Rect,
@@ -123,9 +147,9 @@ impl ImageHelper for Image {
     }
 
     fn copy_region(
-        source_image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
+        source_image: &Image,
         source_region: Rect,
-        dest_image: &mut image::ImageBuffer<image::Rgba<u8>, std::vec::Vec<u8>>,
+        dest_image: &mut Image,
         dest_region: Rect,
     ) {
         assert!(source_region.width == dest_region.width);
@@ -153,6 +177,161 @@ impl ImageHelper for Image {
                     Rgba { data: source_color },
                 )
             }
+        }
+    }
+}
+
+//==================================================================================================
+// AtlasPacker
+//==================================================================================================
+//
+const DEBUG_DRAW_RECTS_AROUND_SPRITES: bool = false;
+
+#[derive(Copy, Clone)]
+pub struct AtlasRegion {
+    rect: Rect,
+    atlas_index: usize,
+}
+
+impl AtlasRegion {
+    pub fn to_sprite(&self, atlas_size: f32, offset: Vec2) -> Sprite {
+        let rect = self.rect;
+        let vertex_bounds = game_lib::Rect {
+            left: offset.x,
+            right: offset.x + rect.width as f32,
+            top: offset.y,
+            bottom: offset.y + rect.height as f32,
+        };
+        let uv_bounds = game_lib::Rect {
+            left: rect.x as f32 / atlas_size,
+            right: (rect.x + rect.width) as f32 / atlas_size,
+            top: rect.y as f32 / atlas_size,
+            bottom: (rect.y + rect.height) as f32 / atlas_size,
+        };
+        Sprite {
+            vertex_bounds,
+            uv_bounds,
+            atlas_index: self.atlas_index,
+        }
+    }
+}
+
+pub struct AtlasPacker {
+    rect_packer: AtlasRectPacker,
+    texture_writer: AtlasTextureWriter,
+    default_empty_region: AtlasRegion,
+    pub atlas_size: i32,
+}
+
+impl AtlasPacker {
+    pub fn new(atlas_size: i32) -> AtlasPacker {
+        let mut rect_packer = AtlasRectPacker::new(atlas_size);
+        let default_empty_region = rect_packer.pack_image(1, 1);
+
+        AtlasPacker {
+            rect_packer,
+            texture_writer: AtlasTextureWriter::new(atlas_size as u32),
+            default_empty_region,
+            atlas_size,
+        }
+    }
+
+    pub fn default_empty_region(&self) -> AtlasRegion {
+        self.default_empty_region
+    }
+
+    pub fn pack_image(&mut self, image: Image) -> AtlasRegion {
+        let region = self
+            .rect_packer
+            .pack_image(image.width() as i32, image.height() as i32);
+        self.texture_writer.write_image(image, &region);
+        region
+    }
+
+    pub fn into_atlas_textures(self) -> Vec<Image> {
+        self.texture_writer.into_atlas_textures()
+    }
+}
+
+struct AtlasRectPacker {
+    atlas_size: i32,
+    atlas_packers: Vec<DensePacker>,
+}
+
+impl AtlasRectPacker {
+    fn new(atlas_size: i32) -> AtlasRectPacker {
+        AtlasRectPacker {
+            atlas_size,
+            atlas_packers: vec![DensePacker::new(atlas_size, atlas_size)],
+        }
+    }
+
+    fn pack_image(&mut self, image_width: i32, image_height: i32) -> AtlasRegion {
+        for (atlas_index, mut packer) in self.atlas_packers.iter_mut().enumerate() {
+            if let Some(rect) = packer.pack(image_width, image_height, false) {
+                return AtlasRegion { rect, atlas_index };
+            }
+        }
+
+        // At this point our image did not fit in any of the existing atlases,
+        // so we create a new atlas.
+        let mut atlas = DensePacker::new(self.atlas_size, self.atlas_size);
+        let rect = atlas
+            .pack(image_width, image_height, false)
+            .expect(&format!(
+                "Could not pack image with dimensions {}x{} into atlas with dimensions {}x{}",
+                image_width, image_height, self.atlas_size, self.atlas_size
+            ));
+        let atlas_index = self.atlas_packers.len();
+        self.atlas_packers.push(atlas);
+
+        AtlasRegion { rect, atlas_index }
+    }
+}
+
+struct AtlasTextureWriter {
+    atlas_size: u32,
+    atlas_textures: Vec<Image>,
+}
+
+impl AtlasTextureWriter {
+    fn new(atlas_size: u32) -> AtlasTextureWriter {
+        AtlasTextureWriter {
+            atlas_size,
+            atlas_textures: Vec::new(),
+        }
+    }
+
+    fn write_image(&mut self, image: Image, region: &AtlasRegion) {
+        self.add_more_atlases_if_necessary(region.atlas_index);
+
+        let dest_image = &mut self.atlas_textures[region.atlas_index];
+        let dest_rect = region.rect;
+
+        let source_image = image;
+        let source_rect = Rect {
+            x: 0,
+            y: 0,
+            width: dest_rect.width,
+            height: dest_rect.height,
+        };
+
+        Image::copy_region(&source_image, source_rect, dest_image, dest_rect);
+
+        if DEBUG_DRAW_RECTS_AROUND_SPRITES {
+            let rand_color = [random::<u8>(), random::<u8>(), random::<u8>(), 125];
+            dest_image.draw_rect(dest_rect, rand_color);
+        }
+    }
+
+    fn into_atlas_textures(self) -> Vec<Image> {
+        self.atlas_textures
+    }
+
+    fn add_more_atlases_if_necessary(&mut self, atlas_index: usize) {
+        while atlas_index >= self.atlas_textures.len() {
+            let atlas = DynamicImage::new_rgba8(self.atlas_size, self.atlas_size).to_rgba();
+            self.atlas_textures.push(atlas)
         }
     }
 }

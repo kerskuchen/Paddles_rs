@@ -419,7 +419,7 @@ where
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
 
         // NOTE: The projection matrix is flipped upside-down for correct blitting
-        let projection_mat = Mat4::ortho_bottom_left_flipped_y(
+        let projection_mat = Mat4::ortho_origin_bottom_left(
             f32::from(target_framebuffer_info.width),
             f32::from(target_framebuffer_info.height),
             0.0,

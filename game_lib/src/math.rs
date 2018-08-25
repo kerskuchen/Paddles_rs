@@ -49,7 +49,7 @@ impl Point {
     pub fn clamped_in_rect(self, rect: Rect) -> Point {
         Point::new(
             clamp(self.x, rect.left, rect.right),
-            clamp(self.y, rect.bottom, rect.top),
+            clamp(self.y, rect.top, rect.bottom),
         )
     }
 }
@@ -282,29 +282,24 @@ impl Div<f32> for Vec2 {
 //==================================================================================================
 //
 pub trait Mat4Helper {
-    fn ortho_centered(width: f32, height: f32, near: f32, far: f32) -> Self;
-    fn ortho_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self;
-    fn ortho_bottom_left_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self;
+    fn ortho_origin_center_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self;
+    fn ortho_origin_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self;
 }
 
 impl Mat4Helper for Mat4 {
-    fn ortho_centered(width: f32, height: f32, near: f32, far: f32) -> Self {
+    fn ortho_origin_center_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self {
         cgmath::ortho(
             -0.5 * width,
             0.5 * width,
-            -0.5 * height,
             0.5 * height,
+            -0.5 * height,
             near,
             far,
         )
     }
 
-    fn ortho_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self {
+    fn ortho_origin_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self {
         cgmath::ortho(0.0, width, 0.0, height, near, far)
-    }
-
-    fn ortho_bottom_left_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self {
-        cgmath::ortho(0.0, width, height, 0.0, near, far)
     }
 }
 
@@ -314,12 +309,13 @@ impl Mat4Helper for Mat4 {
 //
 
 // TODO(JaSc): Write some docs, unittests/examples for these
+/// Origin -> top-left
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect {
     pub left: f32,
     pub right: f32,
-    pub bottom: f32,
     pub top: f32,
+    pub bottom: f32,
 }
 
 impl Rect {
@@ -334,8 +330,8 @@ impl Rect {
         Rect {
             left,
             right,
-            bottom,
             top,
+            bottom,
         }
     }
 
@@ -343,8 +339,8 @@ impl Rect {
         Rect {
             left: x,
             right: x + width,
-            bottom: y,
-            top: y + height,
+            top: y,
+            bottom: y + height,
         }
     }
 
@@ -368,8 +364,8 @@ impl Rect {
         Rect {
             left: 0.0,
             right: 1.0,
-            bottom: 0.0,
-            top: 1.0,
+            top: 0.0,
+            bottom: 1.0,
         }
     }
 
@@ -381,7 +377,7 @@ impl Rect {
     // Accessors
     //
     pub fn pos(&self) -> Point {
-        Point::new(self.left, self.bottom)
+        Point::new(self.left, self.top)
     }
 
     pub fn center(&self) -> Point {
@@ -389,7 +385,7 @@ impl Rect {
     }
 
     pub fn dim(&self) -> Vec2 {
-        Vec2::new(self.right - self.left, self.top - self.bottom)
+        Vec2::new(self.right - self.left, self.bottom - self.top)
     }
 
     pub fn width(&self) -> f32 {
@@ -397,7 +393,7 @@ impl Rect {
     }
 
     pub fn height(&self) -> f32 {
-        self.top - self.bottom
+        self.bottom - self.top
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -407,8 +403,8 @@ impl Rect {
         Rect {
             left: self.left + translation.x,
             right: self.right + translation.x,
-            bottom: self.bottom + translation.y,
             top: self.top + translation.y,
+            bottom: self.bottom + translation.y,
         }
     }
 
@@ -485,44 +481,48 @@ impl Rect {
     //
     pub fn to_border_lines(&self) -> [Line; 4] {
         [
+            // Top horizontal line
             Line {
                 start: Point {
                     x: self.left,
-                    y: self.bottom,
-                },
-                end: Point {
-                    x: self.right,
-                    y: self.bottom,
-                },
-            },
-            Line {
-                start: Point {
-                    x: self.right,
-                    y: self.bottom,
+                    y: self.top,
                 },
                 end: Point {
                     x: self.right,
                     y: self.top,
                 },
             },
+            // Right vertical line
             Line {
                 start: Point {
                     x: self.right,
                     y: self.top,
                 },
                 end: Point {
-                    x: self.left,
-                    y: self.top,
+                    x: self.right,
+                    y: self.bottom,
                 },
             },
+            // Bottom horizontal line
             Line {
                 start: Point {
-                    x: self.left,
-                    y: self.top,
+                    x: self.right,
+                    y: self.bottom,
                 },
                 end: Point {
                     x: self.left,
                     y: self.bottom,
+                },
+            },
+            // Left vertical line
+            Line {
+                start: Point {
+                    x: self.left,
+                    y: self.bottom,
+                },
+                end: Point {
+                    x: self.left,
+                    y: self.top,
                 },
             },
         ]
@@ -566,7 +566,7 @@ impl WorldPoint {
     /// For example pixel-snapping the cameras position before drawing prevents pixel-jittering
     /// artifacts on visible objects if the camera is moving at sub-pixel distances.
     pub fn pixel_snapped(self) -> WorldPoint {
-        // NOTE: Because OpenGL pixels are drawn from the bottom left we need to floor here
+        // NOTE: Because OpenGL pixels are drawn from the top left we need to floor here
         //       to correctly transform world coordinates to pixels.
         WorldPoint {
             x: f32::floor(self.x),
@@ -605,8 +605,8 @@ impl WorldPoint {
 ///
 /// let left =   pos.x - 0.5 * dim.x / zoom;
 /// let right =  pos.x + 0.5 * dim.x / zoom;
-/// let bottom = pos.y - 0.5 * dim.y / zoom;
-/// let top =    pos.y + 0.5 * dim.y / zoom;
+/// let top =    pos.y - 0.5 * dim.y / zoom;
+/// let bottom = pos.y + 0.5 * dim.y / zoom;
 ///
 /// let bounds = cam.frustum();
 /// assert_eq!(bounds.left, left);
@@ -730,10 +730,6 @@ impl Camera {
         self.frustum = self.frustum.centered_in_position(
             (self.pos() - world_point) * (old_zoom_level / new_zoom_level) + world_point,
         );
-
-        dprintln!(self.pos());
-        dprintln!(self.frustum);
-        dprintln!(self.dim_zoomed());
     }
 
     /// Pans the camera using cursor movement distance on the canvas
@@ -751,7 +747,7 @@ impl Camera {
         let view_mat = Mat4::from_nonuniform_scale(self.zoom_level, self.zoom_level, 1.0)
             * Mat4::from_translation(Vector3::new(translation.x, translation.y, 0.0));
 
-        let proj_mat = Mat4::ortho_centered(
+        let proj_mat = Mat4::ortho_origin_center_flipped_y(
             self.frustum.dim().x,
             self.frustum.dim().y,
             self.z_near,

@@ -266,13 +266,10 @@ fn main() -> Result<(), Error> {
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
-                        // NOTE: cursor_pos_screen is in the following interval:
-                        //       [0 .. screen_rect.width - 1] x [0 .. screen_rect.height - 1]
-                        //       where (0,0) is the bottom left of the screen
-                        screen_cursor_pos = Point::new(
-                            position.x as f32,
-                            (screen_dimensions.y - 1.0) - position.y as f32,
-                        );
+                        // NOTE: screen_cursor_pos is in the following interval:
+                        //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
+                        //       where (0,0) is the top left of the screen
+                        screen_cursor_pos = Point::new(position.x as f32, position.y as f32);
                     }
                     WindowEvent::MouseWheel { delta, .. } => {
                         input.mouse_wheel_delta += match delta {

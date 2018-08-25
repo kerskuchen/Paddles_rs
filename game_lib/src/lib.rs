@@ -17,13 +17,15 @@ pub mod utility;
 pub mod draw;
 pub mod math;
 
+pub type ResourcePath = String;
+
 // TODO(JaSc): We need more consistency in names: Is it FrameBuffer or Framebuffer?
 //             Is it GameState or Gamestate? When its GameState why do variables are then called
 //             gamestate and not game_state?
 pub use draw::{
-    vertices_from_rects, ComponentBytes, DrawCommand, DrawContext, FramebufferInfo,
-    FramebufferTarget, LineMesh, Mesh, Pixel, PolygonMesh, Sprite, TextureInfo, Vertex,
-    VertexIndex,
+    vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, Font,
+    FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
+    TextureInfo, Vertex, VertexIndex,
 };
 pub use math::{
     Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2, WorldPoint,
@@ -81,7 +83,7 @@ pub struct GameInput {
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
-    /// where (0,0) is the bottom left of the screen
+    /// where (0,0) is the top left of the screen
     pub mouse_pos_screen: CanvasPoint,
 
     pub mouse_button_left: GameButton,
@@ -311,35 +313,76 @@ pub fn update_and_draw<'gamestate>(
                         grid_light,
                     );
                 } else {
+                    let r = (x + 30) as f32 / 60.0;
+                    let g = (diagonal + 20) as f32 / 40.0;
+                    let b = (r + g) / 2.0;
                     drawcontext.draw_rect_filled(
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
                         -0.9,
-                        grid_dark,
+                        Color::new(r, g, b, 1.0),
                     );
                 }
             }
         }
 
+        for y in 0..10 {
+            for x in 0..10 {
+                let r = (x) as f32 / 10.0;
+                let g = (y) as f32 / 10.0;
+                let b = 0.0; //(r + g) / 2.0;
+                drawcontext.draw_rect_filled(
+                    Rect::from_point_dimension(
+                        Point::new(x as f32, y as f32) * UNIT_SIZE,
+                        Vec2::ones() * UNIT_SIZE / 2.0,
+                    ),
+                    -0.9,
+                    Color::new(r, g, b, 1.0),
+                );
+            }
+        }
+
+        let rect =
+            Rect::from_xy_width_height(-5.0 * UNIT_SIZE, 0.0, 4.0 * UNIT_SIZE, 4.0 * UNIT_SIZE);
+
+        drawcontext.debug_draw_rect_textured(rect, -0.05, Color::new(1.0, 1.0, 1.0, 1.0));
+        let line = Line {
+            start: Point::new(rect.left, rect.bottom),
+            end: Point::new(rect.right, rect.top),
+        };
+        drawcontext.draw_line(line, -0.04, Color::new(1.0, 0.0, 0.0, 1.0));
+
+        drawcontext.debug_draw_rect_textured(
+            Rect::from_point_dimension(Point::zero(), Vec2::ones() * UNIT_SIZE),
+            -0.1,
+            Color::new(0.0, 0.0, 0.0, 0.0),
+        );
+
         // Playing field
         let field_bounds = Rect {
             left: -11.0 * UNIT_SIZE,
             right: 11.0 * UNIT_SIZE,
-            bottom: -7.0 * UNIT_SIZE,
-            top: 7.0 * UNIT_SIZE,
+            top: -7.0 * UNIT_SIZE,
+            bottom: 7.0 * UNIT_SIZE,
         };
         let field_depth = -0.8;
-        let field_border_color = Color::new(0.7, 0.3, 0.3, 1.0);
-        let field_border_line_color = Color::new(1.0, 0.0, 0.0, 1.0);
         let field_border_lines = field_bounds.to_border_lines();
 
-        for &line in &field_border_lines {
-            drawcontext.draw_line(line, field_depth, field_border_line_color);
+        for (&line, &color) in field_border_lines.iter().zip(
+            [
+                draw::COLOR_YELLOW,
+                draw::COLOR_MAGENTA,
+                draw::COLOR_WHITE,
+                draw::COLOR_CYAN,
+            ].iter(),
+        ) {
+            drawcontext.draw_line(line, field_depth, color);
         }
+
         let field_border_left = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.left,
-            bottom: field_bounds.bottom,
             top: field_bounds.top,
+            bottom: field_bounds.bottom,
         };
         let field_border_right = Rect {
             left: field_bounds.right,
@@ -350,22 +393,30 @@ pub fn update_and_draw<'gamestate>(
         let field_border_top = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.right + UNIT_SIZE,
+            top: field_bounds.top - UNIT_SIZE,
             bottom: field_bounds.top,
-            top: field_bounds.top + UNIT_SIZE,
         };
         let field_border_bottom = Rect {
             left: field_bounds.left - UNIT_SIZE,
             right: field_bounds.right + UNIT_SIZE,
-            bottom: field_bounds.bottom - UNIT_SIZE,
             top: field_bounds.bottom,
+            bottom: field_bounds.bottom + UNIT_SIZE,
         };
-        for &field_border in &[
+        for (&field_border, &color) in [
             field_border_left,
             field_border_right,
             field_border_top,
             field_border_bottom,
-        ] {
-            drawcontext.draw_rect_filled(field_border, field_depth, field_border_color);
+        ].iter()
+            .zip(
+                [
+                    draw::COLOR_RED,
+                    draw::COLOR_GREEN,
+                    draw::COLOR_BLUE,
+                    draw::COLOR_BLACK,
+                ].iter(),
+            ) {
+            drawcontext.draw_rect_filled(field_border, field_depth, color);
         }
     }
     let transform = gamestate.cam.proj_view_matrix();
@@ -373,7 +424,7 @@ pub fn update_and_draw<'gamestate>(
 }
 
 // =================================================================================================
-// TODO(JaSc): Find a better place for the following two functions
+// TODO(JaSc): Find a better place for the following three functions
 // =================================================================================================
 
 /// Returns the `blit_rectangle` of for given canvas and screen rectangles.
@@ -431,7 +482,7 @@ pub fn canvas_blit_rect(screen_rect: Rect, canvas_rect: Rect) -> Rect {
 /// Clamps a given `screen_point` to the area of the [`canvas_blit_rect`] and converts the result
 /// into a canvas-position in the following interval:
 /// `[0..canvas_rect.width-1]x[0..canvas_rect.height-1]`
-/// where `(0,0)` is the bottom left of the canvas.
+/// where `(0,0)` is the top left of the canvas.
 fn screen_pos_to_canvas_pos(screen_point: Point, screen_rect: Rect, canvas_rect: Rect) -> Point {
     // NOTE: Clamping the point needs to use integer arithmetic such that
     //          x != canvas.rect.width and y != canvas.rect.height
@@ -440,10 +491,10 @@ fn screen_pos_to_canvas_pos(screen_point: Point, screen_rect: Rect, canvas_rect:
     // TODO(JaSc): Maybe make this more self documenting via integer rectangles
     let mut blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
     blit_rect.right -= 1.0;
-    blit_rect.top -= 1.0;
+    blit_rect.bottom -= 1.0;
     let clamped_point = screen_point.clamped_in_rect(blit_rect);
     blit_rect.right += 1.0;
-    blit_rect.top += 1.0;
+    blit_rect.bottom += 1.0;
 
     let result = canvas_rect.dim() * ((clamped_point - blit_rect.pos()) / blit_rect.dim());
     Point::new(f32::floor(result.x), f32::floor(result.y))

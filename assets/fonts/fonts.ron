@@ -1,0 +1,14 @@
+{
+    "fonts/default": (
+        filename: "04B_03__.ttf",
+        pixel_height: 8,
+        border_thickness: 1,
+        atlas_padding: 0,
+    ),
+    "fonts/default_borderless": (
+        filename: "04B_03__.ttf",
+        pixel_height: 8,
+        border_thickness: 0,
+        atlas_padding: 1,
+    ),
+}

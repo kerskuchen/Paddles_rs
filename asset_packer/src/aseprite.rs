@@ -1,3 +1,4 @@
+/*
 use bincode::deserialize_from;
 use std;
 use std::fs::File;
@@ -404,3 +405,4 @@ fn read_chunk_cell(mut file: &mut File, chunk_size: u32) -> Result<(), Error> {
 
     Ok(())
 }
+*/

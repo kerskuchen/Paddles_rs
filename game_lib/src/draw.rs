@@ -19,6 +19,55 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
+pub const COLOR_RED: Color = Color {
+    x: 1.0,
+    y: 0.0,
+    z: 0.0,
+    w: 1.0,
+};
+pub const COLOR_GREEN: Color = Color {
+    x: 0.0,
+    y: 1.0,
+    z: 0.0,
+    w: 1.0,
+};
+pub const COLOR_BLUE: Color = Color {
+    x: 0.0,
+    y: 0.0,
+    z: 1.0,
+    w: 1.0,
+};
+pub const COLOR_CYAN: Color = Color {
+    x: 0.0,
+    y: 1.0,
+    z: 1.0,
+    w: 1.0,
+};
+pub const COLOR_YELLOW: Color = Color {
+    x: 1.0,
+    y: 1.0,
+    z: 0.0,
+    w: 1.0,
+};
+pub const COLOR_MAGENTA: Color = Color {
+    x: 1.0,
+    y: 0.0,
+    z: 1.0,
+    w: 1.0,
+};
+pub const COLOR_BLACK: Color = Color {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+    w: 1.0,
+};
+pub const COLOR_WHITE: Color = Color {
+    x: 1.0,
+    y: 1.0,
+    z: 1.0,
+    w: 1.0,
+};
+
 //==================================================================================================
 // DrawContext
 //==================================================================================================
@@ -31,10 +80,8 @@ const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
 
 #[derive(Default)]
 pub struct DrawContext<'drawcontext> {
-    texture_atlas: Option<TextureInfo>,
-    texture_font: Option<TextureInfo>,
-    sprite_map: HashMap<String, Sprite>,
-    glyph_sprites: Vec<Sprite>,
+    atlas: AtlasMeta,
+    atlas_textures: Option<Vec<TextureInfo>>,
 
     canvas_framebuffer: Option<FramebufferInfo>,
 
@@ -51,15 +98,20 @@ impl<'drawcontext> DrawContext<'drawcontext> {
 
     pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
-        let plain_uv = self.sprite_map["images/plain"].uv_bounds;
+        let plain_uv = self.atlas.sprites["images/plain"].uv_bounds;
         let line_uv = rect_uv_to_line_uv(plain_uv);
         self.lines.push_line(line, line_uv, depth, color);
     }
 
     pub fn draw_rect_filled(&mut self, rect: Rect, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
-        let plain_uv = self.sprite_map["images/plain"].uv_bounds;
+        let plain_uv = self.atlas.sprites["images/plain"].uv_bounds;
         self.polygons.push_quad(rect, plain_uv, depth, color);
+    }
+
+    pub fn debug_draw_rect_textured(&mut self, rect: Rect, depth: f32, color: Color) {
+        let tex_uv = self.atlas.sprites["images/textured"].uv_bounds;
+        self.polygons.push_quad(rect, tex_uv, depth, color);
     }
 
     pub fn start_drawing(&mut self) {
@@ -79,7 +131,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             .clone()
             .expect("Canvas framebuffer does not exist");
         let texture_atlas = self
-            .texture_atlas
+            .atlas_textures
             .clone()
             .expect("Texture atlas does not exist");
 
@@ -96,13 +148,13 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // Draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
-            texture_info: texture_atlas.clone(),
+            texture_info: texture_atlas[0].clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             mesh: &self.polygons,
         });
         self.draw_commands.push(DrawCommand::DrawLines {
             transform,
-            texture_info: texture_atlas.clone(),
+            texture_info: texture_atlas[0].clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             mesh: &self.lines,
         });
@@ -122,48 +174,33 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // -----------------------------------------------------------------------------------------
         // Sprite creation
         //
-        // Create atlas sprites from metafile
+        // Create atlas from metafile
         let mut atlas_metafile =
-            File::open("data/images/atlas.tex").expect("Could not load atlas metafile");
-        self.sprite_map = bincode::deserialize_from(&mut atlas_metafile)
+            File::open("data/atlas.tex").expect("Could not load atlas metafile");
+        self.atlas = bincode::deserialize_from(&mut atlas_metafile)
             .expect("Could not deserialize sprite map");
 
-        // Delete old texture if it exists
-        if let Some(old_atlas_texture_info) = self.texture_atlas.take() {
-            self.draw_commands.push(DrawCommand::DeleteTexture {
-                texture_info: old_atlas_texture_info,
+        // Delete old atlas textures if they exists
+        if let Some(mut old_atlas_texture_infos) = self.atlas_textures.take() {
+            for texture_info in old_atlas_texture_infos.drain(..) {
+                self.draw_commands
+                    .push(DrawCommand::DeleteTexture { texture_info });
+            }
+        }
+        // Create atlas textures
+        let mut atlas_textures = Vec::new();
+        for atlas_index in 0..self.atlas.num_atlas_textures {
+            let (texture_info, pixels) = load_texture(
+                atlas_index as u32,
+                &format!("data/atlas_{}.png", atlas_index),
+            );
+            atlas_textures.push(texture_info.clone());
+            self.draw_commands.push(DrawCommand::CreateTexture {
+                texture_info,
+                pixels,
             });
         }
-        // Create atlas texture
-        let (texture_info, pixels) = load_texture(0, "data/images/atlas.png");
-        self.texture_atlas = Some(texture_info.clone());
-        self.draw_commands.push(DrawCommand::CreateTexture {
-            texture_info,
-            pixels,
-        });
-
-        // -----------------------------------------------------------------------------------------
-        // Font creation
-        //
-        // Create font-glyph sprites from metafile
-        let mut font_metafile =
-            File::open("data/fonts/04B_03__.fnt").expect("Could not load font metafile");
-        self.glyph_sprites = bincode::deserialize_from(&mut font_metafile)
-            .expect("Could not deserialize font glyphs");
-
-        // Delete old texture if it exists
-        if let Some(old_font_texture_info) = self.texture_font.take() {
-            self.draw_commands.push(DrawCommand::DeleteTexture {
-                texture_info: old_font_texture_info,
-            });
-        }
-        // Create font texture
-        let (texture_info, pixels) = load_texture(1, "data/fonts/04B_03__.png");
-        self.texture_font = Some(texture_info.clone());
-        self.draw_commands.push(DrawCommand::CreateTexture {
-            texture_info,
-            pixels,
-        });
+        self.atlas_textures = Some(atlas_textures);
 
         // -----------------------------------------------------------------------------------------
         // Framebuffer creation
@@ -189,7 +226,8 @@ impl<'drawcontext> DrawContext<'drawcontext> {
 }
 
 fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
-    let image = lodepng::decode32_file(file_name).unwrap();
+    let image =
+        lodepng::decode32_file(file_name).expect(&format!("Could not open '{}'", file_name));
     let texture_info = TextureInfo {
         id,
         width: image.width as u16,
@@ -442,27 +480,26 @@ impl Mesh for PolygonMesh {
 
 impl PolygonMesh {
     pub fn push_quad(&mut self, rect: Rect, rect_uv: Rect, depth: f32, color: Color) {
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
         let color = color.into();
         let quad_vertices = [
             Vertex {
                 pos: [rect.left, rect.bottom, depth, 1.0],
-                uv: [rect_uv.left, rect_uv.top],
+                uv: [rect_uv.left, rect_uv.bottom],
                 color,
             },
             Vertex {
                 pos: [rect.right, rect.bottom, depth, 1.0],
-                uv: [rect_uv.right, rect_uv.top],
-                color,
-            },
-            Vertex {
-                pos: [rect.right, rect.top, depth, 1.0],
                 uv: [rect_uv.right, rect_uv.bottom],
                 color,
             },
             Vertex {
+                pos: [rect.right, rect.top, depth, 1.0],
+                uv: [rect_uv.right, rect_uv.top],
+                color,
+            },
+            Vertex {
                 pos: [rect.left, rect.top, depth, 1.0],
-                uv: [rect_uv.left, rect_uv.bottom],
+                uv: [rect_uv.left, rect_uv.top],
                 color,
             },
         ];
@@ -487,11 +524,38 @@ impl PolygonMesh {
 //==================================================================================================
 //
 
-// TODO(JaSc): Evaluate if we still need this struct or a better alternative/name
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Default, Serialize, Deserialize)]
+pub struct AtlasMeta {
+    pub num_atlas_textures: usize,
+    pub fonts: HashMap<::ResourcePath, Font>,
+    pub animations: HashMap<::ResourcePath, Animation>,
+    pub sprites: HashMap<::ResourcePath, Sprite>,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct Animation {
+    pub frame_durations: Vec<f32>,
+    pub frames: Vec<Sprite>,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone)]
+pub struct Font {
+    pub font_height: f32,
+    pub vertical_advance: f32,
+    pub glyphs: Vec<Glyph>,
+}
+
+#[derive(Default, Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct Glyph {
+    pub sprite: Sprite,
+    pub horizontal_advance: f32,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 pub struct Sprite {
     pub vertex_bounds: Rect,
     pub uv_bounds: Rect,
+    pub atlas_index: usize,
 }
 
 impl Sprite {
@@ -499,6 +563,7 @@ impl Sprite {
         Sprite {
             vertex_bounds: self.vertex_bounds.scaled_from_origin(scale),
             uv_bounds: self.uv_bounds,
+            atlas_index: self.atlas_index,
         }
     }
 
@@ -507,26 +572,25 @@ impl Sprite {
         let uv = self.uv_bounds;
         let color = color.into();
 
-        // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
         [
             Vertex {
                 pos: [pos.x + vertex.left, pos.y + vertex.bottom, depth, 1.0],
-                uv: [uv.left, uv.top],
+                uv: [uv.left, uv.bottom],
                 color,
             },
             Vertex {
                 pos: [pos.x + vertex.right, pos.y + vertex.bottom, depth, 1.0],
-                uv: [uv.right, uv.top],
-                color,
-            },
-            Vertex {
-                pos: [pos.x + vertex.right, pos.y + vertex.top, depth, 1.0],
                 uv: [uv.right, uv.bottom],
                 color,
             },
             Vertex {
+                pos: [pos.x + vertex.right, pos.y + vertex.top, depth, 1.0],
+                uv: [uv.right, uv.top],
+                color,
+            },
+            Vertex {
                 pos: [pos.x + vertex.left, pos.y + vertex.top, depth, 1.0],
-                uv: [uv.left, uv.bottom],
+                uv: [uv.left, uv.top],
                 color,
             },
         ]
@@ -549,27 +613,25 @@ fn rect_uv_to_line_uv(rect_uv: Rect) -> Line {
 pub fn vertices_from_rects(rect: Rect, rect_uv: Rect, depth: f32, color: Color) -> [Vertex; 4] {
     let color = color.into();
 
-    // NOTE: UVs y-axis is intentionally flipped to prevent upside-down images
-    // TODO(JaSc): Maybe we should change just change the shaders to flip y??
     [
         Vertex {
             pos: [rect.left, rect.bottom, depth, 1.0],
-            uv: [rect_uv.left, rect_uv.top],
+            uv: [rect_uv.left, rect_uv.bottom],
             color,
         },
         Vertex {
             pos: [rect.right, rect.bottom, depth, 1.0],
-            uv: [rect_uv.right, rect_uv.top],
-            color,
-        },
-        Vertex {
-            pos: [rect.right, rect.top, depth, 1.0],
             uv: [rect_uv.right, rect_uv.bottom],
             color,
         },
         Vertex {
+            pos: [rect.right, rect.top, depth, 1.0],
+            uv: [rect_uv.right, rect_uv.top],
+            color,
+        },
+        Vertex {
             pos: [rect.left, rect.top, depth, 1.0],
-            uv: [rect_uv.left, rect_uv.bottom],
+            uv: [rect_uv.left, rect_uv.top],
             color,
         },
     ]
