@@ -13,9 +13,9 @@ TODO(JaSc):
     font-sprites into Vectors which can be accessed via hashmap.
 */
 
-#[macro_use]
+//#[macro_use]
 extern crate game_lib;
-use game_lib::{AtlasMeta, Rect, Sprite};
+use game_lib::AtlasMeta;
 
 extern crate image;
 extern crate rand;
@@ -48,7 +48,6 @@ const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Debug;
 
 use bincode::serialize;
 use common::AtlasPacker;
-use game_lib::{Font, Glyph};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
@@ -76,7 +75,7 @@ fn main() -> Result<(), Error> {
     info!("Successfully packed fonts");
 
     debug!("Packing images");
-    let image_map = image_packer::pack_images(&mut packer)?;
+    let sprite_map = image_packer::pack_sprites(&mut packer)?;
     info!("Successfully packed images");
 
     debug!("Saving atlas textures");
@@ -93,7 +92,7 @@ fn main() -> Result<(), Error> {
         num_atlas_textures: atlases.len(),
         fonts: font_map,
         animations: HashMap::new(),
-        sprites: image_map,
+        sprites: sprite_map,
     };
 
     let meta_filepath = "data/atlas.tex";

@@ -223,6 +223,7 @@ where
 //==================================================================================================
 //
 
+#[derive(Debug, Copy, Clone)]
 enum TextureMode {
     ArrayTexture,
     Regular,

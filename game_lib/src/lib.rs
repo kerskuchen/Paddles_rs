@@ -300,7 +300,6 @@ pub fn update_and_draw<'gamestate>(
         );
 
         // Draw grid
-        let grid_dark = Color::new(0.5, 0.3, 0.0, 1.0);
         let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
         for x in -30..30 {
             for diagonal in -20..20 {

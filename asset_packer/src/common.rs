@@ -281,10 +281,12 @@ impl AtlasRectPacker {
         let mut atlas = DensePacker::new(self.atlas_size, self.atlas_size);
         let rect = atlas
             .pack(image_width, image_height, false)
-            .expect(&format!(
-                "Could not pack image with dimensions {}x{} into atlas with dimensions {}x{}",
-                image_width, image_height, self.atlas_size, self.atlas_size
-            ));
+            .unwrap_or_else(|| {
+                panic!(
+                    "Could not pack image with dimensions {}x{} into atlas with dimensions {}x{}",
+                    image_width, image_height, self.atlas_size, self.atlas_size
+                )
+            });
         let atlas_index = self.atlas_packers.len() as u32;
         self.atlas_packers.push(atlas);
 

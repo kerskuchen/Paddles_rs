@@ -148,7 +148,6 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             color: Color::from(CLEAR_COLOR_CANVAS),
         });
 
-        let target = FramebufferTarget::Screen;
         // Draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
@@ -234,8 +233,8 @@ fn load_texture_array(
 
     for index in 0..num_textures {
         let file_path = format!("{}_{}.png", file_name, index);
-        let image =
-            lodepng::decode32_file(&file_path).expect(&format!("Could not open '{}'", file_path));
+        let image = lodepng::decode32_file(&file_path)
+            .unwrap_or_else(|error| panic!("Could not open '{}' : {}", file_path, error));
 
         // TODO(JaSc): Check that all textures have the same dimensions
         width = image.width;
