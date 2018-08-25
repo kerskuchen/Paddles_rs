@@ -25,7 +25,7 @@ pub type ResourcePath = String;
 pub use draw::{
     vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, Font,
     FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
-    TextureInfo, Vertex, VertexIndex,
+    TextureArrayInfo, Vertex, VertexIndex,
 };
 pub use math::{
     Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2, WorldPoint,

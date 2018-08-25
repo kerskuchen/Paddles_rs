@@ -69,7 +69,7 @@ fn main() -> Result<(), Error> {
         .apply()
         .context("Could not initialize logger")?;
 
-    let mut packer = AtlasPacker::new(128);
+    let mut packer = AtlasPacker::new(32);
 
     debug!("Packing fonts");
     let font_map = font_packer::pack_fonts(&mut packer)?;

@@ -190,7 +190,7 @@ const DEBUG_DRAW_RECTS_AROUND_SPRITES: bool = false;
 #[derive(Copy, Clone)]
 pub struct AtlasRegion {
     rect: Rect,
-    atlas_index: usize,
+    atlas_index: u32,
 }
 
 impl AtlasRegion {
@@ -269,7 +269,10 @@ impl AtlasRectPacker {
     fn pack_image(&mut self, image_width: i32, image_height: i32) -> AtlasRegion {
         for (atlas_index, mut packer) in self.atlas_packers.iter_mut().enumerate() {
             if let Some(rect) = packer.pack(image_width, image_height, false) {
-                return AtlasRegion { rect, atlas_index };
+                return AtlasRegion {
+                    rect,
+                    atlas_index: atlas_index as u32,
+                };
             }
         }
 
@@ -282,7 +285,7 @@ impl AtlasRectPacker {
                 "Could not pack image with dimensions {}x{} into atlas with dimensions {}x{}",
                 image_width, image_height, self.atlas_size, self.atlas_size
             ));
-        let atlas_index = self.atlas_packers.len();
+        let atlas_index = self.atlas_packers.len() as u32;
         self.atlas_packers.push(atlas);
 
         AtlasRegion { rect, atlas_index }
@@ -303,9 +306,9 @@ impl AtlasTextureWriter {
     }
 
     fn write_image(&mut self, image: Image, region: &AtlasRegion) {
-        self.add_more_atlases_if_necessary(region.atlas_index);
+        self.add_more_atlases_if_necessary(region.atlas_index as usize);
 
-        let dest_image = &mut self.atlas_textures[region.atlas_index];
+        let dest_image = &mut self.atlas_textures[region.atlas_index as usize];
         let dest_rect = region.rect;
 
         let source_image = image;

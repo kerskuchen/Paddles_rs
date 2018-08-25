@@ -15,7 +15,7 @@ pub type VertexIndex = u16;
 #[derive(Debug, Clone, Copy)]
 pub struct Vertex {
     pub pos: [f32; 4],
-    pub uv: [f32; 2],
+    pub uv: [f32; 3],
     pub color: [f32; 4],
 }
 
@@ -81,7 +81,7 @@ const CLEAR_COLOR_CANVAS: [f32; 4] = [1.0, 0.4, 0.7, 1.0];
 #[derive(Default)]
 pub struct DrawContext<'drawcontext> {
     atlas: AtlasMeta,
-    atlas_textures: Option<Vec<TextureInfo>>,
+    atlas_texture_array: Option<TextureArrayInfo>,
 
     canvas_framebuffer: Option<FramebufferInfo>,
 
@@ -98,20 +98,23 @@ impl<'drawcontext> DrawContext<'drawcontext> {
 
     pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
-        let plain_uv = self.atlas.sprites["images/plain"].uv_bounds;
-        let line_uv = rect_uv_to_line_uv(plain_uv);
-        self.lines.push_line(line, line_uv, depth, color);
+        let sprite = self.atlas.sprites["images/plain"];
+        let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
+        self.lines
+            .push_line(line, line_uv, sprite.atlas_index, depth, color);
     }
 
     pub fn draw_rect_filled(&mut self, rect: Rect, depth: f32, color: Color) {
         // TODO(JaSc): Cache the plain texture uv for reuse
-        let plain_uv = self.atlas.sprites["images/plain"].uv_bounds;
-        self.polygons.push_quad(rect, plain_uv, depth, color);
+        let sprite = self.atlas.sprites["images/plain"];
+        self.polygons
+            .push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
     pub fn debug_draw_rect_textured(&mut self, rect: Rect, depth: f32, color: Color) {
-        let tex_uv = self.atlas.sprites["images/textured"].uv_bounds;
-        self.polygons.push_quad(rect, tex_uv, depth, color);
+        let sprite = self.atlas.sprites["images/textured"];
+        self.polygons
+            .push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
     pub fn start_drawing(&mut self) {
@@ -131,7 +134,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             .clone()
             .expect("Canvas framebuffer does not exist");
         let texture_atlas = self
-            .atlas_textures
+            .atlas_texture_array
             .clone()
             .expect("Texture atlas does not exist");
 
@@ -145,16 +148,17 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             color: Color::from(CLEAR_COLOR_CANVAS),
         });
 
+        let target = FramebufferTarget::Screen;
         // Draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
-            texture_info: texture_atlas[0].clone(),
+            texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             mesh: &self.polygons,
         });
         self.draw_commands.push(DrawCommand::DrawLines {
             transform,
-            texture_info: texture_atlas[0].clone(),
+            texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             mesh: &self.lines,
         });
@@ -181,26 +185,20 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             .expect("Could not deserialize sprite map");
 
         // Delete old atlas textures if they exists
-        if let Some(mut old_atlas_texture_infos) = self.atlas_textures.take() {
-            for texture_info in old_atlas_texture_infos.drain(..) {
-                self.draw_commands
-                    .push(DrawCommand::DeleteTexture { texture_info });
-            }
-        }
-        // Create atlas textures
-        let mut atlas_textures = Vec::new();
-        for atlas_index in 0..self.atlas.num_atlas_textures {
-            let (texture_info, pixels) = load_texture(
-                atlas_index as u32,
-                &format!("data/atlas_{}.png", atlas_index),
-            );
-            atlas_textures.push(texture_info.clone());
-            self.draw_commands.push(DrawCommand::CreateTexture {
-                texture_info,
-                pixels,
+        if let Some(old_atlas_texture_array_info) = self.atlas_texture_array.take() {
+            self.draw_commands.push(DrawCommand::DeleteTextureArray {
+                texture_array_info: old_atlas_texture_array_info,
             });
         }
-        self.atlas_textures = Some(atlas_textures);
+        // Create atlas textures
+        let (texture_array_info, pixels) =
+            load_texture_array(0, "data/atlas", self.atlas.num_atlas_textures);
+        self.atlas_texture_array = Some(texture_array_info.clone());
+
+        self.draw_commands.push(DrawCommand::CreateTextureArray {
+            texture_array_info,
+            pixels,
+        });
 
         // -----------------------------------------------------------------------------------------
         // Framebuffer creation
@@ -225,16 +223,35 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     }
 }
 
-fn load_texture(id: u32, file_name: &str) -> (TextureInfo, Vec<rgb::RGBA8>) {
-    let image =
-        lodepng::decode32_file(file_name).expect(&format!("Could not open '{}'", file_name));
-    let texture_info = TextureInfo {
+fn load_texture_array(
+    id: u32,
+    file_name: &str,
+    num_textures: usize,
+) -> (TextureArrayInfo, Vec<Vec<rgb::RGBA8>>) {
+    let mut pixels = Vec::new();
+    let mut width = 0;
+    let mut height = 0;
+
+    for index in 0..num_textures {
+        let file_path = format!("{}_{}.png", file_name, index);
+        let image =
+            lodepng::decode32_file(&file_path).expect(&format!("Could not open '{}'", file_path));
+
+        // TODO(JaSc): Check that all textures have the same dimensions
+        width = image.width;
+        height = image.height;
+        pixels.push(image.buffer);
+    }
+
+    let texture_array_info = TextureArrayInfo {
         id,
-        width: image.width as u16,
-        height: image.height as u16,
+        width: width as u16,
+        height: height as u16,
+        num_textures: num_textures as u16,
         name: String::from(file_name),
     };
-    (texture_info, image.buffer)
+
+    (texture_array_info, pixels)
 }
 
 //==================================================================================================
@@ -245,13 +262,13 @@ pub enum DrawCommand<'drawcontext> {
     DrawLines {
         transform: Mat4,
         mesh: &'drawcontext LineMesh,
-        texture_info: TextureInfo,
+        texture_array_info: TextureArrayInfo,
         framebuffer: FramebufferTarget,
     },
     DrawPolys {
         transform: Mat4,
         mesh: &'drawcontext PolygonMesh,
-        texture_info: TextureInfo,
+        texture_array_info: TextureArrayInfo,
         framebuffer: FramebufferTarget,
     },
     Clear {
@@ -270,12 +287,12 @@ pub enum DrawCommand<'drawcontext> {
     DeleteFramebuffer {
         framebuffer_info: FramebufferInfo,
     },
-    CreateTexture {
-        texture_info: TextureInfo,
-        pixels: Vec<Pixel>,
+    CreateTextureArray {
+        texture_array_info: TextureArrayInfo,
+        pixels: Vec<Vec<Pixel>>,
     },
-    DeleteTexture {
-        texture_info: TextureInfo,
+    DeleteTextureArray {
+        texture_array_info: TextureArrayInfo,
     },
 }
 
@@ -285,7 +302,7 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
             DrawCommand::DrawLines {
                 transform,
                 mesh,
-                texture_info,
+                texture_array_info,
                 framebuffer,
                 ..
             } => write!(
@@ -293,13 +310,13 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
                 "\n  DrawLines:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
                 transform,
                 mesh.vertices.len(),
-                texture_info,
+                texture_array_info,
                 framebuffer
             ),
             DrawCommand::DrawPolys {
                 transform,
                 mesh,
-                texture_info,
+                texture_array_info,
                 framebuffer,
                 ..
             } => write!(
@@ -307,16 +324,16 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
                 "\n  DrawPolys:\n  {:?}\n  num_verts: {:?}\n  {:?}\n  {:?}",
                 transform,
                 mesh.vertices.len(),
-                texture_info,
+                texture_array_info,
                 framebuffer
             ),
-            DrawCommand::CreateTexture {
-                texture_info,
+            DrawCommand::CreateTextureArray {
+                texture_array_info,
                 pixels,
             } => write!(
                 f,
                 "\n  CreateTexture:\n  {:?}\n  num_pixels: {:?}",
-                texture_info,
+                texture_array_info,
                 pixels.len()
             ),
             DrawCommand::Clear { framebuffer, color } => {
@@ -344,8 +361,8 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
             DrawCommand::DeleteFramebuffer { framebuffer_info } => {
                 write!(f, "\n  DeleteFramebuffer: {:?}", framebuffer_info,)
             }
-            DrawCommand::DeleteTexture { texture_info } => {
-                write!(f, "\n  DeleteTexture: {:?}", texture_info,)
+            DrawCommand::DeleteTextureArray { texture_array_info } => {
+                write!(f, "\n  DeleteTexture: {:?}", texture_array_info,)
             }
         }
     }
@@ -358,22 +375,12 @@ pub enum FramebufferTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TextureInfo {
+pub struct TextureArrayInfo {
     pub id: u32,
     pub width: u16,
     pub height: u16,
+    pub num_textures: u16,
     pub name: String,
-}
-
-impl TextureInfo {
-    pub fn empty() -> TextureInfo {
-        TextureInfo {
-            id: 0,
-            width: 0,
-            height: 0,
-            name: String::from(""),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -431,17 +438,25 @@ impl Mesh for LineMesh {
 }
 
 impl LineMesh {
-    pub fn push_line(&mut self, line: Line, line_uv: Line, depth: f32, color: Color) {
+    pub fn push_line(
+        &mut self,
+        line: Line,
+        line_uv: Line,
+        atlas_index: u32,
+        depth: f32,
+        color: Color,
+    ) {
         let color = color.into();
+        let atlas_index = atlas_index as f32;
         let line_vertices = [
             Vertex {
                 pos: [line.start.x, line.start.y, depth, 1.0],
-                uv: [line_uv.start.x, line_uv.start.y],
+                uv: [line_uv.start.x, line_uv.start.y, atlas_index],
                 color,
             },
             Vertex {
                 pos: [line.end.x, line.end.y, depth, 1.0],
-                uv: [line_uv.end.x, line_uv.end.y],
+                uv: [line_uv.end.x, line_uv.end.y, atlas_index],
                 color,
             },
         ];
@@ -479,27 +494,35 @@ impl Mesh for PolygonMesh {
 }
 
 impl PolygonMesh {
-    pub fn push_quad(&mut self, rect: Rect, rect_uv: Rect, depth: f32, color: Color) {
+    pub fn push_quad(
+        &mut self,
+        rect: Rect,
+        rect_uv: Rect,
+        atlas_index: u32,
+        depth: f32,
+        color: Color,
+    ) {
         let color = color.into();
+        let atlas_index = atlas_index as f32;
         let quad_vertices = [
             Vertex {
                 pos: [rect.left, rect.bottom, depth, 1.0],
-                uv: [rect_uv.left, rect_uv.bottom],
+                uv: [rect_uv.left, rect_uv.bottom, atlas_index],
                 color,
             },
             Vertex {
                 pos: [rect.right, rect.bottom, depth, 1.0],
-                uv: [rect_uv.right, rect_uv.bottom],
+                uv: [rect_uv.right, rect_uv.bottom, atlas_index],
                 color,
             },
             Vertex {
                 pos: [rect.right, rect.top, depth, 1.0],
-                uv: [rect_uv.right, rect_uv.top],
+                uv: [rect_uv.right, rect_uv.top, atlas_index],
                 color,
             },
             Vertex {
                 pos: [rect.left, rect.top, depth, 1.0],
-                uv: [rect_uv.left, rect_uv.top],
+                uv: [rect_uv.left, rect_uv.top, atlas_index],
                 color,
             },
         ];
@@ -555,7 +578,7 @@ pub struct Glyph {
 pub struct Sprite {
     pub vertex_bounds: Rect,
     pub uv_bounds: Rect,
-    pub atlas_index: usize,
+    pub atlas_index: u32,
 }
 
 impl Sprite {
@@ -570,27 +593,28 @@ impl Sprite {
     pub fn into_vertices(self, pos: WorldPoint, depth: f32, color: Color) -> [Vertex; 4] {
         let vertex = self.vertex_bounds;
         let uv = self.uv_bounds;
+        let atlas_index = self.atlas_index as f32;
         let color = color.into();
 
         [
             Vertex {
                 pos: [pos.x + vertex.left, pos.y + vertex.bottom, depth, 1.0],
-                uv: [uv.left, uv.bottom],
+                uv: [uv.left, uv.bottom, atlas_index],
                 color,
             },
             Vertex {
                 pos: [pos.x + vertex.right, pos.y + vertex.bottom, depth, 1.0],
-                uv: [uv.right, uv.bottom],
+                uv: [uv.right, uv.bottom, atlas_index],
                 color,
             },
             Vertex {
                 pos: [pos.x + vertex.right, pos.y + vertex.top, depth, 1.0],
-                uv: [uv.right, uv.top],
+                uv: [uv.right, uv.top, atlas_index],
                 color,
             },
             Vertex {
                 pos: [pos.x + vertex.left, pos.y + vertex.top, depth, 1.0],
-                uv: [uv.left, uv.top],
+                uv: [uv.left, uv.top, atlas_index],
                 color,
             },
         ]
@@ -610,28 +634,35 @@ fn rect_uv_to_line_uv(rect_uv: Rect) -> Line {
     )
 }
 
-pub fn vertices_from_rects(rect: Rect, rect_uv: Rect, depth: f32, color: Color) -> [Vertex; 4] {
+pub fn vertices_from_rects(
+    rect: Rect,
+    rect_uv: Rect,
+    atlas_index: u32,
+    depth: f32,
+    color: Color,
+) -> [Vertex; 4] {
     let color = color.into();
+    let atlas_index = atlas_index as f32;
 
     [
         Vertex {
             pos: [rect.left, rect.bottom, depth, 1.0],
-            uv: [rect_uv.left, rect_uv.bottom],
+            uv: [rect_uv.left, rect_uv.bottom, atlas_index],
             color,
         },
         Vertex {
             pos: [rect.right, rect.bottom, depth, 1.0],
-            uv: [rect_uv.right, rect_uv.bottom],
+            uv: [rect_uv.right, rect_uv.bottom, atlas_index],
             color,
         },
         Vertex {
             pos: [rect.right, rect.top, depth, 1.0],
-            uv: [rect_uv.right, rect_uv.top],
+            uv: [rect_uv.right, rect_uv.top, atlas_index],
             color,
         },
         Vertex {
             pos: [rect.left, rect.top, depth, 1.0],
-            uv: [rect_uv.left, rect_uv.top],
+            uv: [rect_uv.left, rect_uv.top, atlas_index],
             color,
         },
     ]

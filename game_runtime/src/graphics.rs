@@ -1,7 +1,7 @@
 use game_lib;
 use game_lib::{
     Color, ComponentBytes, DrawCommand, FramebufferInfo, FramebufferTarget, Mat4, Mat4Helper, Mesh,
-    Pixel, Rect, TextureInfo, Vertex, VertexIndex,
+    Pixel, Rect, TextureArrayInfo, Vertex, VertexIndex,
 };
 
 use OptionHelper;
@@ -28,17 +28,29 @@ type PipelineStateObject<R> = gfx::PipelineState<R, pipe::Meta>;
 gfx_defines! {
     vertex VertexGFX {
         pos: [f32; 4] = "a_Pos",
-        uv: [f32; 2] = "a_Uv",
+        uv: [f32; 3] = "a_Uv",
         color: [f32; 4] = "a_Color",
     }
 
     pipeline pipe {
         vertex_buffer: gfx::VertexBuffer<VertexGFX> = (),
+
         transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
+        use_texture_array: gfx::Global<i32> = "u_UseTextureArray",
+
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
+        texture_array: gfx::TextureSampler<[f32; 4]> = "u_SamplerArray",
+
         out_color: gfx::RenderTarget<ColorFormat> = "Target0",
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
+}
+
+/// Converts a slice of [`Vertex`] into a slice of [`VertexGFX`] for gfx to consume.
+///
+/// Note that both types are memory-equivalent so the conversion is just a transmutation
+pub fn convert_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
+    unsafe { &*(vertices as *const [Vertex] as *const [VertexGFX]) }
 }
 
 //==================================================================================================
@@ -102,7 +114,7 @@ where
             .context("Could not create shader set for framebuffer")?;
 
         //
-        trace!("Creating framebuffer pipeline state object for line drawing");
+        trace!("Creating rasterizers for line drawing and filling");
         //
         use gfx::state::{CullFace, FrontFace, RasterMethod, Rasterizer};
         let line_rasterizer = Rasterizer {
@@ -112,18 +124,6 @@ where
             offset: None,
             samples: None,
         };
-        let pipeline_state_object_line = factory
-            .create_pipeline_state(
-                &shader_set,
-                gfx::Primitive::LineList,
-                line_rasterizer,
-                pipe::new(),
-            )
-            .context("Failed to create framebuffer pipeline state object for line drawing")?;
-
-        //
-        trace!("Creating framebuffer pipeline state object for filled polygon drawing");
-        //
         let fill_rasterizer = Rasterizer {
             front_face: FrontFace::CounterClockwise,
             cull_face: CullFace::Nothing,
@@ -131,6 +131,19 @@ where
             offset: None,
             samples: None,
         };
+
+        //
+        trace!("Creating framebuffer pipeline state objects");
+        //
+        let pipeline_state_object_line = factory
+            .create_pipeline_state(
+                &shader_set,
+                gfx::Primitive::LineList,
+                line_rasterizer,
+                pipe::new(),
+            )
+            .context("Failed to create pipeline state object for line drawing")?;
+
         let pipeline_state_object_fill = factory
             .create_pipeline_state(
                 &shader_set,
@@ -138,7 +151,7 @@ where
                 fill_rasterizer,
                 pipe::new(),
             )
-            .context("Failed to create framebuffer pipeline state object for filled drawing")?;
+            .context("Failed to create pipeline state object for filled drawing")?;
 
         Ok(Framebuffer {
             info,
@@ -181,6 +194,7 @@ where
         &self,
         transform: &Mat4,
         texture: ShaderResourceView<R>,
+        texture_mode: TextureMode,
         vertex_buffer: VertexBuffer<R>,
     ) -> pipe::Data<R>
     where
@@ -188,8 +202,16 @@ where
     {
         pipe::Data {
             vertex_buffer,
-            texture: (texture, self.texture_sampler.clone()),
+
             transform: (*transform).into(),
+            use_texture_array: match texture_mode {
+                TextureMode::Regular => 0,
+                TextureMode::ArrayTexture => 1,
+            },
+
+            texture: (texture.clone(), self.texture_sampler.clone()),
+            texture_array: (texture, self.texture_sampler.clone()),
+
             out_color: self.color_render_target_view.clone(),
             out_depth: self.depth_render_target_view.clone(),
         }
@@ -200,6 +222,11 @@ where
 // RenderingContext
 //==================================================================================================
 //
+
+enum TextureMode {
+    ArrayTexture,
+    Regular,
+}
 
 #[derive(Debug, Copy, Clone)]
 pub enum DrawMode {
@@ -221,8 +248,8 @@ where
     pub screen_framebuffer: Framebuffer<R>,
 
     framebuffers: HashMap<FramebufferInfo, Framebuffer<R>>,
-    textures: HashMap<TextureInfo, ShaderResourceView<R>>,
-    textures_pixeldata: HashMap<TextureInfo, Vec<Pixel>>,
+    textures: HashMap<TextureArrayInfo, ShaderResourceView<R>>,
+    textures_pixeldata: HashMap<TextureArrayInfo, Vec<Vec<Pixel>>>,
 }
 
 impl<C, R, F> RenderingContext<C, R, F>
@@ -272,13 +299,14 @@ where
                 DrawCommand::DrawLines {
                     transform,
                     mesh,
-                    texture_info,
+                    texture_array_info,
                     framebuffer,
                 } => {
                     let (vertices, indices) = mesh.to_vertices_indices();
                     self.draw(
                         transform,
-                        self.get_texture(&texture_info)?.clone(),
+                        self.get_texture_array(&texture_array_info)?.clone(),
+                        TextureMode::ArrayTexture,
                         vertices,
                         indices,
                         framebuffer,
@@ -288,13 +316,14 @@ where
                 DrawCommand::DrawPolys {
                     transform,
                     mesh,
-                    texture_info,
+                    texture_array_info,
                     framebuffer,
                 } => {
                     let (vertices, indices) = mesh.to_vertices_indices();
                     self.draw(
                         transform,
-                        self.get_texture(&texture_info)?.clone(),
+                        self.get_texture_array(&texture_array_info)?.clone(),
+                        TextureMode::ArrayTexture,
                         vertices,
                         indices,
                         framebuffer,
@@ -319,15 +348,17 @@ where
                 DrawCommand::DeleteFramebuffer { framebuffer_info } => {
                     self.delete_framebuffer(framebuffer_info)
                 }
-                DrawCommand::CreateTexture {
-                    texture_info,
+                DrawCommand::CreateTextureArray {
+                    texture_array_info,
                     pixels,
                 } => {
                     // NOTE: We take the pixeldata out of the drawcommand as we need ownership
                     let taken_pixels = std::mem::replace(pixels, Vec::new());
-                    self.create_texture(texture_info, taken_pixels)
+                    self.create_texture_array(texture_array_info, taken_pixels)
                 }
-                DrawCommand::DeleteTexture { texture_info } => self.delete_texture(&texture_info),
+                DrawCommand::DeleteTextureArray { texture_array_info } => {
+                    self.delete_texture_array(&texture_array_info)
+                }
             };
             processing_result
                 .context(format!("Could not execute draw command {:?}", draw_command))?;
@@ -342,6 +373,7 @@ where
         &mut self,
         transform: &Mat4,
         texture: ShaderResourceView<R>,
+        texture_mode: TextureMode,
         vertices: &[Vertex],
         indices: &[VertexIndex],
         framebuffer_target: &FramebufferTarget,
@@ -357,7 +389,8 @@ where
             .factory
             .create_vertex_buffer_with_slice(convert_to_gfx_format(&vertices), &*indices);
         let framebuffer = self.get_framebuffer(framebuffer_target)?;
-        let pipeline_data = framebuffer.create_pipeline_data(transform, texture, vertex_buffer);
+        let pipeline_data =
+            framebuffer.create_pipeline_data(transform, texture, texture_mode, vertex_buffer);
 
         match draw_mode {
             DrawMode::Lines => self.encoder.draw(
@@ -413,6 +446,7 @@ where
         let vertices = game_lib::vertices_from_rects(
             target_rect,
             Rect::unit_rect(),
+            0,
             0.0,
             Color::new(1.0, 1.0, 1.0, 1.0),
         );
@@ -436,6 +470,7 @@ where
         self.draw(
             &projection_mat,
             texture,
+            TextureMode::Regular,
             &vertices,
             &indices,
             target_framebuffer,
@@ -507,83 +542,91 @@ where
     // ---------------------------------------------------------------------------------------------
     // Textures
     //
-    fn create_texture(
+    fn create_texture_array(
         &mut self,
-        texture_info: &TextureInfo,
-        pixels: Vec<Pixel>,
+        texture_array_info: &TextureArrayInfo,
+        pixels: Vec<Vec<Pixel>>,
     ) -> Result<(), Error> {
-        debug!("Creating texture for {:?}", texture_info);
+        debug!("Creating texture for {:?}", texture_array_info);
 
-        let kind = gfx::texture::Kind::D2(
-            texture_info.width,
-            texture_info.height,
+        let kind = gfx::texture::Kind::D2Array(
+            texture_array_info.width,
+            texture_array_info.height,
+            texture_array_info.num_textures,
             gfx::texture::AaMode::Single,
         );
+        // TODO(JaSc): Check if we can find a easiert/faster solution for deconstructing a
+        //             Vec<Vec<Pixel>> into a &[&[u8]]
+        let data: Vec<_> = pixels.iter().map(|texture| texture.as_bytes()).collect();
         let (_, view) = self
             .factory
-            .create_texture_immutable_u8::<ColorFormat>(
-                kind,
-                gfx::texture::Mipmap::Provided,
-                &[(&pixels).as_bytes()],
-            )
+            .create_texture_immutable_u8::<ColorFormat>(kind, gfx::texture::Mipmap::Provided, &data)
             .context(format!(
                 "Could not create texture data from pixels for {:?}",
-                texture_info
+                texture_array_info
             ))?;
 
         self.textures
-            .insert(texture_info.clone(), view)
+            .insert(texture_array_info.clone(), view)
             .none_or(failure::err_msg(format!(
                 "Could not create texture because it already exists for {:?}",
-                texture_info
+                texture_array_info
             )))?;
 
         self.textures_pixeldata
-            .insert(texture_info.clone(), pixels)
+            .insert(texture_array_info.clone(), pixels)
             .none_or(failure::err_msg(format!(
                 "Could not create pixeldata cache because it already exists for {:?}",
-                texture_info
+                texture_array_info
             )))?;
 
         Ok(())
     }
 
-    fn delete_texture(&mut self, texture_info: &TextureInfo) -> Result<(), Error> {
-        debug!("Deleting texture for {:?}", texture_info);
+    fn delete_texture_array(&mut self, texture_array_info: &TextureArrayInfo) -> Result<(), Error> {
+        debug!("Deleting texture for {:?}", texture_array_info);
 
-        self.textures.remove(texture_info).ok_or_else(|| {
+        self.textures.remove(texture_array_info).ok_or_else(|| {
             failure::err_msg(format!(
                 "Could not delete texture because it did not exist for {:?}",
-                texture_info
+                texture_array_info
             ))
         })?;
         self.textures_pixeldata
-            .remove(texture_info)
+            .remove(texture_array_info)
             .ok_or_else(|| {
                 failure::err_msg(format!(
                     "Could not delete pixeldata cache because it did not exist for {:?}",
-                    texture_info
+                    texture_array_info
                 ))
             })?;
         Ok(())
     }
 
-    fn get_texture(&self, texture_info: &TextureInfo) -> Result<&ShaderResourceView<R>, Error> {
-        Ok(self.textures.get(texture_info).ok_or_else(|| {
-            failure::err_msg(format!("Could not find texture for {:?}", texture_info))
+    fn get_texture_array(
+        &self,
+        texture_array_info: &TextureArrayInfo,
+    ) -> Result<&ShaderResourceView<R>, Error> {
+        Ok(self.textures.get(texture_array_info).ok_or_else(|| {
+            failure::err_msg(format!(
+                "Could not find texture for {:?}",
+                texture_array_info
+            ))
         })?)
     }
 
-    fn _get_texture_pixeldata(&self, texture_info: &TextureInfo) -> Result<&Vec<Pixel>, Error> {
-        Ok(self.textures_pixeldata.get(texture_info).ok_or_else(|| {
-            failure::err_msg(format!("Could not find pixeldata for {:?}", texture_info))
-        })?)
+    fn _get_texture_array_pixeldata(
+        &self,
+        texture_array_info: &TextureArrayInfo,
+    ) -> Result<&Vec<Vec<Pixel>>, Error> {
+        Ok(self
+            .textures_pixeldata
+            .get(texture_array_info)
+            .ok_or_else(|| {
+                failure::err_msg(format!(
+                    "Could not find pixeldata for {:?}",
+                    texture_array_info
+                ))
+            })?)
     }
-}
-
-/// Converts a slice of [`Vertex`] into a slice of [`VertexGFX`] for gfx to consume.
-///
-/// Note that both types are memory-equivalent so the conversion is just a transmutation
-pub fn convert_to_gfx_format(vertices: &[Vertex]) -> &[VertexGFX] {
-    unsafe { &*(vertices as *const [Vertex] as *const [VertexGFX]) }
 }
