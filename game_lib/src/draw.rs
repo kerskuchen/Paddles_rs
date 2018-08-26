@@ -118,7 +118,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     }
 
     pub fn debug_draw_circle_textured(&mut self, pos: Point, depth: f32, color: Color) {
-        let sprite = self.atlas.animations["images/test"].frames[2];
+        let sprite = self.atlas.animations["images/test"].frames[0];
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
         self.polygons.push_quad(
             vertex_bounds,

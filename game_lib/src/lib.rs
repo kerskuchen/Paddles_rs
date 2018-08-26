@@ -267,48 +267,6 @@ pub fn update_and_draw<'gamestate>(
     let drawcontext = &mut gamestate.drawcontext;
     drawcontext.start_drawing();
     {
-        // Draw line from origin to cursor position
-        drawcontext.draw_line(
-            Line::new(
-                gamestate.origin,
-                new_mouse_pos_world.pixel_snapped() + Vec2::ones() * 0.5,
-            ),
-            0.0,
-            Color::new(1.0, 0.0, 0.0, 1.0),
-        );
-
-        let delta = pretty_format_duration_ms(f64::from(input.time_delta));
-        let draw = pretty_format_duration_ms(f64::from(input.time_draw));
-        let update = pretty_format_duration_ms(f64::from(input.time_update));
-        drawcontext.draw_text(
-            gamestate.cam.canvas_to_world(Point::new(5.0, 8.0)),
-            &format!("delta: {}\ndraw: {}\nupdate: {}", delta, draw, update),
-            0.0,
-            Color::new(1.0, 0.0, 1.0, 1.0),
-        );
-
-        // Draw cursor
-        let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
-        if input.mouse_button_left.is_pressed {
-            cursor_color.x = 1.0;
-        }
-        if input.mouse_button_middle.is_pressed {
-            cursor_color.y = 1.0;
-        }
-        if input.mouse_button_right.is_pressed {
-            cursor_color.z = 1.0;
-        }
-        drawcontext.draw_rect_filled(
-            Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
-            -0.1,
-            cursor_color,
-        );
-        drawcontext.debug_draw_circle_textured(
-            new_mouse_pos_world.pixel_snapped(),
-            -0.01,
-            Color::new(1.0, 1.0, 1.0, 1.0),
-        );
-
         // Draw grid
         let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
         for x in -30..30 {
@@ -427,6 +385,48 @@ pub fn update_and_draw<'gamestate>(
             ) {
             drawcontext.draw_rect_filled(field_border, field_depth, color);
         }
+
+        // Draw line from origin to cursor position
+        drawcontext.draw_line(
+            Line::new(
+                gamestate.origin,
+                new_mouse_pos_world.pixel_snapped() + Vec2::ones() * 0.5,
+            ),
+            0.0,
+            Color::new(1.0, 0.0, 0.0, 1.0),
+        );
+
+        // Draw cursor
+        let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
+        if input.mouse_button_left.is_pressed {
+            cursor_color.x = 1.0;
+        }
+        if input.mouse_button_middle.is_pressed {
+            cursor_color.y = 1.0;
+        }
+        if input.mouse_button_right.is_pressed {
+            cursor_color.z = 1.0;
+        }
+        drawcontext.draw_rect_filled(
+            Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
+            -0.1,
+            cursor_color,
+        );
+        drawcontext.debug_draw_circle_textured(
+            new_mouse_pos_world.pixel_snapped(),
+            -0.01,
+            Color::new(1.0, 1.0, 1.0, 1.0),
+        );
+
+        let delta = pretty_format_duration_ms(f64::from(input.time_delta));
+        let draw = pretty_format_duration_ms(f64::from(input.time_draw));
+        let update = pretty_format_duration_ms(f64::from(input.time_update));
+        drawcontext.draw_text(
+            gamestate.cam.canvas_to_world(Point::new(5.0, 8.0)),
+            &format!("delta: {}\ndraw: {}\nupdate: {}", delta, draw, update),
+            0.0,
+            Color::new(1.0, 0.0, 1.0, 1.0),
+        );
     }
     let transform = gamestate.cam.proj_view_matrix();
     drawcontext.finish_drawing(transform, canvas_rect, canvas_blit_rect);

@@ -25,6 +25,7 @@ type RenderTargetDepth<R> = gfx::handle::DepthStencilView<R, DepthFormat>;
 type ShaderResourceView<R> = gfx::handle::ShaderResourceView<R, [f32; 4]>;
 type PipelineStateObject<R> = gfx::PipelineState<R, pipe::Meta>;
 
+use gfx::state::{Blend, BlendValue, ColorMask, Equation, Factor};
 gfx_defines! {
     vertex VertexGFX {
         pos: [f32; 4] = "a_Pos",
@@ -41,7 +42,14 @@ gfx_defines! {
         texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
         texture_array: gfx::TextureSampler<[f32; 4]> = "u_SamplerArray",
 
-        out_color: gfx::RenderTarget<ColorFormat> = "Target0",
+        out_color: gfx::BlendTarget<ColorFormat> = ("Target0",
+                                                    ColorMask::all(),
+                                                    Blend::new(
+                                                        Equation::Add,
+                                                        Factor::One,
+                                                        Factor::OneMinus(BlendValue::SourceAlpha)
+                                                        )
+                                                   ),
         out_depth: gfx::DepthTarget<DepthFormat> = gfx::preset::depth::LESS_EQUAL_WRITE,
     }
 }
@@ -291,6 +299,16 @@ where
         })
     }
 
+    pub fn update_screen_dimensions(&mut self, width: u16, height: u16) {
+        let old_screen_frambuffer_info = self.screen_framebuffer.info.clone();
+        self.screen_framebuffer.info = FramebufferInfo {
+            id: old_screen_frambuffer_info.id,
+            width,
+            height,
+            name: old_screen_frambuffer_info.name,
+        }
+    }
+
     pub fn process_draw_commands(&mut self, draw_commands: Vec<DrawCommand>) -> Result<(), Error> {
         trace!("Processing {:?} draw commands", draw_commands.len());
 
@@ -484,16 +502,6 @@ where
     // ---------------------------------------------------------------------------------------------
     // Framebuffers
     //
-    pub fn update_screen_dimensions(&mut self, width: u16, height: u16) {
-        let old_screen_frambuffer_info = self.screen_framebuffer.info.clone();
-        self.screen_framebuffer.info = FramebufferInfo {
-            id: old_screen_frambuffer_info.id,
-            width,
-            height,
-            name: old_screen_frambuffer_info.name,
-        }
-    }
-
     fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
         debug!("Creating framebuffer for {:?}", framebuffer_info);
 
