@@ -298,6 +298,11 @@ pub fn update_and_draw<'gamestate>(
             -0.1,
             cursor_color,
         );
+        drawcontext.debug_draw_circle_textured(
+            new_mouse_pos_world.pixel_snapped(),
+            -0.01,
+            Color::new(1.0, 1.0, 1.0, 1.0),
+        );
 
         // Draw grid
         let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);

@@ -6,7 +6,8 @@ use image;
 use image::DynamicImage;
 use image::Rgba;
 use rand::prelude::*;
-use rect_packer::{DensePacker, Rect};
+use rect_packer::DensePacker;
+pub use rect_packer::Rect;
 use walkdir::WalkDir;
 
 use failure;
@@ -201,6 +202,21 @@ pub struct AtlasRegion {
 }
 
 impl AtlasRegion {
+    pub fn sub_region_relative(&self, sub_rect_relative: Rect) -> AtlasRegion {
+        let sub_rect = Rect {
+            x: self.rect.x + sub_rect_relative.x,
+            y: self.rect.y + sub_rect_relative.y,
+            width: sub_rect_relative.width,
+            height: sub_rect_relative.height,
+        };
+        assert!(self.rect.contains(&sub_rect));
+
+        AtlasRegion {
+            rect: sub_rect,
+            atlas_index: self.atlas_index,
+        }
+    }
+
     pub fn to_sprite(&self, atlas_size: f32, offset: Vec2) -> Sprite {
         let rect = self.rect;
         let vertex_bounds = game_lib::Rect {

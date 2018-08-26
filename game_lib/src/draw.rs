@@ -117,6 +117,18 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             .push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
+    pub fn debug_draw_circle_textured(&mut self, pos: Point, depth: f32, color: Color) {
+        let sprite = self.atlas.animations["images/test"].frames[2];
+        let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
+        self.polygons.push_quad(
+            vertex_bounds,
+            sprite.uv_bounds,
+            sprite.atlas_index,
+            depth,
+            color,
+        );
+    }
+
     pub fn start_drawing(&mut self) {
         self.polygons.clear();
         self.lines.clear();
@@ -554,7 +566,7 @@ pub struct AtlasMeta {
     pub sprites: HashMap<::ResourcePath, Sprite>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Animation {
     pub frame_durations: Vec<f32>,
     pub frames: Vec<Sprite>,

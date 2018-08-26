@@ -70,7 +70,7 @@ fn main() -> Result<(), Error> {
         .apply()
         .context("Could not initialize logger")?;
 
-    let mut packer = AtlasPacker::new(32);
+    let mut packer = AtlasPacker::new(64);
 
     debug!("Packing fonts");
     let font_map = font_packer::pack_fonts(&mut packer)?;
@@ -97,7 +97,7 @@ fn main() -> Result<(), Error> {
     let atlas_meta = AtlasMeta {
         num_atlas_textures: atlases.len(),
         fonts: font_map,
-        animations: HashMap::new(),
+        animations: animations_map,
         sprites: sprite_map,
     };
 
