@@ -484,6 +484,16 @@ where
     // ---------------------------------------------------------------------------------------------
     // Framebuffers
     //
+    pub fn update_screen_dimensions(&mut self, width: u16, height: u16) {
+        let old_screen_frambuffer_info = self.screen_framebuffer.info.clone();
+        self.screen_framebuffer.info = FramebufferInfo {
+            id: old_screen_frambuffer_info.id,
+            width,
+            height,
+            name: old_screen_frambuffer_info.name,
+        }
+    }
+
     fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
         debug!("Creating framebuffer for {:?}", framebuffer_info);
 

@@ -251,6 +251,7 @@ fn main() -> Result<(), Error> {
                             &mut rc.screen_framebuffer.color_render_target_view,
                             &mut rc.screen_framebuffer.depth_render_target_view,
                         );
+                        rc.update_screen_dimensions(new_dim.width as u16, new_dim.height as u16);
                         screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
 
                         // Grab mouse cursor in window
