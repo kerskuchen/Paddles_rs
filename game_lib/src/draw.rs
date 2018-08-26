@@ -558,7 +558,7 @@ impl PolygonMesh {
 //==================================================================================================
 //
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct AtlasMeta {
     pub num_atlas_textures: usize,
     pub fonts: HashMap<::ResourcePath, Font>,

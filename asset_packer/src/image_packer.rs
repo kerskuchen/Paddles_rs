@@ -9,12 +9,14 @@ use std::collections::HashMap;
 use failure::{Error, ResultExt};
 use image;
 
-pub fn pack_sprites(packer: &mut AtlasPacker) -> Result<HashMap<ResourcePath, Sprite>, Error> {
+pub fn pack_sprites(
+    packer: &mut AtlasPacker,
+    sprites: &mut HashMap<ResourcePath, Sprite>,
+) -> Result<(), Error> {
     debug!("Creating list of images");
     let image_filelist = common::collect_all_files_with_extension(common::ASSETS_DIR, "png");
     trace!("Image list: {:?}", image_filelist);
 
-    let mut sprite_map = HashMap::new();
     for image_filepath in image_filelist {
         debug!("Packing image: '{}'", image_filepath.display());
 
@@ -27,7 +29,7 @@ pub fn pack_sprites(packer: &mut AtlasPacker) -> Result<HashMap<ResourcePath, Sp
 
         let offset = Vec2::zero();
         let region = packer.pack_image(image);
-        let sprite = region.to_sprite(packer.atlas_size as f32, offset);
+        let sprite = region.to_sprite(packer.atlas_size, offset);
 
         let image_relative_filepath = image_filepath
             .strip_prefix(ASSETS_DIR)
@@ -38,7 +40,7 @@ pub fn pack_sprites(packer: &mut AtlasPacker) -> Result<HashMap<ResourcePath, Sp
             ))?
             .to_path_buf();
         let resource_path = filepath_to_string_without_extension(&image_relative_filepath)?;
-        sprite_map.insert(resource_path, sprite);
+        sprites.insert(resource_path, sprite);
     }
-    Ok(sprite_map)
+    Ok(())
 }

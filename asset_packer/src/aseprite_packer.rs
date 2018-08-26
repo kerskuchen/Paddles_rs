@@ -14,19 +14,13 @@ use serde_json;
 
 pub fn pack_animations_and_sprites(
     packer: &mut AtlasPacker,
-) -> Result<
-    (
-        HashMap<ResourcePath, Animation>,
-        HashMap<ResourcePath, Sprite>,
-    ),
-    Error,
-> {
+    animations: &mut HashMap<ResourcePath, Animation>,
+    sprites: &mut HashMap<ResourcePath, Sprite>,
+) -> Result<(), Error> {
     debug!("Creating list of aseprite files");
     let image_filelist = common::collect_all_files_with_extension(common::ASSETS_DIR, "aseprite");
     trace!("Aseprite file list: {:?}", image_filelist);
 
-    let mut sprite_map = HashMap::new();
-    let mut animation_map = HashMap::new();
     for image_filepath in image_filelist {
         debug!("Packing aseprite file: '{}'", image_filepath.display());
 
@@ -57,29 +51,36 @@ pub fn pack_animations_and_sprites(
         let mut frames = Vec::new();
 
         for (frame_index, frame) in meta.frames.iter().enumerate() {
-            let sub_rect_relative = Rect {
-                x: frame.frame.x as i32,
-                y: frame.frame.y as i32,
-                width: frame.frame.w as i32,
-                height: frame.frame.h as i32,
+            let sprite_region = if frame.frame.w == 0 && frame.frame.h == 0 {
+                // NOTE: If we encounter an empty frame we just use our default empty sprite region.
+                //       If we would just use the zero rect we are given, its region would be on the
+                //       wrong atlas index and possibly land on a nonempty sprite.
+                packer.default_empty_region()
+            } else {
+                let sub_rect_relative = Rect {
+                    x: frame.frame.x as i32,
+                    y: frame.frame.y as i32,
+                    width: frame.frame.w as i32,
+                    height: frame.frame.h as i32,
+                };
+                region.sub_region_relative(sub_rect_relative)
             };
-            let sprite_region = region.sub_region_relative(sub_rect_relative);
 
             let offset_x = frame.sprite_source_size.x as f32 - pivots[frame_index].x;
             let offset_y = frame.sprite_source_size.y as f32 - pivots[frame_index].y;
             let offset = Vec2::new(offset_x, offset_y);
 
             let duration = frame.duration as f32;
-            let sprite = sprite_region.to_sprite(packer.atlas_size as f32, offset);
+            let sprite = sprite_region.to_sprite(packer.atlas_size, offset);
 
             frame_durations.push(duration);
             frames.push(sprite);
         }
 
         if num_frames == 1 {
-            sprite_map.insert(resource_path, frames[0]);
+            sprites.insert(resource_path, frames[0]);
         } else {
-            animation_map.insert(
+            animations.insert(
                 resource_path,
                 Animation {
                     frame_durations,
@@ -89,9 +90,7 @@ pub fn pack_animations_and_sprites(
         }
     }
 
-    println!("sprites: {:#?}", sprite_map);
-    println!("animations: {:#?}", animation_map);
-    Ok((animation_map, sprite_map))
+    Ok(())
 }
 
 fn get_file_image_and_meta(file_path: &str) -> Result<(Image, aseprite::SpritesheetData), Error> {

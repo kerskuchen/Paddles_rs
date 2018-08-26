@@ -1,19 +1,4 @@
-/*
-TODO(JaSc):
-  - Create proper font metadata with max-glyph-height and glyph metadata with
-    - rect in bitmap
-    - x,y offsets 
-    - x advance
-  - Create proper spritesheet metadata with
-    - rect in bitmap
-    - frame duration
-    - x,y offsets from pivot-point information
-  - Embed all spritesheets and font-textures into one atlas with corrected metadata
-  - Create actual vertex/uv rects metadata from the whole atlas. Maybe group animation-sprites and 
-    font-sprites into Vectors which can be accessed via hashmap.
-*/
-
-#[macro_use]
+//#[macro_use]
 extern crate game_lib;
 use game_lib::AtlasMeta;
 
@@ -46,7 +31,10 @@ pub mod common;
 pub mod font_packer;
 pub mod image_packer;
 
-const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Debug;
+const DEBUG_WRITE_HUMAN_READABLE_ATLAS_META: bool = true;
+const ATLAS_TEXTURE_SIZE: u32 = 64;
+
+const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Info;
 
 use bincode::serialize;
 use common::AtlasPacker;
@@ -70,18 +58,21 @@ fn main() -> Result<(), Error> {
         .apply()
         .context("Could not initialize logger")?;
 
-    let mut packer = AtlasPacker::new(64);
+    let mut packer = AtlasPacker::new(ATLAS_TEXTURE_SIZE);
+    let mut animations = HashMap::new();
+    let mut sprites = HashMap::new();
+    let mut fonts = HashMap::new();
 
     debug!("Packing fonts");
-    let font_map = font_packer::pack_fonts(&mut packer)?;
+    font_packer::pack_fonts(&mut packer, &mut fonts)?;
     info!("Successfully packed fonts");
 
     debug!("Packing images and animations");
-    let (animations_map, sprite_map) = aseprite_packer::pack_animations_and_sprites(&mut packer)?;
+    aseprite_packer::pack_animations_and_sprites(&mut packer, &mut animations, &mut sprites)?;
     info!("Successfully packed images and animations");
 
     debug!("Packing png images");
-    let sprite_map = image_packer::pack_sprites(&mut packer)?;
+    image_packer::pack_sprites(&mut packer, &mut sprites)?;
     info!("Successfully packed png images");
 
     debug!("Saving atlas textures");
@@ -96,11 +87,10 @@ fn main() -> Result<(), Error> {
     debug!("Saving atlas metadata");
     let atlas_meta = AtlasMeta {
         num_atlas_textures: atlases.len(),
-        fonts: font_map,
-        animations: animations_map,
-        sprites: sprite_map,
+        fonts,
+        animations,
+        sprites,
     };
-
     let meta_filepath = "data/atlas.tex";
     let mut meta_file =
         File::create(meta_filepath).context(format!("Could not create file '{}'", meta_filepath))?;
@@ -109,6 +99,11 @@ fn main() -> Result<(), Error> {
         .write_all(&encoded_sprites)
         .context("Could not write atlas metadata")?;
     info!("Successfully saved atlas metadata");
+
+    if DEBUG_WRITE_HUMAN_READABLE_ATLAS_META {
+        let debug_output = format!("{:#?}", atlas_meta);
+        std::fs::write("data/atlas_debug.txt", &debug_output)?;
+    }
 
     Ok(())
 }

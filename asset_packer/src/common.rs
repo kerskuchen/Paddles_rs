@@ -217,8 +217,10 @@ impl AtlasRegion {
         }
     }
 
-    pub fn to_sprite(&self, atlas_size: f32, offset: Vec2) -> Sprite {
+    pub fn to_sprite(&self, atlas_size: u32, offset: Vec2) -> Sprite {
+        let atlas_size = atlas_size as f32;
         let rect = self.rect;
+
         let vertex_bounds = game_lib::Rect {
             left: offset.x,
             right: offset.x + rect.width as f32,
@@ -243,17 +245,17 @@ pub struct AtlasPacker {
     rect_packer: AtlasRectPacker,
     texture_writer: AtlasTextureWriter,
     default_empty_region: AtlasRegion,
-    pub atlas_size: i32,
+    pub atlas_size: u32,
 }
 
 impl AtlasPacker {
-    pub fn new(atlas_size: i32) -> AtlasPacker {
-        let mut rect_packer = AtlasRectPacker::new(atlas_size);
+    pub fn new(atlas_size: u32) -> AtlasPacker {
+        let mut rect_packer = AtlasRectPacker::new(atlas_size as i32);
         let default_empty_region = rect_packer.pack_image(1, 1);
 
         AtlasPacker {
             rect_packer,
-            texture_writer: AtlasTextureWriter::new(atlas_size as u32),
+            texture_writer: AtlasTextureWriter::new(atlas_size),
             default_empty_region,
             atlas_size,
         }

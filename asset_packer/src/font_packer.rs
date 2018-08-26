@@ -44,12 +44,14 @@ pub struct RawGlyph {
     image: Option<Image>,
 }
 
-pub fn pack_fonts(packer: &mut AtlasPacker) -> Result<HashMap<ResourcePath, Font>, Error> {
+pub fn pack_fonts(
+    packer: &mut AtlasPacker,
+    fonts: &mut HashMap<ResourcePath, Font>,
+) -> Result<(), Error> {
     debug!("Reading font-info map file");
     let font_info_map = load_font_info_map_from_file(FONTS_INFO_FILE_PATH)?;
     trace!("FontInfo map: {:?}", font_info_map);
 
-    let mut font_map = HashMap::new();
     for (font_name, font_info) in font_info_map {
         let font = create_font(
             &font_info.filename,
@@ -62,9 +64,9 @@ pub fn pack_fonts(packer: &mut AtlasPacker) -> Result<HashMap<ResourcePath, Font
         ))?;
 
         let packed_font = pack_font(packer, font);
-        font_map.insert(font_name, packed_font);
+        fonts.insert(font_name, packed_font);
     }
-    Ok(font_map)
+    Ok(())
 }
 
 pub fn pack_font(packer: &mut AtlasPacker, raw_font: RawFont) -> Font {
@@ -89,7 +91,7 @@ fn pack_glyph(packer: &mut AtlasPacker, raw_glyph: RawGlyph) -> Glyph {
         packer.default_empty_region()
     };
 
-    let sprite = region.to_sprite(packer.atlas_size as f32, offset);
+    let sprite = region.to_sprite(packer.atlas_size, offset);
     let horizontal_advance = raw_glyph.horizontal_advance as f32;
 
     Glyph {
