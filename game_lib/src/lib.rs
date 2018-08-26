@@ -193,11 +193,6 @@ pub fn update_and_draw<'gamestate>(
             .reinitialize(canvas_dim.0, canvas_dim.1);
     }
 
-    let delta = pretty_format_duration_ms(f64::from(input.time_delta));
-    let draw = pretty_format_duration_ms(f64::from(input.time_draw));
-    let update = pretty_format_duration_ms(f64::from(input.time_update));
-    trace!("delta: {}, draw: {}, update: {}", delta, draw, update);
-
     // ---------------------------------------------------------------------------------------------
     // Screen size changed
     //
@@ -280,6 +275,16 @@ pub fn update_and_draw<'gamestate>(
             ),
             0.0,
             Color::new(1.0, 0.0, 0.0, 1.0),
+        );
+
+        let delta = pretty_format_duration_ms(f64::from(input.time_delta));
+        let draw = pretty_format_duration_ms(f64::from(input.time_draw));
+        let update = pretty_format_duration_ms(f64::from(input.time_update));
+        drawcontext.draw_text(
+            gamestate.cam.canvas_to_world(Point::new(5.0, 8.0)),
+            &format!("delta: {}\ndraw: {}\nupdate: {}", delta, draw, update),
+            0.0,
+            Color::new(1.0, 0.0, 1.0, 1.0),
         );
 
         // Draw cursor

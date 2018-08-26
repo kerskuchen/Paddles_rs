@@ -13,8 +13,8 @@ use rusttype;
 use rusttype::{point, PositionedGlyph, Scale};
 use std::collections::HashMap;
 
-const COLOR_GLYPH: [u8; 4] = [0, 255, 255, 255];
-const COLOR_BORDER: [u8; 4] = [255, 0, 0, 255];
+const COLOR_GLYPH: [u8; 4] = [255, 255, 255, 255];
+const COLOR_BORDER: [u8; 4] = [0, 0, 0, 255];
 const FIRST_VISIBLE_ASCII_CODE_POINT: u8 = 32;
 const LAST_ASCII_CODE_POINT: u8 = 126;
 

@@ -129,6 +129,43 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         );
     }
 
+    pub fn draw_sprite(&mut self, sprite: &Sprite, pos: Point, depth: f32, color: Color) {
+        let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
+        self.polygons.push_quad(
+            vertex_bounds,
+            sprite.uv_bounds,
+            sprite.atlas_index,
+            depth,
+            color,
+        );
+    }
+
+    pub fn draw_text(&mut self, origin: Point, text: &str, depth: f32, color: Color) {
+        let font = &self.atlas.fonts["fonts/default"];
+        let origin = origin.pixel_snapped();
+        let mut offset = Vec2::zero();
+
+        for c in text.chars() {
+            if c == '\n' {
+                offset.x = 0.0;
+                offset.y += font.vertical_advance;
+            } else {
+                let glyph = font.glyphs[(c as u8) as usize];
+                let sprite = glyph.sprite;
+
+                let vertex_bounds = sprite.vertex_bounds.translated_by(origin + offset);
+                self.polygons.push_quad(
+                    vertex_bounds,
+                    sprite.uv_bounds,
+                    sprite.atlas_index,
+                    depth,
+                    color,
+                );
+                offset.x += glyph.horizontal_advance;
+            }
+        }
+    }
+
     pub fn start_drawing(&mut self) {
         self.polygons.clear();
         self.lines.clear();
