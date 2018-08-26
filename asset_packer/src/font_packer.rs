@@ -167,7 +167,7 @@ fn create_glyph(
 
     // Glyph metrics
     let metrics = glyph.unpositioned().h_metrics();
-    let horizontal_advance = metrics.advance_width.round() as i32 + 2 * i32::from(border_thickness);
+    let horizontal_advance = metrics.advance_width.round() as i32 + i32::from(border_thickness);
     // NOTE: The offset determines how many pixels the glyph-sprite needs to be offset
     //       from its origin (top-left corner) when drawn to the screen
     let mut offset_x = metrics.left_side_bearing.round() as i32 - i32::from(atlas_padding);
