@@ -436,9 +436,9 @@ where
             .clear(&target.color_render_target_view, clear_color.into());
 
         // TODO(JaSc): Get the clear depth value from the command as well
-        let clear_depth_value = 1.0;
+        // TODO(JaSc): Fix znear/zfar meanings and ranges
         self.encoder
-            .clear_depth(&target.depth_render_target_view, clear_depth_value);
+            .clear_depth(&target.depth_render_target_view, game_lib::DEFAULT_ZFAR);
 
         Ok(())
     }
@@ -466,7 +466,7 @@ where
             target_rect,
             Rect::unit_rect(),
             0,
-            0.0,
+            game_lib::DEFAULT_ZNEAR,
             Color::new(1.0, 1.0, 1.0, 1.0),
         );
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];

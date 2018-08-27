@@ -18,6 +18,14 @@ void main() {
         tex_color = texture(u_Sampler, vec2(v_Uv.x, v_Uv.y));
     }
 
+    // TODO(JaSc): We need to overthink this multiplication.
+    //             We need three concepts that we need to pass here: 
+    //               - Opacity
+    //               - Additive blending
+    //               - Color modulation
+    //             Maybe we need to pass them seperately like follows?
+    //             color.a *= 1.0 - additivity;
+    //             color   *= opacity;
     vec4 tex_premultiplied = vec4(tex_color.r * tex_color.a,
                                   tex_color.g * tex_color.a,
                                   tex_color.b * tex_color.a,

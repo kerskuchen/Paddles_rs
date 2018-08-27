@@ -284,6 +284,7 @@ impl Div<f32> for Vec2 {
 pub trait Mat4Helper {
     fn ortho_origin_center_flipped_y(width: f32, height: f32, near: f32, far: f32) -> Self;
     fn ortho_origin_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self;
+    fn ortho_origin_top_left(width: f32, height: f32, near: f32, far: f32) -> Self;
 }
 
 impl Mat4Helper for Mat4 {
@@ -300,6 +301,10 @@ impl Mat4Helper for Mat4 {
 
     fn ortho_origin_bottom_left(width: f32, height: f32, near: f32, far: f32) -> Self {
         cgmath::ortho(0.0, width, 0.0, height, near, far)
+    }
+
+    fn ortho_origin_top_left(width: f32, height: f32, near: f32, far: f32) -> Self {
+        cgmath::ortho(0.0, width, height, 0.0, near, far)
     }
 }
 

@@ -8,7 +8,10 @@ TODO(JaSc):
   x Atlas packer
   x Font packer
   x Atlas textures and sprite/quad/line-batching
-  - Bitmap text rendering 
+  x Bitmap text rendering 
+    x Worldspace/Screenspace placement
+    - Depth clearing after switching from worldspace -> screenspace -> debugspace
+    - Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
   - Audio playback
@@ -26,10 +29,11 @@ TODO(JaSc): (Bigger things for vacations)
 BACKLOG(JaSc):
   - The following are things to remember to extract out of the old C project in the long term
     x Debug macro to print a variable and it's name quickly
-    - Be able to conveniently do debug printing on screen
+    x Be able to conveniently do debug printing on screen
+    - Identification and sorting of translucent sprites
     - Moving camera system
-    - Aseprite image parser and converter
-    - Texture array of atlases implementation
+    x Aseprite image parser and converter
+    x Texture array of atlases implementation
     - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
     - Gamepad input
     x Correct mouse zooming and panning

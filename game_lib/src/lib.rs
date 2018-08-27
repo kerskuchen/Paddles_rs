@@ -23,9 +23,9 @@ pub type ResourcePath = String;
 //             Is it GameState or Gamestate? When its GameState why do variables are then called
 //             gamestate and not game_state?
 pub use draw::{
-    vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, Font,
-    FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
-    TextureArrayInfo, Vertex, VertexIndex,
+    vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, DrawSpace,
+    Font, FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
+    TextureArrayInfo, Vertex, VertexIndex, DEFAULT_ZFAR, DEFAULT_ZNEAR,
 };
 pub use math::{
     Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2, WorldPoint,
@@ -276,8 +276,9 @@ pub fn update_and_draw<'gamestate>(
                 if x % 2 == 0 {
                     drawcontext.draw_rect_filled(
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
-                        -0.9,
+                        -1.0,
                         grid_light,
+                        DrawSpace::World,
                     );
                 } else {
                     let r = (x + 30) as f32 / 60.0;
@@ -285,43 +286,19 @@ pub fn update_and_draw<'gamestate>(
                     let b = (r + g) / 2.0;
                     drawcontext.draw_rect_filled(
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
-                        -0.9,
+                        -1.0,
                         Color::new(r, g, b, 1.0),
+                        DrawSpace::World,
                     );
                 }
             }
         }
 
-        for y in 0..10 {
-            for x in 0..10 {
-                let r = (x) as f32 / 10.0;
-                let g = (y) as f32 / 10.0;
-                let b = 0.0; //(r + g) / 2.0;
-                drawcontext.draw_rect_filled(
-                    Rect::from_point_dimension(
-                        Point::new(x as f32, y as f32) * UNIT_SIZE,
-                        Vec2::ones() * UNIT_SIZE / 2.0,
-                    ),
-                    -0.9,
-                    Color::new(r, g, b, 1.0),
-                );
-            }
-        }
-
-        let rect =
-            Rect::from_xy_width_height(-5.0 * UNIT_SIZE, 0.0, 4.0 * UNIT_SIZE, 4.0 * UNIT_SIZE);
-
-        drawcontext.debug_draw_rect_textured(rect, -0.05, Color::new(1.0, 1.0, 1.0, 1.0));
-        let line = Line {
-            start: Point::new(rect.left, rect.bottom),
-            end: Point::new(rect.right, rect.top),
-        };
-        drawcontext.draw_line(line, -0.04, Color::new(1.0, 0.0, 0.0, 1.0));
-
         drawcontext.debug_draw_rect_textured(
             Rect::from_point_dimension(Point::zero(), Vec2::ones() * UNIT_SIZE),
-            -0.1,
+            -0.5,
             Color::new(0.0, 0.0, 0.0, 0.0),
+            DrawSpace::World,
         );
 
         // Playing field
@@ -331,7 +308,7 @@ pub fn update_and_draw<'gamestate>(
             top: -7.0 * UNIT_SIZE,
             bottom: 7.0 * UNIT_SIZE,
         };
-        let field_depth = -0.8;
+        let field_depth = -0.4;
         let field_border_lines = field_bounds.to_border_lines();
 
         for (&line, &color) in field_border_lines.iter().zip(
@@ -342,7 +319,7 @@ pub fn update_and_draw<'gamestate>(
                 draw::COLOR_CYAN,
             ].iter(),
         ) {
-            drawcontext.draw_line(line, field_depth, color);
+            drawcontext.draw_line(line, field_depth, color, DrawSpace::World);
         }
 
         let field_border_left = Rect {
@@ -383,8 +360,24 @@ pub fn update_and_draw<'gamestate>(
                     draw::COLOR_BLACK,
                 ].iter(),
             ) {
-            drawcontext.draw_rect_filled(field_border, field_depth, color);
+            drawcontext.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
         }
+
+        // Draw line from canvas center to cursor position in screen space
+        drawcontext.draw_line(
+            Line::new(canvas_rect.dim() / 2.0, new_mouse_pos_canvas),
+            -0.3,
+            Color::new(1.0, 1.0, 0.0, 1.0),
+            DrawSpace::Screen,
+        );
+
+        // Draw line from canvas center to cursor position in debug screen space
+        drawcontext.draw_line(
+            Line::new(canvas_rect.dim() / 2.0, new_mouse_pos_canvas),
+            -0.3,
+            Color::new(0.0, 0.0, 1.0, 1.0),
+            DrawSpace::Debug,
+        );
 
         // Draw line from origin to cursor position
         drawcontext.draw_line(
@@ -392,8 +385,9 @@ pub fn update_and_draw<'gamestate>(
                 gamestate.origin,
                 new_mouse_pos_world.pixel_snapped() + Vec2::ones() * 0.5,
             ),
-            0.0,
+            -0.3,
             Color::new(1.0, 0.0, 0.0, 1.0),
+            DrawSpace::World,
         );
 
         // Draw cursor
@@ -409,24 +403,28 @@ pub fn update_and_draw<'gamestate>(
         }
         drawcontext.draw_rect_filled(
             Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
-            -0.1,
+            -0.2,
             cursor_color,
+            DrawSpace::World,
         );
+
         drawcontext.debug_draw_circle_textured(
             new_mouse_pos_world.pixel_snapped(),
-            -0.01,
+            -0.1,
             Color::new(1.0, 1.0, 1.0, 1.0),
+            DrawSpace::World,
         );
 
         let delta = pretty_format_duration_ms(f64::from(input.time_delta));
         let draw = pretty_format_duration_ms(f64::from(input.time_draw));
         let update = pretty_format_duration_ms(f64::from(input.time_update));
-        drawcontext.draw_text(
-            gamestate.cam.canvas_to_world(Point::new(5.0, 8.0)),
-            &format!("delta: {}\ndraw: {}\nupdate: {}", delta, draw, update),
-            0.0,
-            Color::new(1.0, 0.0, 1.0, 1.0),
+        drawcontext.debug_draw_text(
+            &format!("delta: {}\ndraw: {}\nupdate: {}\n", delta, draw, update),
+            draw::COLOR_RED,
         );
+        drawcontext.debug_draw_text("test", draw::COLOR_WHITE);
+        drawcontext.debug_draw_text("test123", draw::COLOR_WHITE);
+        drawcontext.debug_draw_text("\n\ntest-important", draw::COLOR_CYAN);
     }
     let transform = gamestate.cam.proj_view_matrix();
     drawcontext.finish_drawing(transform, canvas_rect, canvas_blit_rect);

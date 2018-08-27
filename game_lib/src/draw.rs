@@ -1,4 +1,4 @@
-use math::{Color, Line, Mat4, Point, Rect, Vec2, WorldPoint};
+use math::{CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, Vec2, WorldPoint};
 
 use bincode;
 use lodepng;
@@ -18,6 +18,9 @@ pub struct Vertex {
     pub uv: [f32; 3],
     pub color: [f32; 4],
 }
+
+pub const DEFAULT_ZNEAR: f32 = -1.0;
+pub const DEFAULT_ZFAR: f32 = 1.0;
 
 pub const COLOR_RED: Color = Color {
     x: 1.0,
@@ -73,6 +76,13 @@ pub const COLOR_WHITE: Color = Color {
 //==================================================================================================
 //
 
+#[derive(Debug, Clone, Copy)]
+pub enum DrawSpace {
+    World,
+    Screen,
+    Debug,
+}
+
 // TODO(JaSc): Change screen color based on debug/release to better see
 //             letterboxing in windowed mode
 const CLEAR_COLOR_SCREEN: [f32; 4] = [0.2, 0.9, 0.4, 1.0];
@@ -85,9 +95,15 @@ pub struct DrawContext<'drawcontext> {
 
     canvas_framebuffer: Option<FramebufferInfo>,
 
-    lines: LineMesh,
-    polygons: PolygonMesh,
+    debug_lines: LineMesh,
+    world_lines: LineMesh,
+    screen_lines: LineMesh,
 
+    debug_polygons: PolygonMesh,
+    world_polygons: PolygonMesh,
+    screen_polygons: PolygonMesh,
+
+    debug_text_origin: CanvasPoint,
     pub draw_commands: Vec<DrawCommand<'drawcontext>>,
 }
 
@@ -96,31 +112,50 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         Default::default()
     }
 
-    pub fn draw_line(&mut self, line: Line, depth: f32, color: Color) {
+    pub fn draw_line(&mut self, line: Line, depth: f32, color: Color, draw_space: DrawSpace) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
-        self.lines
-            .push_line(line, line_uv, sprite.atlas_index, depth, color);
+        let mesh = self.linemesh_by_draw_space(draw_space);
+        mesh.push_line(line, line_uv, sprite.atlas_index, depth, color);
     }
 
-    pub fn draw_rect_filled(&mut self, rect: Rect, depth: f32, color: Color) {
+    pub fn draw_rect_filled(
+        &mut self,
+        rect: Rect,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
-        self.polygons
-            .push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
+        let mesh = self.polymesh_by_draw_space(draw_space);
+        mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
-    pub fn debug_draw_rect_textured(&mut self, rect: Rect, depth: f32, color: Color) {
+    pub fn debug_draw_rect_textured(
+        &mut self,
+        rect: Rect,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
         let sprite = self.atlas.sprites["images/textured"];
-        self.polygons
-            .push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
+        let mesh = self.polymesh_by_draw_space(draw_space);
+        mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
-    pub fn debug_draw_circle_textured(&mut self, pos: Point, depth: f32, color: Color) {
+    pub fn debug_draw_circle_textured(
+        &mut self,
+        pos: Point,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
         let sprite = self.atlas.animations["images/test"].frames[0];
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
-        self.polygons.push_quad(
+        let mesh = self.polymesh_by_draw_space(draw_space);
+        mesh.push_quad(
             vertex_bounds,
             sprite.uv_bounds,
             sprite.atlas_index,
@@ -129,9 +164,17 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         );
     }
 
-    pub fn draw_sprite(&mut self, sprite: &Sprite, pos: Point, depth: f32, color: Color) {
+    pub fn draw_sprite(
+        &mut self,
+        sprite: &Sprite,
+        pos: Point,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
-        self.polygons.push_quad(
+        let mesh = self.polymesh_by_draw_space(draw_space);
+        mesh.push_quad(
             vertex_bounds,
             sprite.uv_bounds,
             sprite.atlas_index,
@@ -140,10 +183,35 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         );
     }
 
-    pub fn draw_text(&mut self, origin: Point, text: &str, depth: f32, color: Color) {
+    pub fn debug_draw_text(&mut self, text: &str, color: Color) {
+        let draw_offset = self.draw_text(
+            self.debug_text_origin,
+            &(String::from("\n") + text),
+            0.0,
+            color,
+            DrawSpace::Debug,
+        );
+        self.debug_text_origin.y += draw_offset.y;
+    }
+
+    pub fn draw_text(
+        &mut self,
+        origin: Point,
+        text: &str,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) -> Vec2 {
         let font = &self.atlas.fonts["fonts/default"];
         let origin = origin.pixel_snapped();
         let mut offset = Vec2::zero();
+
+        // NOTE: We cannot call polymesh_by_draw_space here because the borrowchecker won't let us
+        let mesh = match draw_space {
+            DrawSpace::World => &mut self.world_polygons,
+            DrawSpace::Screen => &mut self.screen_polygons,
+            DrawSpace::Debug => &mut self.debug_polygons,
+        };
 
         for c in text.chars() {
             if c == '\n' {
@@ -154,7 +222,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
                 let sprite = glyph.sprite;
 
                 let vertex_bounds = sprite.vertex_bounds.translated_by(origin + offset);
-                self.polygons.push_quad(
+                mesh.push_quad(
                     vertex_bounds,
                     sprite.uv_bounds,
                     sprite.atlas_index,
@@ -164,11 +232,20 @@ impl<'drawcontext> DrawContext<'drawcontext> {
                 offset.x += glyph.horizontal_advance;
             }
         }
+        offset
     }
 
     pub fn start_drawing(&mut self) {
-        self.polygons.clear();
-        self.lines.clear();
+        self.world_polygons.clear();
+        self.world_lines.clear();
+
+        self.debug_polygons.clear();
+        self.debug_lines.clear();
+
+        self.screen_polygons.clear();
+        self.screen_lines.clear();
+
+        self.debug_text_origin = Vec2::new(8.0, 0.0);
     }
 
     // TODO(JaSc): Get rid of screen_rect/canvas_rect here
@@ -197,18 +274,39 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             color: Color::from(CLEAR_COLOR_CANVAS),
         });
 
-        // Draw batches
+        // World draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
             transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh: &self.polygons,
+            mesh: &self.world_polygons,
         });
         self.draw_commands.push(DrawCommand::DrawLines {
             transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh: &self.lines,
+            mesh: &self.world_lines,
+        });
+
+        let screen_transform = Mat4::ortho_origin_top_left(
+            canvas_rect.width(),
+            canvas_rect.height(),
+            DEFAULT_ZNEAR,
+            DEFAULT_ZFAR,
+        );
+
+        // Screen draw batches
+        self.draw_commands.push(DrawCommand::DrawPolys {
+            transform: screen_transform,
+            texture_array_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            mesh: &self.screen_polygons,
+        });
+        self.draw_commands.push(DrawCommand::DrawLines {
+            transform: screen_transform,
+            texture_array_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            mesh: &self.screen_lines,
         });
 
         // Blit canvas to screen
@@ -217,6 +315,20 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             target_framebuffer: FramebufferTarget::Screen,
             source_rect: canvas_rect,
             target_rect: canvas_blit_rect,
+        });
+
+        // Debug draw batches
+        self.draw_commands.push(DrawCommand::DrawPolys {
+            transform: screen_transform,
+            texture_array_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Screen,
+            mesh: &self.debug_polygons,
+        });
+        self.draw_commands.push(DrawCommand::DrawLines {
+            transform: screen_transform,
+            texture_array_info: texture_atlas.clone(),
+            framebuffer: FramebufferTarget::Screen,
+            mesh: &self.debug_lines,
         });
     }
 
@@ -268,6 +380,21 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         self.canvas_framebuffer = Some(framebuffer_info.clone());
         self.draw_commands
             .push(DrawCommand::CreateFramebuffer { framebuffer_info });
+    }
+
+    fn linemesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut LineMesh {
+        match draw_space {
+            DrawSpace::World => &mut self.world_lines,
+            DrawSpace::Screen => &mut self.screen_lines,
+            DrawSpace::Debug => &mut self.debug_lines,
+        }
+    }
+    fn polymesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut PolygonMesh {
+        match draw_space {
+            DrawSpace::World => &mut self.world_polygons,
+            DrawSpace::Screen => &mut self.screen_polygons,
+            DrawSpace::Debug => &mut self.debug_polygons,
+        }
     }
 }
 
