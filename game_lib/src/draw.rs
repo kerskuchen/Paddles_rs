@@ -19,7 +19,9 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
-pub const DEFAULT_ZNEAR: f32 = -1.0;
+// NOTE: This translates to the depth range [-DEFAULT_ZNEAR, -DEFAULT_ZFAR].
+//       For more information see: https://stackoverflow.com/a/36046924
+pub const DEFAULT_ZNEAR: f32 = 0.0;
 pub const DEFAULT_ZFAR: f32 = 1.0;
 
 pub const COLOR_RED: Color = Color {

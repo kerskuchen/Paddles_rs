@@ -505,7 +505,7 @@ where
         let projection_mat = Mat4::ortho_origin_bottom_left(
             f32::from(target_framebuffer_info.width),
             f32::from(target_framebuffer_info.height),
-            0.0,
+            -1.0,
             1.0,
         );
 
