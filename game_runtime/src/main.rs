@@ -24,7 +24,7 @@ TODO(JaSc): (Bigger things for vacations)
     restructure the platform layer a little
   - Add system commands from client to platform that can change settings like vsync without 
     restart. This requires some major codeflow refactoring but would allow us to better modularize
-    the platform layer. We also need would need to re-upload all textures to the graphics context.
+    the platform layer. We also would need to re-upload all textures to the graphics context.
 
 BACKLOG(JaSc):
   - The following are things to remember to extract out of the old C project in the long term

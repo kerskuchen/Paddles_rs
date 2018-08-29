@@ -268,10 +268,12 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         self.draw_commands.push(DrawCommand::Clear {
             framebuffer: FramebufferTarget::Screen,
             color: Color::from(CLEAR_COLOR_SCREEN),
+            depth: DEFAULT_ZFAR,
         });
         self.draw_commands.push(DrawCommand::Clear {
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             color: Color::from(CLEAR_COLOR_CANVAS),
+            depth: DEFAULT_ZFAR,
         });
 
         // World draw batches
@@ -294,6 +296,10 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             DEFAULT_ZNEAR,
             DEFAULT_ZFAR,
         );
+        self.draw_commands.push(DrawCommand::ClearDepth {
+            framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
+            depth: DEFAULT_ZFAR,
+        });
 
         // Screen draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
@@ -315,6 +321,10 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             target_framebuffer: FramebufferTarget::Screen,
             source_rect: canvas_rect,
             target_rect: canvas_blit_rect,
+        });
+        self.draw_commands.push(DrawCommand::ClearDepth {
+            framebuffer: FramebufferTarget::Screen,
+            depth: DEFAULT_ZFAR,
         });
 
         // Debug draw batches
@@ -449,6 +459,15 @@ pub enum DrawCommand<'drawcontext> {
     Clear {
         framebuffer: FramebufferTarget,
         color: Color,
+        depth: f32,
+    },
+    ClearColor {
+        framebuffer: FramebufferTarget,
+        color: Color,
+    },
+    ClearDepth {
+        framebuffer: FramebufferTarget,
+        depth: f32,
     },
     BlitFramebuffer {
         source_framebuffer: FramebufferInfo,
@@ -511,8 +530,20 @@ impl<'drawbuffers> std::fmt::Debug for DrawCommand<'drawbuffers> {
                 texture_array_info,
                 pixels.len()
             ),
-            DrawCommand::Clear { framebuffer, color } => {
+            DrawCommand::Clear {
+                framebuffer,
+                color,
+                depth,
+            } => write!(
+                f,
+                "\n  Clear: color: {:?}, depth: {:?}, {:?}",
+                color, depth, framebuffer
+            ),
+            DrawCommand::ClearColor { framebuffer, color } => {
                 write!(f, "\n  Clear: color: {:?}, {:?}", color, framebuffer)
+            }
+            DrawCommand::ClearDepth { framebuffer, depth } => {
+                write!(f, "\n  Clear: color: {:?}, {:?}", depth, framebuffer)
             }
             DrawCommand::BlitFramebuffer {
                 source_framebuffer,

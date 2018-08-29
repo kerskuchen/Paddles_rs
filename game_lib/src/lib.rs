@@ -166,7 +166,13 @@ fn reinitialize_after_hotreload() {
 
 fn reinitialize_gamestate(gamestate: &mut GameState) {
     gamestate.origin = WorldPoint::zero();
-    gamestate.cam = Camera::new(gamestate.origin, CANVAS_WIDTH, CANVAS_HEIGHT, -1.0, 1.0);
+    gamestate.cam = Camera::new(
+        gamestate.origin,
+        CANVAS_WIDTH,
+        CANVAS_HEIGHT,
+        DEFAULT_ZNEAR,
+        DEFAULT_ZFAR,
+    );
 }
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform

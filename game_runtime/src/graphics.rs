@@ -349,7 +349,17 @@ where
                         DrawMode::Fill,
                     )
                 }
-                DrawCommand::Clear { framebuffer, color } => self.clear(&framebuffer, *color),
+                DrawCommand::Clear {
+                    framebuffer,
+                    color,
+                    depth,
+                } => self.clear(&framebuffer, *color, *depth),
+                DrawCommand::ClearColor { framebuffer, color } => {
+                    self.clear_color(&framebuffer, *color)
+                }
+                DrawCommand::ClearDepth { framebuffer, depth } => {
+                    self.clear_depth(&framebuffer, *depth)
+                }
                 DrawCommand::BlitFramebuffer {
                     source_framebuffer,
                     target_framebuffer,
@@ -430,15 +440,35 @@ where
         &mut self,
         framebuffer_target: &FramebufferTarget,
         clear_color: Color,
+        clear_depth: f32,
+    ) -> Result<(), Error> {
+        self.clear_color(framebuffer_target, clear_color)?;
+        self.clear_depth(framebuffer_target, clear_depth)?;
+
+        Ok(())
+    }
+
+    fn clear_color(
+        &mut self,
+        framebuffer_target: &FramebufferTarget,
+        clear_color: Color,
     ) -> Result<(), Error> {
         let target = self.get_framebuffer(framebuffer_target)?;
         self.encoder
             .clear(&target.color_render_target_view, clear_color.into());
 
-        // TODO(JaSc): Get the clear depth value from the command as well
-        // TODO(JaSc): Fix znear/zfar meanings and ranges
+        Ok(())
+    }
+
+    fn clear_depth(
+        &mut self,
+        framebuffer_target: &FramebufferTarget,
+        clear_depth: f32,
+    ) -> Result<(), Error> {
+        let target = self.get_framebuffer(framebuffer_target)?;
+
         self.encoder
-            .clear_depth(&target.depth_render_target_view, game_lib::DEFAULT_ZFAR);
+            .clear_depth(&target.depth_render_target_view, clear_depth);
 
         Ok(())
     }
@@ -466,12 +496,12 @@ where
             target_rect,
             Rect::unit_rect(),
             0,
-            game_lib::DEFAULT_ZNEAR,
+            0.0,
             Color::new(1.0, 1.0, 1.0, 1.0),
         );
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
 
-        // NOTE: The projection matrix is flipped upside-down for correct blitting
+        // NOTE: The projection matrix is flipped 'upside-down' for correct blitting
         let projection_mat = Mat4::ortho_origin_bottom_left(
             f32::from(target_framebuffer_info.width),
             f32::from(target_framebuffer_info.height),
