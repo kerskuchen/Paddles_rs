@@ -10,8 +10,8 @@ TODO(JaSc):
   x Atlas textures and sprite/quad/line-batching
   x Bitmap text rendering 
     x Worldspace/Screenspace placement
-    - Depth clearing after switching from worldspace -> screenspace -> debugspace
-    - Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
+    x Depth clearing after switching from worldspace -> screenspace -> debugspace
+    x Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
   - Game input + keyboard/mouse-support
   - Gamestate + logic + timing
   - Audio playback

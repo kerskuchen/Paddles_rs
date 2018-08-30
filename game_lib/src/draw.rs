@@ -19,10 +19,16 @@ pub struct Vertex {
     pub color: [f32; 4],
 }
 
-// NOTE: This translates to the depth range [-DEFAULT_ZNEAR, -DEFAULT_ZFAR].
+// NOTE: This translates to the depth range [-ZNEAR, -ZFAR].
 //       For more information see: https://stackoverflow.com/a/36046924
-pub const DEFAULT_ZNEAR: f32 = 0.0;
-pub const DEFAULT_ZFAR: f32 = 1.0;
+pub const DEFAULT_WORLD_ZNEAR: f32 = 0.0;
+pub const DEFAULT_WORLD_ZFAR: f32 = 1.0;
+
+pub const DEFAULT_CANVAS_ZNEAR: f32 = 0.0;
+pub const DEFAULT_CANVAS_ZFAR: f32 = 1.0;
+
+pub const DEFAULT_SCREEN_ZNEAR: f32 = 0.0;
+pub const DEFAULT_SCREEN_ZFAR: f32 = 1.0;
 
 pub const COLOR_RED: Color = Color {
     x: 1.0,
@@ -81,7 +87,7 @@ pub const COLOR_WHITE: Color = Color {
 #[derive(Debug, Clone, Copy)]
 pub enum DrawSpace {
     World,
-    Screen,
+    Canvas,
     Debug,
 }
 
@@ -99,11 +105,11 @@ pub struct DrawContext<'drawcontext> {
 
     debug_lines: LineMesh,
     world_lines: LineMesh,
-    screen_lines: LineMesh,
+    canvas_lines: LineMesh,
 
     debug_polygons: PolygonMesh,
     world_polygons: PolygonMesh,
-    screen_polygons: PolygonMesh,
+    canvas_polygons: PolygonMesh,
 
     debug_text_origin: CanvasPoint,
     pub draw_commands: Vec<DrawCommand<'drawcontext>>,
@@ -211,7 +217,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // NOTE: We cannot call polymesh_by_draw_space here because the borrowchecker won't let us
         let mesh = match draw_space {
             DrawSpace::World => &mut self.world_polygons,
-            DrawSpace::Screen => &mut self.screen_polygons,
+            DrawSpace::Canvas => &mut self.canvas_polygons,
             DrawSpace::Debug => &mut self.debug_polygons,
         };
 
@@ -244,8 +250,8 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         self.debug_polygons.clear();
         self.debug_lines.clear();
 
-        self.screen_polygons.clear();
-        self.screen_lines.clear();
+        self.canvas_polygons.clear();
+        self.canvas_lines.clear();
 
         self.debug_text_origin = Vec2::new(8.0, 0.0);
     }
@@ -270,12 +276,12 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         self.draw_commands.push(DrawCommand::Clear {
             framebuffer: FramebufferTarget::Screen,
             color: Color::from(CLEAR_COLOR_SCREEN),
-            depth: DEFAULT_ZFAR,
+            depth: DEFAULT_SCREEN_ZFAR,
         });
         self.draw_commands.push(DrawCommand::Clear {
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
             color: Color::from(CLEAR_COLOR_CANVAS),
-            depth: DEFAULT_ZFAR,
+            depth: DEFAULT_CANVAS_ZFAR,
         });
 
         // World draw batches
@@ -292,29 +298,28 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             mesh: &self.world_lines,
         });
 
-        let screen_transform = Mat4::ortho_origin_top_left(
+        // Canvas draw batches
+        let canvas_transform = Mat4::ortho_origin_top_left(
             canvas_rect.width(),
             canvas_rect.height(),
-            DEFAULT_ZNEAR,
-            DEFAULT_ZFAR,
+            DEFAULT_CANVAS_ZNEAR,
+            DEFAULT_CANVAS_ZFAR,
         );
         self.draw_commands.push(DrawCommand::ClearDepth {
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            depth: DEFAULT_ZFAR,
+            depth: DEFAULT_CANVAS_ZFAR,
         });
-
-        // Screen draw batches
         self.draw_commands.push(DrawCommand::DrawPolys {
-            transform: screen_transform,
+            transform: canvas_transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh: &self.screen_polygons,
+            mesh: &self.canvas_polygons,
         });
         self.draw_commands.push(DrawCommand::DrawLines {
-            transform: screen_transform,
+            transform: canvas_transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Offscreen(canvas_framebuffer.clone()),
-            mesh: &self.screen_lines,
+            mesh: &self.canvas_lines,
         });
 
         // Blit canvas to screen
@@ -324,20 +329,20 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             source_rect: canvas_rect,
             target_rect: canvas_blit_rect,
         });
-        self.draw_commands.push(DrawCommand::ClearDepth {
-            framebuffer: FramebufferTarget::Screen,
-            depth: DEFAULT_ZFAR,
-        });
 
         // Debug draw batches
+        self.draw_commands.push(DrawCommand::ClearDepth {
+            framebuffer: FramebufferTarget::Screen,
+            depth: DEFAULT_SCREEN_ZFAR,
+        });
         self.draw_commands.push(DrawCommand::DrawPolys {
-            transform: screen_transform,
+            transform: canvas_transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Screen,
             mesh: &self.debug_polygons,
         });
         self.draw_commands.push(DrawCommand::DrawLines {
-            transform: screen_transform,
+            transform: canvas_transform,
             texture_array_info: texture_atlas.clone(),
             framebuffer: FramebufferTarget::Screen,
             mesh: &self.debug_lines,
@@ -397,14 +402,14 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     fn linemesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut LineMesh {
         match draw_space {
             DrawSpace::World => &mut self.world_lines,
-            DrawSpace::Screen => &mut self.screen_lines,
+            DrawSpace::Canvas => &mut self.canvas_lines,
             DrawSpace::Debug => &mut self.debug_lines,
         }
     }
     fn polymesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut PolygonMesh {
         match draw_space {
             DrawSpace::World => &mut self.world_polygons,
-            DrawSpace::Screen => &mut self.screen_polygons,
+            DrawSpace::Canvas => &mut self.canvas_polygons,
             DrawSpace::Debug => &mut self.debug_polygons,
         }
     }

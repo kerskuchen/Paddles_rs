@@ -25,7 +25,7 @@ pub type ResourcePath = String;
 pub use draw::{
     vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, DrawSpace,
     Font, FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
-    TextureArrayInfo, Vertex, VertexIndex, DEFAULT_ZFAR, DEFAULT_ZNEAR,
+    TextureArrayInfo, Vertex, VertexIndex, DEFAULT_WORLD_ZFAR, DEFAULT_WORLD_ZNEAR,
 };
 pub use math::{
     Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2, WorldPoint,
@@ -170,8 +170,8 @@ fn reinitialize_gamestate(gamestate: &mut GameState) {
         gamestate.origin,
         CANVAS_WIDTH,
         CANVAS_HEIGHT,
-        DEFAULT_ZNEAR,
-        DEFAULT_ZFAR,
+        DEFAULT_WORLD_ZNEAR,
+        DEFAULT_WORLD_ZFAR,
     );
 }
 
@@ -374,7 +374,7 @@ pub fn update_and_draw<'gamestate>(
             Line::new(canvas_rect.dim() / 2.0, new_mouse_pos_canvas),
             -0.3,
             Color::new(1.0, 1.0, 0.0, 1.0),
-            DrawSpace::Screen,
+            DrawSpace::Canvas,
         );
 
         // Draw line from canvas center to cursor position in debug screen space
