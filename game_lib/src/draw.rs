@@ -128,6 +128,18 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         mesh.push_line(line, line_uv, sprite.atlas_index, depth, color);
     }
 
+    pub fn draw_arrow(
+        &mut self,
+        pos: Point,
+        dir: Vec2,
+        length: f32,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
+        self.draw_line(Line::new(pos, pos + length * dir), depth, color, draw_space);
+    }
+
     pub fn draw_rect_filled(
         &mut self,
         rect: Rect,
@@ -191,17 +203,6 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         );
     }
 
-    pub fn debug_draw_text(&mut self, text: &str, color: Color) {
-        let draw_offset = self.draw_text(
-            self.debug_text_origin,
-            &(String::from("\n") + text),
-            0.0,
-            color,
-            DrawSpace::Debug,
-        );
-        self.debug_text_origin.y += draw_offset.y;
-    }
-
     pub fn draw_text(
         &mut self,
         origin: Point,
@@ -243,6 +244,23 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         offset
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Debug drawing
+    //
+    pub fn debug_draw_text(&mut self, text: &str, color: Color) {
+        let draw_offset = self.draw_text(
+            self.debug_text_origin,
+            &(String::from("\n") + text),
+            0.0,
+            color,
+            DrawSpace::Debug,
+        );
+        self.debug_text_origin.y += draw_offset.y;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // State
+    //
     pub fn start_drawing(&mut self) {
         self.world_polygons.clear();
         self.world_lines.clear();
@@ -399,6 +417,9 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             .push(DrawCommand::CreateFramebuffer { framebuffer_info });
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Utility
+    //
     fn linemesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut LineMesh {
         match draw_space {
             DrawSpace::World => &mut self.world_lines,

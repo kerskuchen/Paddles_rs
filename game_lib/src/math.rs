@@ -3,6 +3,7 @@ pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
 const EPSILON: f32 = 0.000_001;
+pub use std::f32::consts::PI;
 
 pub type Color = cgmath::Vector4<f32>;
 pub type Mat4 = cgmath::Matrix4<f32>;
@@ -97,6 +98,22 @@ impl Vec2 {
 
     pub fn unit_y() -> Vec2 {
         Vec2 { x: 0.0, y: 1.0 }
+    }
+
+    // Returns a unit vector constructed from an angle in range [-PI, PI]
+    // which represents the angle between the resulting vector and the vector (1,0) in the
+    // 2D cartesian coordinate system.
+    pub fn from_angle(angle: f32) -> Vec2 {
+        // NOTE: The y is negative as a correction for our y-flipped coordinate system
+        Vec2::new(f32::cos(angle), -f32::sin(angle))
+    }
+
+    pub fn normalized(self) -> Vec2 {
+        self / self.magnitude()
+    }
+
+    pub fn magnitude(self) -> f32 {
+        f32::sqrt(self.x * self.x + self.y * self.y)
     }
 
     pub fn distance_squared(a: Vec2, b: Vec2) -> f32 {
