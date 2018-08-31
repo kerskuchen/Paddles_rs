@@ -3,6 +3,7 @@ pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
 const EPSILON: f32 = 0.000_001;
+use std;
 pub use std::f32::consts::PI;
 
 pub type Color = cgmath::Vector4<f32>;
@@ -126,6 +127,11 @@ impl Vec2 {
 
     pub fn dot(a: Vec2, b: Vec2) -> f32 {
         a.x * b.x + a.y * b.y
+    }
+
+    // Returns the z-component of a 3D cross-product of `a` and `b` as if they were 3D-vectors
+    pub fn cross(a: Vec2, b: Vec2) -> f32 {
+        a.x * b.y - a.y * b.x
     }
 }
 
@@ -551,6 +557,10 @@ impl Rect {
     }
 }
 
+//==================================================================================================
+// Line
+//==================================================================================================
+//
 #[derive(Debug, Clone, Copy)]
 pub struct Line {
     pub start: Point,
@@ -561,8 +571,52 @@ impl Line {
     pub fn new(start: Point, end: Point) -> Line {
         Line { start, end }
     }
-}
 
+    pub fn to_intersection_point(&self, t: f32) -> Point {
+        self.start + t * (self.end - self.start)
+    }
+
+    // Checks intersection of a line with multiple lines.
+    // NOTE: We treat colinear line segments as non-intersecting
+    pub fn intersect_with_lines(&self, lines: &[Line]) -> Option<(usize, Point, f32)> {
+        let mut intersection_time = std::f32::MAX;
+        let mut intersection = None;
+
+        for (index, line) in lines.iter().enumerate() {
+            if let Some((point, time)) = Line::intersect_lines(*self, *line) {
+                if time <= intersection_time {
+                    intersection_time = time;
+                    intersection = Some((index, point, time));
+                }
+            }
+        }
+        intersection
+    }
+
+    // Checks whether two line segments intersect. If so returns the intersection point `point`
+    // and the time of intersection `time_a` with `point = a.start + time_a * (a.end - a.start)`.
+    // See https://stackoverflow.com/a/565282 for derivation
+    // with p = self.start, r = self_dir, q = line.start, s = line_dir.
+    // NOTE: We treat colinear line segments as non-intersecting
+    pub fn intersect_lines(a: Line, b: Line) -> Option<(Point, f32)> {
+        let dir_a = a.end - a.start;
+        let dir_b = b.end - b.start;
+        let dir_a_x_dir_b = Vec2::cross(dir_a, dir_b);
+
+        if !is_effectively_zero(dir_a_x_dir_b) {
+            let diff_start_b_a = b.start - a.start;
+            let time_a = Vec2::cross(diff_start_b_a, dir_b) / dir_a_x_dir_b;
+            let time_b = Vec2::cross(diff_start_b_a, dir_a) / dir_a_x_dir_b;
+
+            // Check if t in [0, 1] and u in [0, 1]
+            if time_a >= 0.0 && time_a <= 1.0 && time_b >= 0.0 && time_b <= 1.0 {
+                return Some((a.start + time_a * dir_a, time_a));
+            }
+        }
+
+        return None;
+    }
+}
 //==================================================================================================
 // Camera and coordinate systems
 //==================================================================================================
@@ -779,6 +833,10 @@ impl Camera {
     }
 }
 
+//==================================================================================================
+// Unit tests
+//==================================================================================================
+//
 #[cfg(test)]
 mod tests {
     use super::*;
