@@ -105,7 +105,7 @@ impl Vec2 {
     // which represents the angle between the resulting vector and the vector (1,0) in the
     // 2D cartesian coordinate system.
     pub fn from_angle(angle: f32) -> Vec2 {
-        // NOTE: The y is negative as a correction for our y-flipped coordinate system
+        // NOTE: The y component is negative as a correction for our y-flipped coordinate system
         Vec2::new(f32::cos(angle), -f32::sin(angle))
     }
 
@@ -113,8 +113,21 @@ impl Vec2 {
         self / self.magnitude()
     }
 
+    pub fn perpendicular(self) -> Vec2 {
+        // NOTE: The y component is positive as a correction for our y-flipped coordinate system
+        Vec2::new(self.y, self.x)
+    }
+
     pub fn magnitude(self) -> f32 {
         f32::sqrt(self.x * self.x + self.y * self.y)
+    }
+
+    pub fn slid_on_normal(self, normal: Vec2) -> Vec2 {
+        self - Vec2::dot(self, normal) * normal
+    }
+
+    pub fn reflected_on_normal(self, normal: Vec2) -> Vec2 {
+        self - 2.0 * Vec2::dot(self, normal) * normal
     }
 
     pub fn distance_squared(a: Vec2, b: Vec2) -> f32 {
@@ -463,8 +476,8 @@ impl Rect {
         Rect {
             left: self.left * scale.x,
             right: self.right * scale.x,
-            bottom: self.bottom * scale.y,
             top: self.top * scale.y,
+            bottom: self.bottom * scale.y,
         }
     }
 
@@ -476,6 +489,15 @@ impl Rect {
         self.centered_in_origin()
             .scaled_from_origin(scale)
             .centered_in_position(center)
+    }
+
+    pub fn extended_uniformly_by(self, extension: f32) -> Rect {
+        Rect {
+            left: self.left - extension,
+            right: self.right + extension,
+            top: self.top - extension,
+            bottom: self.bottom + extension,
+        }
     }
 
     /// Returns a version of the rectangle that is centered in a given rect
@@ -567,6 +589,14 @@ pub struct Line {
     pub end: Point,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Intersection {
+    pub point: Point,
+    pub normal: Vec2,
+    pub time: f32,
+    pub segment_index: usize,
+}
+
 impl Line {
     pub fn new(start: Point, end: Point) -> Line {
         Line { start, end }
@@ -576,21 +606,29 @@ impl Line {
         self.start + t * (self.end - self.start)
     }
 
+    pub fn raycast_with_rect(&self, rect: &Rect) -> Option<(Intersection)> {
+        self.raycast_with_segments(&rect.to_border_lines())
+    }
+
+    pub fn raycast_with_rect_from_inside(&self, rect: &Rect) -> Option<(Intersection)> {
+        self.raycast_with_segments(&rect.to_border_lines())
+    }
+
     // Checks intersection of a line with multiple lines.
     // NOTE: We treat colinear line segments as non-intersecting
-    pub fn intersect_with_lines(&self, lines: &[Line]) -> Option<(usize, Point, f32)> {
-        let mut intersection_time = std::f32::MAX;
-        let mut intersection = None;
+    fn raycast_with_segments(&self, lines: &[Line]) -> Option<(Intersection)> {
+        let mut min_intersection_time = std::f32::MAX;
+        let mut result = None;
 
         for (index, line) in lines.iter().enumerate() {
-            if let Some((point, time)) = Line::intersect_lines(*self, *line) {
-                if time <= intersection_time {
-                    intersection_time = time;
-                    intersection = Some((index, point, time));
+            if let Some(intersection) = Line::intersect_lines(*self, *line, index) {
+                if intersection.time <= min_intersection_time {
+                    min_intersection_time = intersection.time;
+                    result = Some(intersection);
                 }
             }
         }
-        intersection
+        result
     }
 
     // Checks whether two line segments intersect. If so returns the intersection point `point`
@@ -598,7 +636,7 @@ impl Line {
     // See https://stackoverflow.com/a/565282 for derivation
     // with p = self.start, r = self_dir, q = line.start, s = line_dir.
     // NOTE: We treat colinear line segments as non-intersecting
-    pub fn intersect_lines(a: Line, b: Line) -> Option<(Point, f32)> {
+    pub fn intersect_lines(a: Line, b: Line, segment_index: usize) -> Option<Intersection> {
         let dir_a = a.end - a.start;
         let dir_b = b.end - b.start;
         let dir_a_x_dir_b = Vec2::cross(dir_a, dir_b);
@@ -610,7 +648,13 @@ impl Line {
 
             // Check if t in [0, 1] and u in [0, 1]
             if time_a >= 0.0 && time_a <= 1.0 && time_b >= 0.0 && time_b <= 1.0 {
-                return Some((a.start + time_a * dir_a, time_a));
+                let intersection = Intersection {
+                    point: a.start + time_a * dir_a,
+                    normal: dir_b.perpendicular().normalized(),
+                    time: time_a,
+                    segment_index,
+                };
+                return Some(intersection);
             }
         }
 
