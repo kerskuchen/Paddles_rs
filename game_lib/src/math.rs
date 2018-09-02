@@ -54,6 +54,14 @@ impl Point {
             clamp(self.y, rect.top, rect.bottom),
         )
     }
+
+    pub fn intersects_circle(self, circle: Circle) -> bool {
+        self.squared_distance_to(circle.center) <= circle.radius * circle.radius
+    }
+
+    pub fn intersects_rect(self, rect: Rect) -> bool {
+        rect.left <= self.x && self.x <= rect.right && rect.top <= self.y && self.y <= rect.bottom
+    }
 }
 
 //==================================================================================================
@@ -130,12 +138,20 @@ impl Vec2 {
         self - 2.0 * Vec2::dot(self, normal) * normal
     }
 
-    pub fn distance_squared(a: Vec2, b: Vec2) -> f32 {
-        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
+    pub fn distance_to(self, other: Vec2) -> f32 {
+        Vec2::distance(self, other)
+    }
+
+    pub fn squared_distance_to(self, other: Vec2) -> f32 {
+        Vec2::squared_distance(self, other)
     }
 
     pub fn distance(a: Vec2, b: Vec2) -> f32 {
         f32::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y))
+    }
+
+    pub fn squared_distance(a: Vec2, b: Vec2) -> f32 {
+        (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y)
     }
 
     pub fn dot(a: Vec2, b: Vec2) -> f32 {
@@ -527,6 +543,17 @@ impl Rect {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // Intersection
+    //
+
+    pub fn intersects_rect(self, other: Rect) -> bool {
+        self.right >= other.left
+            && self.left <= other.right
+            && self.top <= other.bottom
+            && self.bottom >= other.top
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Conversions
     //
     pub fn to_border_lines(&self) -> [Line; 4] {
@@ -669,6 +696,32 @@ impl Line {
         return None;
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct Circle {
+    pub center: Point,
+    pub radius: f32,
+}
+
+impl Circle {
+    pub fn new(center: Point, radius: f32) -> Circle {
+        Circle { center, radius }
+    }
+
+    pub fn intersects_circle(self, other: Circle) -> bool {
+        let radius_sum = self.radius + other.radius;
+        Vec2::squared_distance(self.center, other.center) <= radius_sum * radius_sum
+    }
+
+    pub fn intersects_rect(self, rect: Rect) -> bool {
+        let rect_point_that_is_nearest_to_circle = Point::new(
+            f32::max(rect.left, f32::min(self.center.x, rect.right)),
+            f32::max(rect.bottom, f32::min(self.center.y, rect.top)),
+        );
+        rect_point_that_is_nearest_to_circle.intersects_circle(self)
+    }
+}
+
 //==================================================================================================
 // Camera and coordinate systems
 //==================================================================================================
