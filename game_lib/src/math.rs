@@ -606,21 +606,29 @@ impl Line {
         self.start + t * (self.end - self.start)
     }
 
-    pub fn raycast_with_rect(&self, rect: &Rect) -> Option<(Intersection)> {
-        self.raycast_with_segments(&rect.to_border_lines())
-    }
-
-    pub fn raycast_with_rect_from_inside(&self, rect: &Rect) -> Option<(Intersection)> {
-        self.raycast_with_segments(&rect.to_border_lines())
+    pub fn raycast_with_rect(
+        &self,
+        rect: &Rect,
+        ignored_segment_indices: &[usize],
+    ) -> Option<(Intersection)> {
+        self.raycast_with_segments(&rect.to_border_lines(), ignored_segment_indices)
     }
 
     // Checks intersection of a line with multiple lines.
     // NOTE: We treat colinear line segments as non-intersecting
-    fn raycast_with_segments(&self, lines: &[Line]) -> Option<(Intersection)> {
+    fn raycast_with_segments(
+        &self,
+        lines: &[Line],
+        ignored_segment_indices: &[usize],
+    ) -> Option<(Intersection)> {
         let mut min_intersection_time = std::f32::MAX;
         let mut result = None;
 
         for (index, line) in lines.iter().enumerate() {
+            if ignored_segment_indices.contains(&index) {
+                continue;
+            }
+
             if let Some(intersection) = Line::intersect_lines(*self, *line, index) {
                 if intersection.time <= min_intersection_time {
                     min_intersection_time = intersection.time;

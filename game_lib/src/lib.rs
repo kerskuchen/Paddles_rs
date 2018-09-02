@@ -22,15 +22,8 @@ pub type ResourcePath = String;
 // TODO(JaSc): We need more consistency in names: Is it FrameBuffer or Framebuffer?
 //             Is it GameState or Gamestate? When its GameState why do variables are then called
 //             gamestate and not game_state?
-pub use draw::{
-    vertices_from_rects, Animation, AtlasMeta, ComponentBytes, DrawCommand, DrawContext, DrawSpace,
-    Font, FramebufferInfo, FramebufferTarget, Glyph, LineMesh, Mesh, Pixel, PolygonMesh, Sprite,
-    TextureArrayInfo, Vertex, VertexIndex, DEFAULT_WORLD_ZFAR, DEFAULT_WORLD_ZNEAR,
-};
-pub use math::{
-    Camera, CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, SquareMatrix, Vec2,
-    WorldPoint, PI,
-};
+pub use draw::*;
+pub use math::*;
 
 const UNIT_SIZE: f32 = 16.0;
 const CANVAS_WIDTH: f32 = 480.0;
@@ -43,12 +36,19 @@ const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
 #[derive(Default)]
 pub struct GameState<'gamestate> {
+    game_has_crashed: Option<String>,
+
     screen_dim: Vec2,
 
     drawcontext: DrawContext<'gamestate>,
 
+    time_till_next_beat: f32,
+    beat_box_size: f32,
+    beat_box_growth: f32,
+
     pongi_pos: WorldPoint,
     pongi_vel: Vec2,
+    pongi_readjust_vel_after_dir_change: bool,
 
     mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
@@ -178,9 +178,12 @@ fn reinitialize_gamestate(gs: &mut GameState) {
         DEFAULT_WORLD_ZFAR,
     );
 
-    let angle: f32 = 54.0;
-    gs.pongi_pos = Point::zero();
+    let angle: f32 = 45.0;
+    gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
     gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 15.0 * UNIT_SIZE;
+
+    // gs.pongi_pos = Point::new(-151.48575, -88.0);
+    // gs.pongi_vel = Vec2::new(-4644.807, 6393.034);
 }
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
@@ -299,22 +302,33 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             }
         }
 
-        dc.debug_draw_rect_textured(
-            Rect::from_point_dimension(Point::zero(), Vec2::ones() * UNIT_SIZE),
-            -0.5,
-            Color::new(0.0, 0.0, 0.0, 0.0),
-            DrawSpace::World,
-        );
-
-        const PONGI_RADIUS: f32 = 8.0;
-
-        // Playing field
+        const PONGI_RADIUS: f32 = 7.5;
+        const BPM: f32 = 10.0;
+        const BEAT_LENGTH: f32 = 60.0 / BPM;
         let field_bounds = Rect {
             left: -10.0 * UNIT_SIZE + PONGI_RADIUS,
             right: 10.0 * UNIT_SIZE - PONGI_RADIUS,
             top: -6.0 * UNIT_SIZE + PONGI_RADIUS,
             bottom: 6.0 * UNIT_SIZE - PONGI_RADIUS,
         };
+
+        gs.time_till_next_beat -= input.time_delta;
+        while gs.time_till_next_beat < 0.0 {
+            gs.time_till_next_beat += BEAT_LENGTH;
+        }
+        let beat_value = beat_visualizer_value(gs.time_till_next_beat, BEAT_LENGTH);
+
+        // Draw beat visualizer
+        let beat_box_pos = Vec2::new(canvas_rect.right - 2.0 * UNIT_SIZE, 1.5 * UNIT_SIZE - 1.0);
+        let beat_box_size = UNIT_SIZE * (0.5 + beat_value);
+        dc.draw_rect_filled(
+            Rect::from_point_dimension(beat_box_pos, Vec2::ones() * beat_box_size).centered(),
+            0.0,
+            draw::COLOR_MAGENTA,
+            DrawSpace::Canvas,
+        );
+
+        // Draw playing field
         let field_depth = -0.4;
         let field_border_lines = field_bounds.to_border_lines();
         for (&line, &color) in field_border_lines.iter().zip(
@@ -369,10 +383,56 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             dc.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
         }
 
-        // Draw Pongi ball
+        // Update pongi
+        let mut travel_distance = gs.pongi_vel * input.time_delta;
+        let mut look_ahead_raycast = Line::new(gs.pongi_pos, gs.pongi_pos + travel_distance);
+        let mut ignored_segment_indices = Vec::new();
+        let mut dir_change_happened = false;
 
-        gs.pongi_pos += gs.pongi_vel * input.time_delta;
+        let mut debug_num_loops = 0;
+        while let Some(collision) =
+            look_ahead_raycast.raycast_with_rect(&field_bounds, &ignored_segment_indices)
+        {
+            dir_change_happened = true;
+            ignored_segment_indices.push(collision.segment_index);
+            let distance_till_hit = collision.point - gs.pongi_pos;
+            let remaining_travel_distance = (travel_distance - distance_till_hit).magnitude();
 
+            if gs.game_has_crashed.is_none() {
+                gs.pongi_pos = collision.point;
+                gs.pongi_vel = gs.pongi_vel.reflected_on_normal(collision.normal);
+            }
+
+            let reflection_dir = gs.pongi_vel.normalized();
+            travel_distance = remaining_travel_distance * reflection_dir;
+            look_ahead_raycast = Line::new(gs.pongi_pos, gs.pongi_pos + travel_distance);
+
+            debug_num_loops += 1;
+            if debug_num_loops == 1000 {
+                gs.game_has_crashed = Some(String::from("Collision loop took 1000 iterations"));
+                break;
+            }
+        }
+        if gs.game_has_crashed.is_none() {
+            gs.pongi_pos += travel_distance;
+        }
+
+        if dir_change_happened && gs.game_has_crashed.is_none() {
+            if let Some(vel) = determine_new_pongi_vel(
+                gs.pongi_pos,
+                gs.pongi_vel,
+                BEAT_LENGTH,
+                gs.time_till_next_beat,
+                &field_bounds,
+                &ignored_segment_indices,
+            ) {
+                gs.pongi_vel = vel;
+            } else {
+                gs.game_has_crashed = Some(String::from("Could not find next wall"));
+            }
+        }
+
+        // Draw pongi
         dc.debug_draw_text(&dformat!(gs.pongi_vel), draw::COLOR_WHITE);
         dc.debug_draw_text(&dformat!(gs.pongi_pos), draw::COLOR_WHITE);
         dc.draw_arrow(
@@ -384,27 +444,10 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             DrawSpace::World,
         );
 
-        if gs.pongi_pos.y <= field_bounds.top {
-            gs.pongi_pos.y += field_bounds.top - gs.pongi_pos.y;
-            gs.pongi_vel.y = -gs.pongi_vel.y;
-        }
-        if gs.pongi_pos.y >= field_bounds.bottom {
-            gs.pongi_pos.y -= gs.pongi_pos.y - field_bounds.bottom;
-            gs.pongi_vel.y = -gs.pongi_vel.y;
-        }
-        if gs.pongi_pos.x <= field_bounds.left {
-            gs.pongi_pos.x += field_bounds.left - gs.pongi_pos.x;
-            gs.pongi_vel.x = -gs.pongi_vel.x;
-        }
-        if gs.pongi_pos.x >= field_bounds.right {
-            gs.pongi_pos.x -= gs.pongi_pos.x - field_bounds.right;
-            gs.pongi_vel.x = -gs.pongi_vel.x;
-        }
-
         dc.debug_draw_circle_textured(
             gs.pongi_pos.pixel_snapped(),
             -0.3,
-            Color::new(1.0, 1.0, 1.0, 1.0),
+            Color::new(1.0 - beat_value, 1.0 - beat_value, 1.0, 1.0),
             DrawSpace::World,
         );
 
@@ -426,21 +469,60 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             DrawSpace::World,
         );
 
+        // Frametimes etc.
         let delta = pretty_format_duration_ms(f64::from(input.time_delta));
         let draw = pretty_format_duration_ms(f64::from(input.time_draw));
         let update = pretty_format_duration_ms(f64::from(input.time_update));
         dc.debug_draw_text(
             &format!("delta: {}\ndraw: {}\nupdate: {}\n", delta, draw, update),
-            draw::COLOR_RED,
+            draw::COLOR_WHITE,
         );
-        dc.debug_draw_text("test", draw::COLOR_WHITE);
-        dc.debug_draw_text("test123", draw::COLOR_WHITE);
-        dc.debug_draw_text("\n\ntest-important", draw::COLOR_CYAN);
+
+        // Debug crash message
+        if gs.game_has_crashed.is_some() {
+            dc.debug_draw_text(
+                &format!(
+                    "The game has crashed: {}",
+                    gs.game_has_crashed.clone().unwrap()
+                ),
+                draw::COLOR_RED,
+            );
+        }
     }
     let transform = gs.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
 }
 
+fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
+    let ratio = time_till_next_beat / beat_length;
+    let increasing = (1.0 - ratio).powi(10);
+    let decreasing = ratio.powi(3);
+
+    increasing + decreasing
+}
+
+fn determine_new_pongi_vel(
+    pos: Point,
+    vel: Vec2,
+    beat_length: f32,
+    time_till_next_beat: f32,
+    field_bounds: &Rect,
+    ignored_segment_indices: &[usize],
+) -> Option<Vec2> {
+    let dir = vel.normalized();
+    let ray = Line::new(pos, pos + 30.0 * UNIT_SIZE * vel);
+
+    let intersection = ray.raycast_with_rect(field_bounds, ignored_segment_indices);
+    if intersection.is_none() {
+        return None;
+    }
+
+    let intersection = intersection.unwrap();
+    let distance = (intersection.point - pos).magnitude();
+    let speed = distance / f32::max(time_till_next_beat, 0.0001);
+
+    Some(speed * dir)
+}
 // =================================================================================================
 // TODO(JaSc): Find a better place for the following three functions
 // =================================================================================================
