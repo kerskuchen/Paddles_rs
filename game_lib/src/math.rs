@@ -55,6 +55,12 @@ impl Point {
         )
     }
 
+    pub fn intersects_line(self, line: Line, line_thickness: f32) -> bool {
+        let distance_to_start = self - line.start;
+        let distance_to_line = f32::abs(Vec2::dot(distance_to_start, line.normal()));
+        distance_to_line <= line_thickness
+    }
+
     pub fn intersects_circle(self, circle: Circle) -> bool {
         self.squared_distance_to(circle.center) <= circle.radius * circle.radius
     }
@@ -633,6 +639,18 @@ impl Line {
         self.start + t * (self.end - self.start)
     }
 
+    pub fn length(self) -> f32 {
+        Vec2::distance(self.start, self.end)
+    }
+
+    pub fn squared_length(self) -> f32 {
+        Vec2::squared_distance(self.start, self.end)
+    }
+
+    pub fn normal(self) -> Vec2 {
+        (self.end - self.start).perpendicular().normalized()
+    }
+
     pub fn raycast_with_rect(
         &self,
         rect: &Rect,
@@ -695,6 +713,12 @@ impl Line {
 
         return None;
     }
+
+    pub fn intersects_rect(self, rect: Rect) -> bool {
+        rect.to_border_lines()
+            .iter()
+            .any(|&line| Line::intersect_lines(self, line, 0).is_some())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -706,6 +730,12 @@ pub struct Circle {
 impl Circle {
     pub fn new(center: Point, radius: f32) -> Circle {
         Circle { center, radius }
+    }
+
+    pub fn intersects_line(self, line: Line, line_thickness: f32) -> bool {
+        let distance_to_start = self.center - line.start;
+        let distance_to_line = f32::abs(Vec2::dot(distance_to_start, line.normal()));
+        distance_to_line <= line_thickness + self.radius
     }
 
     pub fn intersects_circle(self, other: Circle) -> bool {
