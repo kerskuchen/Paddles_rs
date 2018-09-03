@@ -37,6 +37,10 @@ pub fn clamp_integer(val: i32, min: i32, max: i32) -> i32 {
     i32::max(min, i32::min(val, max))
 }
 
+pub fn is_value_in_range(val: f32, min: f32, max: f32) -> bool {
+    min <= val && val <= max
+}
+
 /// A typedef for [`Vec2`] mainly used for representing points.
 pub type Point = Vec2;
 
@@ -65,8 +69,21 @@ impl Point {
         distance_to_line <= line_thickness
     }
 
-    pub fn intersects_circle(self, circle: Circle) -> bool {
-        self.squared_distance_to(circle.center) <= circle.radius * circle.radius
+    pub fn intersects_circle(self, circle: Circle, line_thickness: f32) -> bool {
+        let squared_distance_to_center = self.squared_distance_to(circle.center);
+        let circle_radius_min = circle.radius - line_thickness;
+        let circle_radius_max = circle.radius + line_thickness;
+        debug_assert!(circle_radius_min >= 0.0);
+
+        is_value_in_range(
+            squared_distance_to_center,
+            circle_radius_min * circle_radius_min,
+            circle_radius_max * circle_radius_max,
+        )
+    }
+
+    pub fn intersects_sphere(self, sphere: Circle) -> bool {
+        self.squared_distance_to(sphere.center) <= sphere.radius * sphere.radius
     }
 
     pub fn intersects_rect(self, rect: Rect) -> bool {
@@ -566,52 +583,41 @@ impl Rect {
     // ---------------------------------------------------------------------------------------------
     // Conversions
     //
+    pub fn left_segment(&self) -> Line {
+        Line::new(
+            Point::new(self.left, self.bottom),
+            Point::new(self.left, self.top),
+        )
+    }
+
+    pub fn right_segment(&self) -> Line {
+        Line::new(
+            Point::new(self.right, self.top),
+            Point::new(self.right, self.bottom),
+        )
+    }
+
+    pub fn top_segment(&self) -> Line {
+        Line::new(
+            Point::new(self.left, self.top),
+            Point::new(self.right, self.top),
+        )
+    }
+
+    pub fn bottom_segment(&self) -> Line {
+        Line::new(
+            Point::new(self.right, self.bottom),
+            Point::new(self.left, self.bottom),
+        )
+    }
+
+    /// Returns line segments in the following order left, right, top, bottom
     pub fn to_border_lines(&self) -> [Line; 4] {
         [
-            // Top horizontal line
-            Line {
-                start: Point {
-                    x: self.left,
-                    y: self.top,
-                },
-                end: Point {
-                    x: self.right,
-                    y: self.top,
-                },
-            },
-            // Right vertical line
-            Line {
-                start: Point {
-                    x: self.right,
-                    y: self.top,
-                },
-                end: Point {
-                    x: self.right,
-                    y: self.bottom,
-                },
-            },
-            // Bottom horizontal line
-            Line {
-                start: Point {
-                    x: self.right,
-                    y: self.bottom,
-                },
-                end: Point {
-                    x: self.left,
-                    y: self.bottom,
-                },
-            },
-            // Left vertical line
-            Line {
-                start: Point {
-                    x: self.left,
-                    y: self.bottom,
-                },
-                end: Point {
-                    x: self.left,
-                    y: self.top,
-                },
-            },
+            self.left_segment(),
+            self.right_segment(),
+            self.top_segment(),
+            self.bottom_segment(),
         ]
     }
 }
@@ -655,101 +661,190 @@ impl Line {
         (self.end - self.start).perpendicular().normalized()
     }
 
-    pub fn raycast_with_rects(&self, rects: &[Rect]) -> Option<Intersection> {
-        let mut intersections: Vec<Intersection> = rects
-            .iter()
-            .map(|rect| self.raycast_with_rect(rect, &[]))
-            .filter(|maybe_intersection| maybe_intersection.is_some())
-            .map(|intersection| intersection.unwrap())
-            .collect();
-
-        if intersections.len() == 0 {
-            None
-        } else if intersections.len() == 1 {
-            Some(intersections[0])
-        } else {
-            intersections.sort_unstable_by(|a, b| {
-                f32::partial_cmp(&a.time, &b.time).unwrap_or(std::cmp::Ordering::Equal)
-            });
-            Some(intersections[0])
-        }
+    pub fn intersects_line(self, other: Line) -> bool {
+        intersection_line_line(self, other, 0).is_some()
     }
 
-    pub fn raycast_with_rect(
-        &self,
-        rect: &Rect,
-        ignored_segment_indices: &[usize],
-    ) -> Option<Intersection> {
-        self.raycast_with_segments(
-            &rect
-                .extended_uniformly_by(COLLISION_SAFETY_MARGIN)
-                .to_border_lines(),
-            ignored_segment_indices,
-        )
+    pub fn intersects_circle(self, circle: Circle) -> bool {
+        let (intersection_near, intersection_far) = intersections_line_circle(self, circle);
+        intersection_near.is_some() || intersection_far.is_some()
     }
 
-    // Checks intersection of a line with multiple lines.
-    // NOTE: We treat colinear line segments as non-intersecting
-    fn raycast_with_segments(
-        &self,
-        lines: &[Line],
-        ignored_segment_indices: &[usize],
-    ) -> Option<Intersection> {
-        let mut min_intersection_time = std::f32::MAX;
-        let mut result = None;
-
-        for (index, line) in lines.iter().enumerate() {
-            if ignored_segment_indices.contains(&index) {
-                continue;
-            }
-
-            if let Some(intersection) = Line::intersect_lines(*self, *line, index) {
-                if intersection.time <= min_intersection_time {
-                    min_intersection_time = intersection.time;
-                    result = Some(intersection);
-                }
-            }
-        }
-        result
-    }
-
-    // Checks whether two line segments intersect. If so returns the intersection point `point`
-    // and the time of intersection `time_a` with `point = a.start + time_a * (a.end - a.start)`.
-    // See https://stackoverflow.com/a/565282 for derivation
-    // with p = self.start, r = self_dir, q = line.start, s = line_dir.
-    // NOTE: We treat colinear line segments as non-intersecting
-    pub fn intersect_lines(a: Line, b: Line, segment_index: usize) -> Option<Intersection> {
-        let dir_a = a.end - a.start;
-        let dir_b = b.end - b.start;
-        let dir_a_x_dir_b = Vec2::cross(dir_a, dir_b);
-
-        if !is_effectively_zero(dir_a_x_dir_b) {
-            let diff_start_b_a = b.start - a.start;
-            let time_a = Vec2::cross(diff_start_b_a, dir_b) / dir_a_x_dir_b;
-            let time_b = Vec2::cross(diff_start_b_a, dir_a) / dir_a_x_dir_b;
-
-            // Check if t in [0, 1] and u in [0, 1]
-            if time_a >= 0.0 && time_a <= 1.0 && time_b >= 0.0 && time_b <= 1.0 {
-                let intersection = Intersection {
-                    point: a.start + time_a * dir_a,
-                    normal: dir_b.perpendicular().normalized(),
-                    time: time_a,
-                    segment_index,
-                };
-                return Some(intersection);
-            }
-        }
-
-        return None;
+    pub fn intersects_sphere(self, sphere: Circle) -> bool {
+        self.intersects_circle(sphere) || self.start.intersects_sphere(sphere)
     }
 
     pub fn intersects_rect(self, rect: Rect) -> bool {
-        rect.to_border_lines()
-            .iter()
-            .any(|&line| Line::intersect_lines(self, line, 0).is_some())
+        self.start.intersects_rect(rect)
+            || intersections_line_rect(self, rect)
+                .iter()
+                .any(|intersection| intersection.is_some())
     }
 }
 
+//==================================================================================================
+// Raycasts and intersections
+//==================================================================================================
+//
+pub fn raycast_spheres(ray: Line, spheres: &[Circle]) -> Option<Intersection> {
+    let intersections: Vec<_> = spheres
+        .iter()
+        .map(|&spheres| raycast_sphere(ray, spheres))
+        .collect();
+    pick_closest_intersection(&intersections)
+}
+
+pub fn raycast_rects(ray: Line, rects: &[Rect]) -> Option<Intersection> {
+    let intersections: Vec<_> = rects.iter().map(|&rect| raycast_rect(ray, rect)).collect();
+    pick_closest_intersection(&intersections)
+}
+
+pub fn raycast_lines(ray: Line, segments: &[Line]) -> Option<Intersection> {
+    pick_closest_intersection(&intersections_line_lines(ray, segments))
+}
+
+pub fn raycast_sphere(ray: Line, sphere: Circle) -> Option<Intersection> {
+    // NOTE: Raycasts from within a sphere are not allowed
+    debug_assert!(!ray.start.intersects_sphere(sphere));
+
+    let (intersection_near, _intersection_far) = intersections_line_circle(ray, sphere);
+    intersection_near
+}
+
+pub fn raycast_rect(ray: Line, rect: Rect) -> Option<Intersection> {
+    // NOTE: Raycasts from within a rectangle are not allowed
+    debug_assert!(!ray.start.intersects_rect(rect));
+    pick_closest_intersection(&intersections_line_rect(ray, rect))
+}
+
+fn pick_closest_intersection(intersections: &[Option<Intersection>]) -> Option<Intersection> {
+    let mut result = None;
+    let mut closest = std::f32::MAX;
+
+    intersections.iter().for_each(|intersection| {
+        if let Some(intersection) = intersection {
+            if intersection.time <= closest {
+                closest = intersection.time;
+                result = Some(*intersection);
+            }
+        }
+    });
+    result
+}
+
+/// Returns the intersections for segments in the following order left, right, top, bottom
+pub fn intersections_line_rect(line: Line, rect: Rect) -> [Option<Intersection>; 4] {
+    let left = intersection_line_line(line, rect.left_segment(), 0);
+    let right = intersection_line_line(line, rect.right_segment(), 1);
+    let top = intersection_line_line(line, rect.top_segment(), 2);
+    let bottom = intersection_line_line(line, rect.bottom_segment(), 3);
+    [left, right, top, bottom]
+}
+
+pub fn intersections_line_circle(
+    line: Line,
+    circle: Circle,
+) -> (Option<Intersection>, Option<Intersection>) {
+    // We need to find the `t` values for the intersection points
+    // `p = line.start + t * line_dir` such that `||p - circle.center||^2 == circle.radius^2`.
+    // Substituting `p` in the above equation leads to solving the quadratic equation
+    // `at^2 + bt + c = 0`
+    // with
+    // `a = ||line.end - line.start||^2`
+    // `b = 2 dot(line.start - circle.center, line.end - line.start)`
+    // `c = ||line.end - line.start||^2 - circle.radius^2`
+    //
+    // which solution is `t = (-b +- sqrt(b^2 - 4ac)) / 2a`
+    let line_dir = line.end - line.start;
+    let a = Vec2::dot(line_dir, line_dir);
+    let b = 2.0 * Vec2::dot(line.start - circle.center, line_dir);
+    let c = a - circle.radius * circle.radius;
+
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        // No intersection with circle
+        return (None, None);
+    }
+
+    debug_assert!(!is_effectively_zero(a));
+    let discriminant = f32::sqrt(discriminant);
+    let recip_a = f32::recip(2.0 * a);
+    // NOTE: t_min <= t_max because a > 0 and discriminant >= 0
+    let t_min = (-b - discriminant) * recip_a;
+    let t_max = (-b + discriminant) * recip_a;
+
+    let t_min_result = if 0.0 <= t_min && t_min <= 1.0 {
+        let point = line.start + t_min * line_dir;
+        let normal = (point - circle.center).normalized();
+        Some(Intersection {
+            point,
+            normal,
+            time: t_min,
+            segment_index: 0,
+        })
+    } else {
+        None
+    };
+
+    let t_max_result = if 0.0 <= t_max && t_max <= 1.0 {
+        let point = line.start + t_max * line_dir;
+        let normal = (point - circle.center).normalized();
+        Some(Intersection {
+            point,
+            normal,
+            time: t_max,
+            segment_index: 0,
+        })
+    } else {
+        None
+    };
+
+    (t_min_result, t_max_result)
+}
+
+// Checks intersection of a line with multiple lines.
+pub fn intersections_line_lines(line: Line, line_segments: &[Line]) -> Vec<Option<Intersection>> {
+    line_segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| intersection_line_line(line, *segment, index))
+        .collect()
+}
+
+// Checks whether two line segments intersect. If so returns the intersection point `point`
+// and the time of intersection `time_a` with `point = a.start + time_a * (a.end - a.start)`.
+// See https://stackoverflow.com/a/565282 for derivation
+// with p = self.start, r = self_dir, q = line.start, s = line_dir.
+// NOTE: We treat colinear line segments as non-intersecting
+pub fn intersection_line_line(a: Line, b: Line, segment_index: usize) -> Option<Intersection> {
+    let dir_a = a.end - a.start;
+    let dir_b = b.end - b.start;
+    let dir_a_x_dir_b = Vec2::cross(dir_a, dir_b);
+
+    if !is_effectively_zero(dir_a_x_dir_b) {
+        let diff_start_b_a = b.start - a.start;
+        let time_a = Vec2::cross(diff_start_b_a, dir_b) / dir_a_x_dir_b;
+        let time_b = Vec2::cross(diff_start_b_a, dir_a) / dir_a_x_dir_b;
+
+        // Check if t in [0, 1] and u in [0, 1]
+        if time_a >= 0.0 && time_a <= 1.0 && time_b >= 0.0 && time_b <= 1.0 {
+            let intersection = Intersection {
+                point: a.start + time_a * dir_a,
+                normal: dir_b.perpendicular().normalized(),
+                time: time_a,
+                segment_index,
+            };
+            return Some(intersection);
+        }
+    }
+
+    return None;
+}
+
+//==================================================================================================
+// Circle
+//==================================================================================================
+//
 #[derive(Debug, Clone, Copy)]
 pub struct Circle {
     pub center: Point,
@@ -777,7 +872,61 @@ impl Circle {
             f32::max(rect.left, f32::min(self.center.x, rect.right)),
             f32::max(rect.bottom, f32::min(self.center.y, rect.top)),
         );
-        rect_point_that_is_nearest_to_circle.intersects_circle(self)
+        rect_point_that_is_nearest_to_circle.intersects_sphere(self)
+    }
+}
+
+//==================================================================================================
+// Minkowski Sums
+//==================================================================================================
+//
+pub struct MinkowskiSumRectCircle {
+    pub original_rect: Rect,
+    pub original_circle: Circle,
+
+    pub circle_top_left: Circle,
+    pub circle_top_right: Circle,
+    pub circle_bottom_left: Circle,
+    pub circle_bottom_right: Circle,
+    pub line_left: Line,
+    pub line_right: Line,
+    pub line_top: Line,
+    pub line_bottom: Line,
+}
+
+impl MinkowskiSumRectCircle {
+    pub fn new(rect: Rect, circle: Circle) -> MinkowskiSumRectCircle {
+        let new_left = rect.left - circle.radius;
+        let new_right = rect.right + circle.radius;
+        let new_top = rect.top - circle.radius;
+        let new_bottom = rect.bottom + circle.radius;
+
+        MinkowskiSumRectCircle {
+            original_rect: rect,
+            original_circle: circle,
+
+            circle_top_left: Circle::new(Point::new(rect.left, rect.top), circle.radius),
+            circle_top_right: Circle::new(Point::new(rect.right, rect.top), circle.radius),
+            circle_bottom_left: Circle::new(Point::new(rect.left, rect.bottom), circle.radius),
+            circle_bottom_right: Circle::new(Point::new(rect.right, rect.bottom), circle.radius),
+
+            line_left: Line::new(
+                Point::new(new_left, rect.top),
+                Point::new(new_left, rect.bottom),
+            ),
+            line_right: Line::new(
+                Point::new(new_right, rect.top),
+                Point::new(new_right, rect.bottom),
+            ),
+            line_top: Line::new(
+                Point::new(rect.left, new_top),
+                Point::new(rect.right, new_top),
+            ),
+            line_bottom: Line::new(
+                Point::new(rect.left, new_bottom),
+                Point::new(rect.right, new_bottom),
+            ),
+        }
     }
 }
 

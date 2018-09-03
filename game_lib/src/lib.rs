@@ -335,11 +335,15 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             top: field_bounds.bottom,
             bottom: field_bounds.bottom + UNIT_SIZE,
         };
+        let field_border_center =
+            Rect::unit_rect_centered().scaled_from_center(Vec2::ones() * UNIT_SIZE);
+
         for (&field_border, &color) in [
             field_border_left,
             field_border_right,
             field_border_top,
             field_border_bottom,
+            field_border_center,
         ].iter()
             .zip(
                 [
@@ -347,6 +351,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
                     draw::COLOR_GREEN,
                     draw::COLOR_BLUE,
                     draw::COLOR_BLACK,
+                    draw::COLOR_YELLOW,
                 ].iter(),
             ) {
             dc.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
@@ -381,6 +386,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             field_border_right.clone(),
             field_border_top.clone(),
             field_border_bottom.clone(),
+            field_border_center.clone(),
         ];
 
         let mut debug_num_loops = 0;
@@ -396,7 +402,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let mut look_ahead_raycast =
             Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
 
-        while let Some(collision) = look_ahead_raycast.raycast_with_rects(&field_border_rects) {
+        while let Some(collision) = raycast_rects(look_ahead_raycast, &field_border_rects) {
             // Determine a point that is right before the actual collision point
             let distance_till_hit = (collision.point - pos).magnitude();
             let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
@@ -521,7 +527,7 @@ fn determine_new_pongi_vel(
     let dir = vel.normalized();
     let ray = Line::new(pos, pos + 30.0 * UNIT_SIZE * vel);
 
-    let intersection = ray.raycast_with_rects(field_border_rects);
+    let intersection = raycast_rects(ray, field_border_rects);
     if intersection.is_none() {
         return None;
     }
