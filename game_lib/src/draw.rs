@@ -120,6 +120,16 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         Default::default()
     }
 
+    pub fn draw_lines(&mut self, lines: &[Line], depth: f32, color: Color, draw_space: DrawSpace) {
+        // TODO(JaSc): Cache the plain texture uv for reuse
+        let sprite = self.atlas.sprites["images/plain"];
+        let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
+        let mesh = self.linemesh_by_draw_space(draw_space);
+        for line in lines {
+            mesh.push_line(*line, line_uv, sprite.atlas_index, depth, color);
+        }
+    }
+
     pub fn draw_line(&mut self, line: Line, depth: f32, color: Color, draw_space: DrawSpace) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];

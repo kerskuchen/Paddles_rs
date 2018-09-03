@@ -715,8 +715,27 @@ impl Circle {
         );
         rect_point_that_is_nearest_to_circle.intersects_sphere(self)
     }
-}
 
+    pub fn to_lines(self, num_segments: usize) -> Vec<Line> {
+        let points: Vec<Point> = (0..=num_segments)
+            .map(|index| {
+                self.center
+                    + self.radius
+                        * Point::new(
+                            f32::cos(2.0 * (index as f32) * PI / (num_segments as f32)),
+                            f32::sin(2.0 * (index as f32) * PI / (num_segments as f32)),
+                        )
+            })
+            .collect();
+
+        let mut lines = Vec::new();
+        for index in 0..num_segments {
+            let line = Line::new(points[index], points[index + 1]);
+            lines.push(line);
+        }
+        lines
+    }
+}
 //==================================================================================================
 // Minkowski Sums
 //==================================================================================================
@@ -770,6 +789,19 @@ impl MinkowskiRectSphereSum {
                 Point::new(rect.right, new_bottom),
             ),
         }
+    }
+
+    pub fn to_lines(&self) -> Vec<Line> {
+        let mut lines = self.sphere_top_left.to_lines(32);
+        lines.append(&mut self.sphere_top_right.to_lines(32));
+        lines.append(&mut self.sphere_bottom_left.to_lines(32));
+        lines.append(&mut self.sphere_bottom_right.to_lines(32));
+        lines.push(self.line_left);
+        lines.push(self.line_right);
+        lines.push(self.line_top);
+        lines.push(self.line_bottom);
+
+        lines
     }
 }
 

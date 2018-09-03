@@ -180,9 +180,12 @@ fn reinitialize_gamestate(gs: &mut GameState) {
         DEFAULT_WORLD_ZFAR,
     );
 
-    let angle: f32 = 45.0;
-    gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
-    gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 5.0 * UNIT_SIZE;
+    gs.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
+    gs.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
+
+    let angle: f32 = 90.0;
+    // gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
+    //gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 5.0 * UNIT_SIZE;
     gs.game_has_crashed = None;
 
     // gs.pongi_pos = Point::new(-151.48575, -88.0);
@@ -208,7 +211,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         gs.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
     }
 
-    let delta_time = if input.game_paused {
+    let delta_time = if input.game_paused || gs.game_has_crashed.is_some() {
         0.0
     } else {
         let time_factor = if input.fast_time == 0 {
@@ -405,6 +408,11 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             field_border_center.clone(),
         ];
 
+        field_border_rects
+            .iter()
+            .map(|&rect| MinkowskiRectSphereSum::new(rect, PONGI_RADIUS))
+            .for_each(|sum| dc.draw_lines(&sum.to_lines(), 0.0, COLOR_YELLOW, DrawSpace::World));
+
         let mut debug_num_loops = 0;
 
         let speed = gs.pongi_vel.magnitude();
@@ -427,6 +435,16 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
                 break;
             }
 
+            println!("======================");
+            dprintln!(debug_num_loops);
+            dprintln!(pos + gs.pongi_vel * delta_time);
+            dprintln!(collision.point);
+            dprintln!(safe_collision_point_distance);
+            dprintln!(distance_till_hit);
+            dprintln!(travel_distance);
+            dprintln!(pos);
+            dprintln!(vel);
+
             // Move ourselves to the position right before the actual collision point
             pos += safe_collision_point_distance * dir;
             vel = vel.reflected_on_normal(collision.normal);
@@ -438,7 +456,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
             dir_change_happened = true;
             debug_num_loops += 1;
-            if debug_num_loops == 1000 {
+            if debug_num_loops == 10 {
                 gs.game_has_crashed = Some(String::from("Collision loop took 1000 iterations"));
                 break;
             }
@@ -507,6 +525,22 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let update = pretty_format_duration_ms(f64::from(input.time_update));
         dc.debug_draw_text(
             &format!("delta: {}\ndraw: {}\nupdate: {}\n", delta, draw, update),
+            draw::COLOR_WHITE,
+        );
+        dc.debug_draw_text(
+            &format!(
+                "mouse_world: {}x{}",
+                new_mouse_pos_world.pixel_snapped().x,
+                new_mouse_pos_world.pixel_snapped().y
+            ),
+            draw::COLOR_WHITE,
+        );
+        dc.debug_draw_text(
+            &format!(
+                "mouse_canvas: {}x{}\n",
+                new_mouse_pos_canvas.pixel_snapped().x,
+                new_mouse_pos_canvas.pixel_snapped().y
+            ),
             draw::COLOR_WHITE,
         );
 
