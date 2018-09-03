@@ -302,69 +302,38 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             }
         }
 
-        const PONGI_RADIUS: f32 = 7.5;
-        const BPM: f32 = 10.0;
-        const BEAT_LENGTH: f32 = 60.0 / BPM;
-        let field_bounds = Rect {
-            left: -10.0 * UNIT_SIZE + PONGI_RADIUS,
-            right: 10.0 * UNIT_SIZE - PONGI_RADIUS,
-            top: -6.0 * UNIT_SIZE + PONGI_RADIUS,
-            bottom: 6.0 * UNIT_SIZE - PONGI_RADIUS,
-        };
-
-        gs.time_till_next_beat -= input.time_delta;
-        while gs.time_till_next_beat < 0.0 {
-            gs.time_till_next_beat += BEAT_LENGTH;
-        }
-        let beat_value = beat_visualizer_value(gs.time_till_next_beat, BEAT_LENGTH);
-
-        // Draw beat visualizer
-        let beat_box_pos = Vec2::new(canvas_rect.right - 2.0 * UNIT_SIZE, 1.5 * UNIT_SIZE - 1.0);
-        let beat_box_size = UNIT_SIZE * (0.5 + beat_value);
-        dc.draw_rect_filled(
-            Rect::from_point_dimension(beat_box_pos, Vec2::ones() * beat_box_size).centered(),
-            0.0,
-            draw::COLOR_MAGENTA,
-            DrawSpace::Canvas,
-        );
-
         // Draw playing field
+        let field_bounds = Rect {
+            left: -10.0 * UNIT_SIZE,
+            right: 10.0 * UNIT_SIZE,
+            top: -6.0 * UNIT_SIZE,
+            bottom: 6.0 * UNIT_SIZE,
+        };
         let field_depth = -0.4;
-        let field_border_lines = field_bounds.to_border_lines();
-        for (&line, &color) in field_border_lines.iter().zip(
-            [
-                draw::COLOR_YELLOW,
-                draw::COLOR_MAGENTA,
-                draw::COLOR_WHITE,
-                draw::COLOR_CYAN,
-            ].iter(),
-        ) {
-            dc.draw_line(line, field_depth, color, DrawSpace::World);
-        }
 
         let field_border_left = Rect {
-            left: field_bounds.left - UNIT_SIZE - PONGI_RADIUS,
-            right: field_bounds.left - PONGI_RADIUS,
-            top: field_bounds.top - PONGI_RADIUS,
-            bottom: field_bounds.bottom + PONGI_RADIUS,
+            left: field_bounds.left - UNIT_SIZE,
+            right: field_bounds.left,
+            top: field_bounds.top,
+            bottom: field_bounds.bottom,
         };
         let field_border_right = Rect {
-            left: field_bounds.right + PONGI_RADIUS,
-            right: field_bounds.right + UNIT_SIZE + PONGI_RADIUS,
-            top: field_bounds.top - PONGI_RADIUS,
-            bottom: field_bounds.bottom + PONGI_RADIUS,
+            left: field_bounds.right,
+            right: field_bounds.right + UNIT_SIZE,
+            top: field_bounds.top,
+            bottom: field_bounds.bottom,
         };
         let field_border_top = Rect {
-            left: field_bounds.left - UNIT_SIZE - PONGI_RADIUS,
-            right: field_bounds.right + UNIT_SIZE + PONGI_RADIUS,
-            top: field_bounds.top - UNIT_SIZE - PONGI_RADIUS,
-            bottom: field_bounds.top - PONGI_RADIUS,
+            left: field_bounds.left - UNIT_SIZE,
+            right: field_bounds.right + UNIT_SIZE,
+            top: field_bounds.top - UNIT_SIZE,
+            bottom: field_bounds.top,
         };
         let field_border_bottom = Rect {
-            left: field_bounds.left - UNIT_SIZE - PONGI_RADIUS,
-            right: field_bounds.right + UNIT_SIZE + PONGI_RADIUS,
-            top: field_bounds.bottom + PONGI_RADIUS,
-            bottom: field_bounds.bottom + UNIT_SIZE + PONGI_RADIUS,
+            left: field_bounds.left - UNIT_SIZE,
+            right: field_bounds.right + UNIT_SIZE,
+            top: field_bounds.bottom,
+            bottom: field_bounds.bottom + UNIT_SIZE,
         };
         for (&field_border, &color) in [
             field_border_left,
@@ -383,53 +352,94 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             dc.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
         }
 
+        // Update beat
+        const BPM: f32 = 100.0;
+        const BEAT_LENGTH: f32 = 60.0 / BPM;
+
+        gs.time_till_next_beat -= input.time_delta;
+        while gs.time_till_next_beat < 0.0 {
+            gs.time_till_next_beat += BEAT_LENGTH;
+        }
+        let beat_value = beat_visualizer_value(gs.time_till_next_beat, BEAT_LENGTH);
+
+        // Draw beat visualizer
+        let beat_box_pos = Vec2::new(canvas_rect.right - 2.0 * UNIT_SIZE, 1.5 * UNIT_SIZE - 1.0);
+        let beat_box_size = UNIT_SIZE * (0.5 + beat_value);
+        dc.draw_rect_filled(
+            Rect::from_point_dimension(beat_box_pos, Vec2::ones() * beat_box_size).centered(),
+            0.0,
+            draw::COLOR_MAGENTA,
+            DrawSpace::Canvas,
+        );
+
         // Update pongi
-        let mut travel_distance = gs.pongi_vel * input.time_delta;
-        let mut look_ahead_raycast = Line::new(gs.pongi_pos, gs.pongi_pos + travel_distance);
-        let mut ignored_segment_indices = Vec::new();
+        const PONGI_RADIUS: f32 = 7.5;
         let mut dir_change_happened = false;
 
-        let mut debug_num_loops = 0;
-        while let Some(collision) =
-            look_ahead_raycast.raycast_with_rect(&field_bounds, &ignored_segment_indices)
-        {
-            dir_change_happened = true;
-            ignored_segment_indices.push(collision.segment_index);
-            let distance_till_hit = collision.point - gs.pongi_pos;
-            let remaining_travel_distance = (travel_distance - distance_till_hit).magnitude();
+        let field_border_rects = vec![
+            field_border_left.clone(),
+            field_border_right.clone(),
+            field_border_top.clone(),
+            field_border_bottom.clone(),
+        ];
 
-            if gs.game_has_crashed.is_none() {
-                gs.pongi_pos = collision.point;
-                gs.pongi_vel = gs.pongi_vel.reflected_on_normal(collision.normal);
+        let mut debug_num_loops = 0;
+
+        let delta_time = input.time_delta;
+        let speed = gs.pongi_vel.magnitude();
+
+        let mut pos = gs.pongi_pos;
+        let mut vel = gs.pongi_vel;
+        let mut dir = vel.normalized();
+        let mut travel_distance = speed * delta_time;
+
+        let mut look_ahead_raycast =
+            Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
+
+        while let Some(collision) = look_ahead_raycast.raycast_with_rects(&field_border_rects) {
+            // Determine a point that is right before the actual collision point
+            let distance_till_hit = (collision.point - pos).magnitude();
+            let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
+            if travel_distance < safe_collision_point_distance {
+                // We won't hit anything yet in this frame
+                break;
             }
 
-            let reflection_dir = gs.pongi_vel.normalized();
-            travel_distance = remaining_travel_distance * reflection_dir;
-            look_ahead_raycast = Line::new(gs.pongi_pos, gs.pongi_pos + travel_distance);
+            // Move ourselves to the position right before the actual collision point
+            pos += safe_collision_point_distance * dir;
+            vel = vel.reflected_on_normal(collision.normal);
+            dir = vel.normalized();
+            travel_distance -= safe_collision_point_distance;
 
+            look_ahead_raycast =
+                Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
+
+            dir_change_happened = true;
             debug_num_loops += 1;
             if debug_num_loops == 1000 {
                 gs.game_has_crashed = Some(String::from("Collision loop took 1000 iterations"));
                 break;
             }
         }
-        if gs.game_has_crashed.is_none() {
-            gs.pongi_pos += travel_distance;
-        }
+        pos += travel_distance * dir;
 
-        if dir_change_happened && gs.game_has_crashed.is_none() {
-            if let Some(vel) = determine_new_pongi_vel(
-                gs.pongi_pos,
-                gs.pongi_vel,
-                BEAT_LENGTH,
-                gs.time_till_next_beat,
-                &field_bounds,
-                &ignored_segment_indices,
-            ) {
-                gs.pongi_vel = vel;
-            } else {
-                gs.game_has_crashed = Some(String::from("Could not find next wall"));
-            }
+        // if dir_change_happened && gs.game_has_crashed.is_none() {
+        //     if let Some(new_vel) = determine_new_pongi_vel(
+        //         pos,
+        //         vel,
+        //         BEAT_LENGTH,
+        //         gs.time_till_next_beat,
+        //         &field_border_rects,
+        //     ) {
+        //         vel = new_vel;
+        //     } else {
+        //         gs.game_has_crashed = Some(String::from("Could not find next wall"));
+        //     }
+        // }
+
+        if gs.game_has_crashed.is_none() {
+            gs.pongi_pos = pos;
+            gs.pongi_vel = vel;
         }
 
         // Draw pongi
@@ -445,7 +455,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
 
         dc.debug_draw_circle_textured(
-            gs.pongi_pos.pixel_snapped(),
+            gs.pongi_pos,
             -0.3,
             Color::new(1.0 - beat_value, 1.0 - beat_value, 1.0, 1.0),
             DrawSpace::World,
@@ -506,13 +516,12 @@ fn determine_new_pongi_vel(
     vel: Vec2,
     beat_length: f32,
     time_till_next_beat: f32,
-    field_bounds: &Rect,
-    ignored_segment_indices: &[usize],
+    field_border_rects: &[Rect],
 ) -> Option<Vec2> {
     let dir = vel.normalized();
     let ray = Line::new(pos, pos + 30.0 * UNIT_SIZE * vel);
 
-    let intersection = ray.raycast_with_rect(field_bounds, ignored_segment_indices);
+    let intersection = ray.raycast_with_rects(field_border_rects);
     if intersection.is_none() {
         return None;
     }

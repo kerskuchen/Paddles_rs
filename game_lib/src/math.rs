@@ -2,7 +2,9 @@ pub use cgmath;
 pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
-const EPSILON: f32 = 0.000_001;
+pub const EPSILON: f32 = 0.000_001;
+pub const COLLISION_SAFETY_MARGIN: f32 = 0.1;
+
 use std;
 pub use std::f32::consts::PI;
 
@@ -16,6 +18,8 @@ pub fn is_effectively_zero(x: f32) -> bool {
 pub fn is_positive(x: f32) -> bool {
     x > EPSILON
 }
+
+// TODO(JaSc): Decide if we want to pass self of &self into methods of small copyable types
 
 //==================================================================================================
 // Clamping
@@ -651,12 +655,37 @@ impl Line {
         (self.end - self.start).perpendicular().normalized()
     }
 
+    pub fn raycast_with_rects(&self, rects: &[Rect]) -> Option<Intersection> {
+        let mut intersections: Vec<Intersection> = rects
+            .iter()
+            .map(|rect| self.raycast_with_rect(rect, &[]))
+            .filter(|maybe_intersection| maybe_intersection.is_some())
+            .map(|intersection| intersection.unwrap())
+            .collect();
+
+        if intersections.len() == 0 {
+            None
+        } else if intersections.len() == 1 {
+            Some(intersections[0])
+        } else {
+            intersections.sort_unstable_by(|a, b| {
+                f32::partial_cmp(&a.time, &b.time).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Some(intersections[0])
+        }
+    }
+
     pub fn raycast_with_rect(
         &self,
         rect: &Rect,
         ignored_segment_indices: &[usize],
-    ) -> Option<(Intersection)> {
-        self.raycast_with_segments(&rect.to_border_lines(), ignored_segment_indices)
+    ) -> Option<Intersection> {
+        self.raycast_with_segments(
+            &rect
+                .extended_uniformly_by(COLLISION_SAFETY_MARGIN)
+                .to_border_lines(),
+            ignored_segment_indices,
+        )
     }
 
     // Checks intersection of a line with multiple lines.
@@ -665,7 +694,7 @@ impl Line {
         &self,
         lines: &[Line],
         ignored_segment_indices: &[usize],
-    ) -> Option<(Intersection)> {
+    ) -> Option<Intersection> {
         let mut min_intersection_time = std::f32::MAX;
         let mut result = None;
 
