@@ -84,6 +84,8 @@ pub struct GameInput {
     pub do_reinit_drawstate: bool,
     pub hotreload_happened: bool,
     pub direct_screen_drawing: bool,
+    pub game_paused: bool,
+    pub fast_time: i32,
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
@@ -180,7 +182,8 @@ fn reinitialize_gamestate(gs: &mut GameState) {
 
     let angle: f32 = 45.0;
     gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
-    gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 15.0 * UNIT_SIZE;
+    gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 5.0 * UNIT_SIZE;
+    gs.game_has_crashed = None;
 
     // gs.pongi_pos = Point::new(-151.48575, -88.0);
     // gs.pongi_vel = Vec2::new(-4644.807, 6393.034);
@@ -204,6 +207,19 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         };
         gs.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
     }
+
+    let delta_time = if input.game_paused {
+        0.0
+    } else {
+        let time_factor = if input.fast_time == 0 {
+            1.0
+        } else if input.fast_time > 0 {
+            (input.fast_time + 1) as f32
+        } else {
+            1.0 / (((i32::abs(input.fast_time)) + 1) as f32)
+        };
+        input.time_delta * time_factor
+    };
 
     // ---------------------------------------------------------------------------------------------
     // Screen size changed
@@ -361,7 +377,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         const BPM: f32 = 100.0;
         const BEAT_LENGTH: f32 = 60.0 / BPM;
 
-        gs.time_till_next_beat -= input.time_delta;
+        gs.time_till_next_beat -= delta_time;
         while gs.time_till_next_beat < 0.0 {
             gs.time_till_next_beat += BEAT_LENGTH;
         }
@@ -378,7 +394,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
 
         // Update pongi
-        const PONGI_RADIUS: f32 = 7.5;
+        const PONGI_RADIUS: f32 = 8.0;
         let mut dir_change_happened = false;
 
         let field_border_rects = vec![
@@ -391,9 +407,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
         let mut debug_num_loops = 0;
 
-        let delta_time = input.time_delta;
         let speed = gs.pongi_vel.magnitude();
-
         let mut pos = gs.pongi_pos;
         let mut vel = gs.pongi_vel;
         let mut dir = vel.normalized();
@@ -402,7 +416,9 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let mut look_ahead_raycast =
             Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
 
-        while let Some(collision) = raycast_rects(look_ahead_raycast, &field_border_rects) {
+        while let Some(collision) =
+            sweepcast_sphere_against_rects(look_ahead_raycast, PONGI_RADIUS, &field_border_rects)
+        {
             // Determine a point that is right before the actual collision point
             let distance_till_hit = (collision.point - pos).magnitude();
             let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
@@ -494,6 +510,23 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             draw::COLOR_WHITE,
         );
 
+        if input.fast_time != 0 {
+            if input.fast_time > 0 {
+                dc.debug_draw_text(
+                    &format!("Time speedup {}x", input.fast_time + 1),
+                    draw::COLOR_GREEN,
+                );
+            } else if input.fast_time < 0 {
+                dc.debug_draw_text(
+                    &format!("Time slowdown {}x", i32::abs(input.fast_time) + 1),
+                    draw::COLOR_YELLOW,
+                );
+            } else {
+            };
+        }
+        if input.game_paused {
+            dc.debug_draw_text("The game is paused", draw::COLOR_CYAN);
+        }
         // Debug crash message
         if gs.game_has_crashed.is_some() {
             dc.debug_draw_text(

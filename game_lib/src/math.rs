@@ -683,8 +683,148 @@ impl Line {
 }
 
 //==================================================================================================
+// Circle
+//==================================================================================================
+//
+#[derive(Debug, Clone, Copy)]
+pub struct Circle {
+    pub center: Point,
+    pub radius: f32,
+}
+
+impl Circle {
+    pub fn new(center: Point, radius: f32) -> Circle {
+        Circle { center, radius }
+    }
+
+    pub fn intersects_line(self, line: Line, line_thickness: f32) -> bool {
+        let distance_to_start = self.center - line.start;
+        let distance_to_line = f32::abs(Vec2::dot(distance_to_start, line.normal()));
+        distance_to_line <= line_thickness + self.radius
+    }
+
+    pub fn intersects_circle(self, other: Circle) -> bool {
+        let radius_sum = self.radius + other.radius;
+        Vec2::squared_distance(self.center, other.center) <= radius_sum * radius_sum
+    }
+
+    pub fn intersects_rect(self, rect: Rect) -> bool {
+        let rect_point_that_is_nearest_to_circle = Point::new(
+            f32::max(rect.left, f32::min(self.center.x, rect.right)),
+            f32::max(rect.bottom, f32::min(self.center.y, rect.top)),
+        );
+        rect_point_that_is_nearest_to_circle.intersects_sphere(self)
+    }
+}
+
+//==================================================================================================
+// Minkowski Sums
+//==================================================================================================
+//
+pub struct MinkowskiRectSphereSum {
+    pub rect: Rect,
+    pub sphere_radius: f32,
+
+    pub sphere_top_left: Circle,
+    pub sphere_top_right: Circle,
+    pub sphere_bottom_left: Circle,
+    pub sphere_bottom_right: Circle,
+
+    pub line_left: Line,
+    pub line_right: Line,
+    pub line_top: Line,
+    pub line_bottom: Line,
+}
+
+impl MinkowskiRectSphereSum {
+    pub fn new(rect: Rect, sphere_radius: f32) -> MinkowskiRectSphereSum {
+        let new_left = rect.left - sphere_radius;
+        let new_right = rect.right + sphere_radius;
+        let new_top = rect.top - sphere_radius;
+        let new_bottom = rect.bottom + sphere_radius;
+
+        MinkowskiRectSphereSum {
+            rect,
+            sphere_radius,
+
+            sphere_top_left: Circle::new(Point::new(rect.left, rect.top), sphere_radius),
+            sphere_top_right: Circle::new(Point::new(rect.right, rect.top), sphere_radius),
+            sphere_bottom_left: Circle::new(Point::new(rect.left, rect.bottom), sphere_radius),
+            sphere_bottom_right: Circle::new(Point::new(rect.right, rect.bottom), sphere_radius),
+
+            // TODO(JaSc): Check if these need to be counter-clockwise
+            line_left: Line::new(
+                Point::new(new_left, rect.top),
+                Point::new(new_left, rect.bottom),
+            ),
+            line_right: Line::new(
+                Point::new(new_right, rect.top),
+                Point::new(new_right, rect.bottom),
+            ),
+            line_top: Line::new(
+                Point::new(rect.left, new_top),
+                Point::new(rect.right, new_top),
+            ),
+            line_bottom: Line::new(
+                Point::new(rect.left, new_bottom),
+                Point::new(rect.right, new_bottom),
+            ),
+        }
+    }
+}
+
+//==================================================================================================
 // Raycasts and intersections
 //==================================================================================================
+//
+
+// ---------------------------------------------------------------------------------------------
+// Sweepcasting elementary shapes
+//
+pub fn sweepcast_sphere_against_rects(
+    ray: Line,
+    radius: f32,
+    rects: &[Rect],
+) -> Option<Intersection> {
+    let intersections: Vec<_> = rects
+        .iter()
+        .map(|&rect| MinkowskiRectSphereSum::new(rect, radius))
+        .map(|sum| raycast_minkowski_rect_sphere_sum(ray, &sum))
+        .collect();
+
+    pick_closest_intersection(&intersections)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Raycasting Minkowski sum shapes
+//
+
+// TODO(JaSc): Allow a way of identifying which part of the original shape we hit
+pub fn raycast_minkowski_rect_sphere_sum(
+    ray: Line,
+    sum: &MinkowskiRectSphereSum,
+) -> Option<Intersection> {
+    let intersections = [
+        raycast_spheres(
+            ray,
+            &[
+                sum.sphere_top_left,
+                sum.sphere_top_right,
+                sum.sphere_bottom_left,
+                sum.sphere_bottom_right,
+            ],
+        ),
+        raycast_lines(
+            ray,
+            &[sum.line_left, sum.line_right, sum.line_top, sum.line_bottom],
+        ),
+    ];
+
+    pick_closest_intersection(&intersections)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Raycasting elementary shapes
 //
 pub fn raycast_spheres(ray: Line, spheres: &[Circle]) -> Option<Intersection> {
     let intersections: Vec<_> = spheres
@@ -731,6 +871,10 @@ fn pick_closest_intersection(intersections: &[Option<Intersection>]) -> Option<I
     });
     result
 }
+
+// ---------------------------------------------------------------------------------------------
+// Elementary shape intersection
+//
 
 /// Returns the intersections for segments in the following order left, right, top, bottom
 pub fn intersections_line_rect(line: Line, rect: Rect) -> [Option<Intersection>; 4] {
@@ -839,95 +983,6 @@ pub fn intersection_line_line(a: Line, b: Line, segment_index: usize) -> Option<
     }
 
     return None;
-}
-
-//==================================================================================================
-// Circle
-//==================================================================================================
-//
-#[derive(Debug, Clone, Copy)]
-pub struct Circle {
-    pub center: Point,
-    pub radius: f32,
-}
-
-impl Circle {
-    pub fn new(center: Point, radius: f32) -> Circle {
-        Circle { center, radius }
-    }
-
-    pub fn intersects_line(self, line: Line, line_thickness: f32) -> bool {
-        let distance_to_start = self.center - line.start;
-        let distance_to_line = f32::abs(Vec2::dot(distance_to_start, line.normal()));
-        distance_to_line <= line_thickness + self.radius
-    }
-
-    pub fn intersects_circle(self, other: Circle) -> bool {
-        let radius_sum = self.radius + other.radius;
-        Vec2::squared_distance(self.center, other.center) <= radius_sum * radius_sum
-    }
-
-    pub fn intersects_rect(self, rect: Rect) -> bool {
-        let rect_point_that_is_nearest_to_circle = Point::new(
-            f32::max(rect.left, f32::min(self.center.x, rect.right)),
-            f32::max(rect.bottom, f32::min(self.center.y, rect.top)),
-        );
-        rect_point_that_is_nearest_to_circle.intersects_sphere(self)
-    }
-}
-
-//==================================================================================================
-// Minkowski Sums
-//==================================================================================================
-//
-pub struct MinkowskiSumRectCircle {
-    pub original_rect: Rect,
-    pub original_circle: Circle,
-
-    pub circle_top_left: Circle,
-    pub circle_top_right: Circle,
-    pub circle_bottom_left: Circle,
-    pub circle_bottom_right: Circle,
-    pub line_left: Line,
-    pub line_right: Line,
-    pub line_top: Line,
-    pub line_bottom: Line,
-}
-
-impl MinkowskiSumRectCircle {
-    pub fn new(rect: Rect, circle: Circle) -> MinkowskiSumRectCircle {
-        let new_left = rect.left - circle.radius;
-        let new_right = rect.right + circle.radius;
-        let new_top = rect.top - circle.radius;
-        let new_bottom = rect.bottom + circle.radius;
-
-        MinkowskiSumRectCircle {
-            original_rect: rect,
-            original_circle: circle,
-
-            circle_top_left: Circle::new(Point::new(rect.left, rect.top), circle.radius),
-            circle_top_right: Circle::new(Point::new(rect.right, rect.top), circle.radius),
-            circle_bottom_left: Circle::new(Point::new(rect.left, rect.bottom), circle.radius),
-            circle_bottom_right: Circle::new(Point::new(rect.right, rect.bottom), circle.radius),
-
-            line_left: Line::new(
-                Point::new(new_left, rect.top),
-                Point::new(new_left, rect.bottom),
-            ),
-            line_right: Line::new(
-                Point::new(new_right, rect.top),
-                Point::new(new_right, rect.bottom),
-            ),
-            line_top: Line::new(
-                Point::new(rect.left, new_top),
-                Point::new(rect.right, new_top),
-            ),
-            line_bottom: Line::new(
-                Point::new(rect.left, new_bottom),
-                Point::new(rect.right, new_bottom),
-            ),
-        }
-    }
 }
 
 //==================================================================================================

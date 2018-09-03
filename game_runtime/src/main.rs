@@ -236,6 +236,9 @@ fn main() -> Result<(), Error> {
                                 input.direct_screen_drawing = !input.direct_screen_drawing;
                                 input.do_reinit_drawstate = true;
                             }
+                            Add => input.fast_time += 1,
+                            Subtract => input.fast_time -= 1,
+                            Space => input.game_paused = !input.game_paused,
                             _ => (),
                         }
                     }
