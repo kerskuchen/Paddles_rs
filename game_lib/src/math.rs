@@ -4,6 +4,7 @@ pub use cgmath::prelude::*;
 
 pub const EPSILON: f32 = 0.000_001;
 
+use std;
 pub use std::f32::consts::PI;
 
 pub type Color = cgmath::Vector4<f32>;
@@ -18,6 +19,10 @@ pub fn is_positive(x: f32) -> bool {
 }
 
 // TODO(JaSc): Decide if we want to pass self of &self into methods of small copyable types
+
+pub fn compare_floats(a: f32, b: f32) -> std::cmp::Ordering {
+    a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal)
+}
 
 //==================================================================================================
 // Rounding
@@ -202,6 +207,18 @@ impl Vec2 {
     // Returns the z-component of a 3D cross-product of `a` and `b` as if they were 3D-vectors
     pub fn cross(a: Vec2, b: Vec2) -> f32 {
         a.x * b.y - a.y * b.x
+    }
+
+    // For a given vector this returns a rotated vector by given angle.
+    // Equivalent to multiplying this vector with a rotation matrix.
+    pub fn rotated(self, angle: f32) -> Vec2 {
+        // NOTE: We to pass the negative angle into the sin_cos function as a correction for
+        //       our y-flipped coordinate system
+        let (sin_angle, cos_angle) = f32::sin_cos(-angle);
+        Vec2::new(
+            self.x * cos_angle - self.y * sin_angle,
+            self.x * sin_angle + self.y * cos_angle,
+        )
     }
 }
 

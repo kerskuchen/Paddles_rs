@@ -187,10 +187,7 @@ impl RectSphereSum {
 //
 
 fn compare_collisions(a: &CollisionInfo, b: &CollisionInfo) -> std::cmp::Ordering {
-    a.intersection
-        .time
-        .partial_cmp(&b.intersection.time)
-        .unwrap_or(std::cmp::Ordering::Equal)
+    compare_floats(a.intersection.time, b.intersection.time)
 }
 
 // TODO(JaSc): Allow a way of identifying which part of the original shape we hit

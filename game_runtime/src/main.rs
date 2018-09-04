@@ -161,6 +161,7 @@ fn main() -> Result<(), Error> {
             glutin::Api::OpenGl,
             (GL_VERSION_MAJOR, GL_VERSION_MINOR),
         ))
+        // TODO(JaSc): Find out why CPU load is so high even though we use vsync
         .with_vsync(true);
 
     let (
