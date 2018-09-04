@@ -192,6 +192,7 @@ fn main() -> Result<(), Error> {
     input.do_reinit_gamestate = true;
     input.do_reinit_drawstate = true;
     input.hotreload_happened = true;
+    input.game_paused = true;
 
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     let mut gamestate = GameState::new();

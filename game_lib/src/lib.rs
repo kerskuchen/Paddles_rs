@@ -14,6 +14,7 @@ extern crate bincode;
 
 #[macro_use]
 pub mod utility;
+pub mod collision;
 pub mod draw;
 pub mod math;
 
@@ -22,6 +23,7 @@ pub type ResourcePath = String;
 // TODO(JaSc): We need more consistency in names: Is it FrameBuffer or Framebuffer?
 //             Is it GameState or Gamestate? When its GameState why do variables are then called
 //             gamestate and not game_state?
+pub use collision::*;
 pub use draw::*;
 pub use math::*;
 
@@ -400,6 +402,13 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         const PONGI_RADIUS: f32 = 8.0;
         let mut dir_change_happened = false;
 
+        let mut collision_mesh = CollisionMesh::new("play_field");
+        collision_mesh.add_rect("left_wall", field_border_left);
+        collision_mesh.add_rect("right_wall", field_border_right);
+        collision_mesh.add_rect("top_wall", field_border_top);
+        collision_mesh.add_rect("bottom_wall", field_border_bottom);
+        collision_mesh.add_rect("center_wall", field_border_center);
+
         let field_border_rects = vec![
             field_border_left.clone(),
             field_border_right.clone(),
@@ -407,11 +416,6 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             field_border_bottom.clone(),
             field_border_center.clone(),
         ];
-
-        field_border_rects
-            .iter()
-            .map(|&rect| MinkowskiRectSphereSum::new(rect, PONGI_RADIUS))
-            .for_each(|sum| dc.draw_lines(&sum.to_lines(), 0.0, COLOR_YELLOW, DrawSpace::World));
 
         let mut debug_num_loops = 0;
 
@@ -424,11 +428,25 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let mut look_ahead_raycast =
             Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
 
+        // Debug draw sphere sweeping
+        collision_mesh
+            .shapes
+            .iter()
+            .map(|rect| RectSphereSum::new(rect, PONGI_RADIUS))
+            .for_each(|sum| dc.draw_lines(&sum.to_lines(), 0.0, COLOR_YELLOW, DrawSpace::World));
+
+        if let Some(collision) = collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS) {
+            println!(
+                "Intersection with '{}' on shape '{:?}' on segment '{:?}':\n {:?}",
+                collision_mesh.name, collision.shape, collision.segment, collision.intersection
+            );
+        }
+
         while let Some(collision) =
-            sweepcast_sphere_against_rects(look_ahead_raycast, PONGI_RADIUS, &field_border_rects)
+            collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS)
         {
             // Determine a point that is right before the actual collision point
-            let distance_till_hit = (collision.point - pos).magnitude();
+            let distance_till_hit = (collision.intersection.point - pos).magnitude();
             let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
             if travel_distance < safe_collision_point_distance {
                 // We won't hit anything yet in this frame
@@ -437,8 +455,9 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
             println!("======================");
             dprintln!(debug_num_loops);
+            dprintln!(look_ahead_raycast);
             dprintln!(pos + gs.pongi_vel * delta_time);
-            dprintln!(collision.point);
+            dprintln!(collision.intersection.point);
             dprintln!(safe_collision_point_distance);
             dprintln!(distance_till_hit);
             dprintln!(travel_distance);
@@ -447,7 +466,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
             // Move ourselves to the position right before the actual collision point
             pos += safe_collision_point_distance * dir;
-            vel = vel.reflected_on_normal(collision.normal);
+            vel = vel.reflected_on_normal(collision.intersection.normal);
             dir = vel.normalized();
             travel_distance -= safe_collision_point_distance;
 
@@ -456,8 +475,11 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
             dir_change_happened = true;
             debug_num_loops += 1;
-            if debug_num_loops == 10 {
-                gs.game_has_crashed = Some(String::from("Collision loop took 1000 iterations"));
+            if debug_num_loops == 1 {
+                gs.game_has_crashed = Some(format!(
+                    "Collision loop took {} iterations",
+                    debug_num_loops
+                ));
                 break;
             }
         }
@@ -584,27 +606,28 @@ fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
     increasing + decreasing
 }
 
-fn determine_new_pongi_vel(
-    pos: Point,
-    vel: Vec2,
-    beat_length: f32,
-    time_till_next_beat: f32,
-    field_border_rects: &[Rect],
-) -> Option<Vec2> {
-    let dir = vel.normalized();
-    let ray = Line::new(pos, pos + 30.0 * UNIT_SIZE * vel);
+// fn determine_new_pongi_vel(
+//     pos: Point,
+//     vel: Vec2,
+//     beat_length: f32,
+//     time_till_next_beat: f32,
+//     field_border_rects: &[Rect],
+// ) -> Option<Vec2> {
+//     let dir = vel.normalized();
+//     let ray = Line::new(pos, pos + 30.0 * UNIT_SIZE * vel);
+//
+//     let intersection = raycast_rects(ray, field_border_rects);
+//     if intersection.is_none() {
+//         return None;
+//     }
+//
+//     let intersection = intersection.unwrap();
+//     let distance = (intersection.point - pos).magnitude();
+//     let speed = distance / f32::max(time_till_next_beat, 0.0001);
+//
+//     Some(speed * dir)
+// }
 
-    let intersection = raycast_rects(ray, field_border_rects);
-    if intersection.is_none() {
-        return None;
-    }
-
-    let intersection = intersection.unwrap();
-    let distance = (intersection.point - pos).magnitude();
-    let speed = distance / f32::max(time_till_next_beat, 0.0001);
-
-    Some(speed * dir)
-}
 // =================================================================================================
 // TODO(JaSc): Find a better place for the following three functions
 // =================================================================================================

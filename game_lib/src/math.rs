@@ -632,14 +632,6 @@ pub struct Line {
     pub end: Point,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Intersection {
-    pub point: Point,
-    pub normal: Vec2,
-    pub time: f32,
-    pub segment_index: usize,
-}
-
 impl Line {
     pub fn new(start: Point, end: Point) -> Line {
         Line { start, end }
@@ -662,7 +654,7 @@ impl Line {
     }
 
     pub fn intersects_line(self, other: Line) -> bool {
-        intersection_line_line(self, other, 0).is_some()
+        intersection_line_line(self, other).is_some()
     }
 
     pub fn intersects_circle(self, circle: Circle) -> bool {
@@ -719,13 +711,12 @@ impl Circle {
     pub fn to_lines(self, num_segments: usize) -> Vec<Line> {
         let points: Vec<Point> = (0..=num_segments)
             .map(|index| {
-                self.center
-                    + self.radius
-                        * Point::new(
-                            f32::cos(2.0 * (index as f32) * PI / (num_segments as f32)),
-                            f32::sin(2.0 * (index as f32) * PI / (num_segments as f32)),
-                        )
+                Point::new(
+                    f32::cos(2.0 * (index as f32) * PI / (num_segments as f32)),
+                    f32::sin(2.0 * (index as f32) * PI / (num_segments as f32)),
+                )
             })
+            .map(|point| self.center + self.radius * point)
             .collect();
 
         let mut lines = Vec::new();
@@ -736,184 +727,24 @@ impl Circle {
         lines
     }
 }
-//==================================================================================================
-// Minkowski Sums
-//==================================================================================================
-//
-pub struct MinkowskiRectSphereSum {
-    pub rect: Rect,
-    pub sphere_radius: f32,
-
-    pub sphere_top_left: Circle,
-    pub sphere_top_right: Circle,
-    pub sphere_bottom_left: Circle,
-    pub sphere_bottom_right: Circle,
-
-    pub line_left: Line,
-    pub line_right: Line,
-    pub line_top: Line,
-    pub line_bottom: Line,
-}
-
-impl MinkowskiRectSphereSum {
-    pub fn new(rect: Rect, sphere_radius: f32) -> MinkowskiRectSphereSum {
-        let new_left = rect.left - sphere_radius;
-        let new_right = rect.right + sphere_radius;
-        let new_top = rect.top - sphere_radius;
-        let new_bottom = rect.bottom + sphere_radius;
-
-        MinkowskiRectSphereSum {
-            rect,
-            sphere_radius,
-
-            sphere_top_left: Circle::new(Point::new(rect.left, rect.top), sphere_radius),
-            sphere_top_right: Circle::new(Point::new(rect.right, rect.top), sphere_radius),
-            sphere_bottom_left: Circle::new(Point::new(rect.left, rect.bottom), sphere_radius),
-            sphere_bottom_right: Circle::new(Point::new(rect.right, rect.bottom), sphere_radius),
-
-            // TODO(JaSc): Check if these need to be counter-clockwise
-            line_left: Line::new(
-                Point::new(new_left, rect.top),
-                Point::new(new_left, rect.bottom),
-            ),
-            line_right: Line::new(
-                Point::new(new_right, rect.top),
-                Point::new(new_right, rect.bottom),
-            ),
-            line_top: Line::new(
-                Point::new(rect.left, new_top),
-                Point::new(rect.right, new_top),
-            ),
-            line_bottom: Line::new(
-                Point::new(rect.left, new_bottom),
-                Point::new(rect.right, new_bottom),
-            ),
-        }
-    }
-
-    pub fn to_lines(&self) -> Vec<Line> {
-        let mut lines = self.sphere_top_left.to_lines(32);
-        lines.append(&mut self.sphere_top_right.to_lines(32));
-        lines.append(&mut self.sphere_bottom_left.to_lines(32));
-        lines.append(&mut self.sphere_bottom_right.to_lines(32));
-        lines.push(self.line_left);
-        lines.push(self.line_right);
-        lines.push(self.line_top);
-        lines.push(self.line_bottom);
-
-        lines
-    }
-}
-
-//==================================================================================================
-// Raycasts and intersections
-//==================================================================================================
-//
-
-// ---------------------------------------------------------------------------------------------
-// Sweepcasting elementary shapes
-//
-pub fn sweepcast_sphere_against_rects(
-    ray: Line,
-    radius: f32,
-    rects: &[Rect],
-) -> Option<Intersection> {
-    let intersections: Vec<_> = rects
-        .iter()
-        .map(|&rect| MinkowskiRectSphereSum::new(rect, radius))
-        .map(|sum| raycast_minkowski_rect_sphere_sum(ray, &sum))
-        .collect();
-
-    pick_closest_intersection(&intersections)
-}
-
-// ---------------------------------------------------------------------------------------------
-// Raycasting Minkowski sum shapes
-//
-
-// TODO(JaSc): Allow a way of identifying which part of the original shape we hit
-pub fn raycast_minkowski_rect_sphere_sum(
-    ray: Line,
-    sum: &MinkowskiRectSphereSum,
-) -> Option<Intersection> {
-    let intersections = [
-        raycast_spheres(
-            ray,
-            &[
-                sum.sphere_top_left,
-                sum.sphere_top_right,
-                sum.sphere_bottom_left,
-                sum.sphere_bottom_right,
-            ],
-        ),
-        raycast_lines(
-            ray,
-            &[sum.line_left, sum.line_right, sum.line_top, sum.line_bottom],
-        ),
-    ];
-
-    pick_closest_intersection(&intersections)
-}
-
-// ---------------------------------------------------------------------------------------------
-// Raycasting elementary shapes
-//
-pub fn raycast_spheres(ray: Line, spheres: &[Circle]) -> Option<Intersection> {
-    let intersections: Vec<_> = spheres
-        .iter()
-        .map(|&spheres| raycast_sphere(ray, spheres))
-        .collect();
-    pick_closest_intersection(&intersections)
-}
-
-pub fn raycast_rects(ray: Line, rects: &[Rect]) -> Option<Intersection> {
-    let intersections: Vec<_> = rects.iter().map(|&rect| raycast_rect(ray, rect)).collect();
-    pick_closest_intersection(&intersections)
-}
-
-pub fn raycast_lines(ray: Line, segments: &[Line]) -> Option<Intersection> {
-    pick_closest_intersection(&intersections_line_lines(ray, segments))
-}
-
-pub fn raycast_sphere(ray: Line, sphere: Circle) -> Option<Intersection> {
-    // NOTE: Raycasts from within a sphere are not allowed
-    debug_assert!(!ray.start.intersects_sphere(sphere));
-
-    let (intersection_near, _intersection_far) = intersections_line_circle(ray, sphere);
-    intersection_near
-}
-
-pub fn raycast_rect(ray: Line, rect: Rect) -> Option<Intersection> {
-    // NOTE: Raycasts from within a rectangle are not allowed
-    debug_assert!(!ray.start.intersects_rect(rect));
-    pick_closest_intersection(&intersections_line_rect(ray, rect))
-}
-
-fn pick_closest_intersection(intersections: &[Option<Intersection>]) -> Option<Intersection> {
-    let mut result = None;
-    let mut closest = std::f32::MAX;
-
-    intersections.iter().for_each(|intersection| {
-        if let Some(intersection) = intersection {
-            if intersection.time <= closest {
-                closest = intersection.time;
-                result = Some(*intersection);
-            }
-        }
-    });
-    result
-}
 
 // ---------------------------------------------------------------------------------------------
 // Elementary shape intersection
 //
 
+#[derive(Debug, Clone, Copy)]
+pub struct Intersection {
+    pub point: Point,
+    pub normal: Vec2,
+    pub time: f32,
+}
+
 /// Returns the intersections for segments in the following order left, right, top, bottom
 pub fn intersections_line_rect(line: Line, rect: Rect) -> [Option<Intersection>; 4] {
-    let left = intersection_line_line(line, rect.left_segment(), 0);
-    let right = intersection_line_line(line, rect.right_segment(), 1);
-    let top = intersection_line_line(line, rect.top_segment(), 2);
-    let bottom = intersection_line_line(line, rect.bottom_segment(), 3);
+    let left = intersection_line_line(line, rect.left_segment());
+    let right = intersection_line_line(line, rect.right_segment());
+    let top = intersection_line_line(line, rect.top_segment());
+    let bottom = intersection_line_line(line, rect.bottom_segment());
     [left, right, top, bottom]
 }
 
@@ -956,7 +787,6 @@ pub fn intersections_line_circle(
             point,
             normal,
             time: t_min,
-            segment_index: 0,
         })
     } else {
         None
@@ -969,7 +799,6 @@ pub fn intersections_line_circle(
             point,
             normal,
             time: t_max,
-            segment_index: 0,
         })
     } else {
         None
@@ -982,8 +811,7 @@ pub fn intersections_line_circle(
 pub fn intersections_line_lines(line: Line, line_segments: &[Line]) -> Vec<Option<Intersection>> {
     line_segments
         .iter()
-        .enumerate()
-        .map(|(index, segment)| intersection_line_line(line, *segment, index))
+        .map(|segment| intersection_line_line(line, *segment))
         .collect()
 }
 
@@ -992,7 +820,7 @@ pub fn intersections_line_lines(line: Line, line_segments: &[Line]) -> Vec<Optio
 // See https://stackoverflow.com/a/565282 for derivation
 // with p = self.start, r = self_dir, q = line.start, s = line_dir.
 // NOTE: We treat colinear line segments as non-intersecting
-pub fn intersection_line_line(a: Line, b: Line, segment_index: usize) -> Option<Intersection> {
+pub fn intersection_line_line(a: Line, b: Line) -> Option<Intersection> {
     let dir_a = a.end - a.start;
     let dir_b = b.end - b.start;
     let dir_a_x_dir_b = Vec2::cross(dir_a, dir_b);
@@ -1008,7 +836,6 @@ pub fn intersection_line_line(a: Line, b: Line, segment_index: usize) -> Option<
                 point: a.start + time_a * dir_a,
                 normal: dir_b.perpendicular().normalized(),
                 time: time_a,
-                segment_index,
             };
             return Some(intersection);
         }
@@ -1016,7 +843,6 @@ pub fn intersection_line_line(a: Line, b: Line, segment_index: usize) -> Option<
 
     return None;
 }
-
 //==================================================================================================
 // Camera and coordinate systems
 //==================================================================================================
