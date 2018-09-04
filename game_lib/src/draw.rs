@@ -147,7 +147,24 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         color: Color,
         draw_space: DrawSpace,
     ) {
-        self.draw_line(Line::new(pos, pos + length * dir), depth, color, draw_space);
+        let end_point = pos + length * dir;
+        let head_dimensions = length * 0.1;
+        let head_left_part = (dir.perpendicular() - 2.0 * dir) * head_dimensions;
+        let head_right_part = (-dir.perpendicular() - 2.0 * dir) * head_dimensions;
+
+        self.draw_line(Line::new(pos, end_point), depth, color, draw_space);
+        self.draw_line(
+            Line::new(end_point, end_point + head_left_part),
+            depth,
+            color,
+            draw_space,
+        );
+        self.draw_line(
+            Line::new(end_point, end_point + head_right_part),
+            depth,
+            color,
+            draw_space,
+        );
     }
 
     pub fn draw_rect_filled(

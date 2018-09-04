@@ -22,6 +22,8 @@ TODO(JaSc): (Bigger things for vacations)
   x Throw out generalized coordinate system and replace by simple pixel-based coordinate system
   x Make framebuffer handling client side. For this we need to create some new draw commands and 
     restructure the platform layer a little
+  - Make it possible for debug overlays like intersections to draw to world-space as well as 
+    canvas-space to make i.e. arrow-heads uniformly sized regardless of arrow-size/zoom-level
   - Add system commands from client to platform that can change settings like vsync without 
     restart. This requires some major codeflow refactoring but would allow us to better modularize
     the platform layer. We also would need to re-upload all textures to the graphics context.
