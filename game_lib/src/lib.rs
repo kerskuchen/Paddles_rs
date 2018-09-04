@@ -182,12 +182,12 @@ fn reinitialize_gamestate(gs: &mut GameState) {
         DEFAULT_WORLD_ZFAR,
     );
 
-    gs.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
-    gs.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
+    //gs.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
+    //gs.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
 
-    let angle: f32 = 90.0;
-    // gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
-    //gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 5.0 * UNIT_SIZE;
+    let angle: f32 = 40.0;
+    gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
+    gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 15.0 * UNIT_SIZE;
     gs.game_has_crashed = None;
 
     // gs.pongi_pos = Point::new(-151.48575, -88.0);
@@ -296,6 +296,12 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
     let dc = &mut gs.drawcontext;
     dc.start_drawing();
     {
+        //do_collision_tests(dc, new_mouse_pos_world);
+
+        // ---------------------------------------------------------------------------------------------
+        // Playfield
+        //
+
         // Draw grid
         let grid_light = Color::new(0.9, 0.7, 0.2, 1.0);
         for x in -30..30 {
@@ -409,14 +415,6 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         collision_mesh.add_rect("bottom_wall", field_border_bottom);
         collision_mesh.add_rect("center_wall", field_border_center);
 
-        let field_border_rects = vec![
-            field_border_left.clone(),
-            field_border_right.clone(),
-            field_border_top.clone(),
-            field_border_bottom.clone(),
-            field_border_center.clone(),
-        ];
-
         let mut debug_num_loops = 0;
 
         let speed = gs.pongi_vel.magnitude();
@@ -475,7 +473,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
 
             dir_change_happened = true;
             debug_num_loops += 1;
-            if debug_num_loops == 1 {
+            if debug_num_loops == 3 {
                 gs.game_has_crashed = Some(format!(
                     "Collision loop took {} iterations",
                     debug_num_loops
@@ -627,6 +625,134 @@ fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
 //
 //     Some(speed * dir)
 // }
+
+fn do_collision_tests(dc: &mut DrawContext, new_mouse_pos_world: WorldPoint) {
+    let mouse_ray = Line::new(Vec2::zero(), new_mouse_pos_world);
+
+    // Rect
+    let test_rect = Rect {
+        left: -8.0 * UNIT_SIZE,
+        right: -3.0 * UNIT_SIZE,
+        top: 1.0 * UNIT_SIZE,
+        bottom: 5.0 * UNIT_SIZE,
+    };
+
+    dc.draw_lines(
+        &test_rect.to_border_lines(),
+        0.0,
+        if mouse_ray.intersects_rect(test_rect) {
+            COLOR_RED
+        } else {
+            COLOR_BLACK
+        },
+        DrawSpace::World,
+    );
+    let intersections = intersections_line_rect(mouse_ray, test_rect);
+    for intersection in &intersections {
+        if let Some(intersection) = intersection {
+            dc.draw_rect_filled(
+                Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
+                -0.1,
+                COLOR_CYAN,
+                DrawSpace::World,
+            );
+            dc.draw_arrow(
+                intersection.point,
+                intersection.normal,
+                UNIT_SIZE,
+                -0.2,
+                COLOR_GREEN,
+                DrawSpace::World,
+            );
+        }
+    }
+
+    // Line
+    let test_line = Line::new(
+        Point::new(-4.0, -5.0) * UNIT_SIZE,
+        Point::new(-8.0, -2.0) * UNIT_SIZE,
+    );
+    dc.draw_line(
+        test_line,
+        0.0,
+        if mouse_ray.intersects_line(test_line) {
+            COLOR_RED
+        } else {
+            COLOR_BLACK
+        },
+        DrawSpace::World,
+    );
+    if let Some(intersection) = intersection_line_line(mouse_ray, test_line) {
+        dc.draw_rect_filled(
+            Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
+            -0.1,
+            COLOR_CYAN,
+            DrawSpace::World,
+        );
+        dc.draw_arrow(
+            intersection.point,
+            intersection.normal,
+            UNIT_SIZE,
+            -0.2,
+            COLOR_GREEN,
+            DrawSpace::World,
+        );
+    }
+
+    // Sphere
+    let test_sphere = Circle::new(Vec2::ones() * 3.0 * UNIT_SIZE, UNIT_SIZE);
+    dc.draw_lines(
+        &test_sphere.to_lines(32),
+        0.0,
+        if mouse_ray.intersects_circle(test_sphere) {
+            COLOR_RED
+        } else {
+            COLOR_BLACK
+        },
+        DrawSpace::World,
+    );
+    dc.draw_arrow(
+        Point::zero(),
+        mouse_ray.dir().normalized(),
+        mouse_ray.length(),
+        0.0,
+        COLOR_BLUE,
+        DrawSpace::World,
+    );
+    let (near, far) = intersections_line_circle(mouse_ray, test_sphere);
+    if let Some(intersection) = near {
+        dc.draw_rect_filled(
+            Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
+            -0.1,
+            COLOR_MAGENTA,
+            DrawSpace::World,
+        );
+        dc.draw_arrow(
+            intersection.point,
+            intersection.normal,
+            UNIT_SIZE,
+            -0.2,
+            COLOR_GREEN,
+            DrawSpace::World,
+        );
+    }
+    if let Some(intersection) = far {
+        dc.draw_rect_filled(
+            Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
+            -0.1,
+            COLOR_CYAN,
+            DrawSpace::World,
+        );
+        dc.draw_arrow(
+            intersection.point,
+            intersection.normal,
+            UNIT_SIZE,
+            -0.2,
+            COLOR_GREEN,
+            DrawSpace::World,
+        );
+    }
+}
 
 // =================================================================================================
 // TODO(JaSc): Find a better place for the following three functions

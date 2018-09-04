@@ -149,8 +149,7 @@ impl Vec2 {
     }
 
     pub fn perpendicular(self) -> Vec2 {
-        // NOTE: The y component is positive as a correction for our y-flipped coordinate system
-        Vec2::new(self.y, self.x)
+        Vec2::new(self.y, -self.x)
     }
 
     pub fn magnitude(self) -> f32 {
@@ -524,6 +523,7 @@ impl Rect {
         }
     }
 
+    // TODO(JaSc): This is broken
     pub fn scaled_from_center(self, scale: Vec2) -> Rect {
         debug_assert!(is_positive(scale.x));
         debug_assert!(is_positive(scale.y));
@@ -639,6 +639,10 @@ impl Line {
 
     pub fn to_intersection_point(&self, t: f32) -> Point {
         self.start + t * (self.end - self.start)
+    }
+
+    pub fn dir(self) -> Vec2 {
+        self.end - self.start
     }
 
     pub fn length(self) -> f32 {
@@ -763,9 +767,10 @@ pub fn intersections_line_circle(
     //
     // which solution is `t = (-b +- sqrt(b^2 - 4ac)) / 2a`
     let line_dir = line.end - line.start;
+    let center_to_line_start = line.start - circle.center;
     let a = Vec2::dot(line_dir, line_dir);
-    let b = 2.0 * Vec2::dot(line.start - circle.center, line_dir);
-    let c = a - circle.radius * circle.radius;
+    let b = 2.0 * Vec2::dot(center_to_line_start, line_dir);
+    let c = Vec2::dot(center_to_line_start, center_to_line_start) - circle.radius * circle.radius;
 
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 {
