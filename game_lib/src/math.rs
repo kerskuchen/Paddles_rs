@@ -3,7 +3,6 @@ pub use cgmath::ortho;
 pub use cgmath::prelude::*;
 
 pub const EPSILON: f32 = 0.000_001;
-pub const COLLISION_SAFETY_MARGIN: f32 = 0.1;
 
 use std;
 pub use std::f32::consts::PI;

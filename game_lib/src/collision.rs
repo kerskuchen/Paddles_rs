@@ -3,6 +3,7 @@ use std;
 
 pub type SegmentIndex = usize;
 pub type ShapeIndex = usize;
+pub const COLLISION_SAFETY_MARGIN: f32 = 0.1;
 
 #[derive(Debug, Clone)]
 pub enum CollisionShape {

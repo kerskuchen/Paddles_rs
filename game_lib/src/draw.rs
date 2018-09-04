@@ -199,7 +199,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         color: Color,
         draw_space: DrawSpace,
     ) {
-        let sprite = self.atlas.animations["images/test"].frames[1];
+        let sprite = self.atlas.animations["images/test"].frames[0];
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
         let mesh = self.polymesh_by_draw_space(draw_space);
         mesh.push_quad(

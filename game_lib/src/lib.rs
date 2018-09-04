@@ -405,7 +405,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
 
         // Update pongi
-        const PONGI_RADIUS: f32 = 8.0;
+        const PONGI_RADIUS: f32 = 7.5;
         let mut dir_change_happened = false;
 
         let mut collision_mesh = CollisionMesh::new("play_field");
@@ -451,17 +451,6 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
                 break;
             }
 
-            println!("======================");
-            dprintln!(debug_num_loops);
-            dprintln!(look_ahead_raycast);
-            dprintln!(pos + gs.pongi_vel * delta_time);
-            dprintln!(collision.intersection.point);
-            dprintln!(safe_collision_point_distance);
-            dprintln!(distance_till_hit);
-            dprintln!(travel_distance);
-            dprintln!(pos);
-            dprintln!(vel);
-
             // Move ourselves to the position right before the actual collision point
             pos += safe_collision_point_distance * dir;
             vel = vel.reflected_on_normal(collision.intersection.normal);
@@ -506,7 +495,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         dc.debug_draw_text(&dformat!(gs.pongi_vel), draw::COLOR_WHITE);
         dc.debug_draw_text(&dformat!(gs.pongi_pos), draw::COLOR_WHITE);
         dc.draw_arrow(
-            gs.pongi_pos,
+            gs.pongi_pos.pixel_snapped(),
             gs.pongi_vel.normalized(),
             0.3 * gs.pongi_vel.magnitude(),
             -0.1,
@@ -515,7 +504,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
 
         dc.debug_draw_circle_textured(
-            gs.pongi_pos,
+            gs.pongi_pos.pixel_snapped(),
             -0.3,
             Color::new(1.0 - beat_value, 1.0 - beat_value, 1.0, 1.0),
             DrawSpace::World,
