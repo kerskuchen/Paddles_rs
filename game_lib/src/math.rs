@@ -4,7 +4,6 @@ pub use cgmath::prelude::*;
 
 pub const EPSILON: f32 = 0.000_001;
 
-use std;
 pub use std::f32::consts::PI;
 
 pub type Color = cgmath::Vector4<f32>;
@@ -19,6 +18,23 @@ pub fn is_positive(x: f32) -> bool {
 }
 
 // TODO(JaSc): Decide if we want to pass self of &self into methods of small copyable types
+
+//==================================================================================================
+// Rounding
+//==================================================================================================
+//
+
+pub fn round_to_nearest_multiple_of_target(value: f32, target: f32) -> f32 {
+    f32::round(value / target) * target
+}
+
+pub fn round_down_to_nearest_multiple_of_target(value: f32, target: f32) -> f32 {
+    f32::floor(value / target) * target
+}
+
+pub fn round_up_to_nearest_multiple_of_target(value: f32, target: f32) -> f32 {
+    f32::ceil(value / target) * target
+}
 
 //==================================================================================================
 // Clamping
