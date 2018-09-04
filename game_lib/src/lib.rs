@@ -28,7 +28,7 @@ pub use draw::*;
 pub use math::*;
 
 const PONGI_RADIUS: f32 = 7.5;
-const PONGI_BASE_SPEED: f32 = 10.0 * UNIT_SIZE;
+const PONGI_BASE_SPEED: f32 = 15.0 * UNIT_SIZE;
 
 const UNIT_SIZE: f32 = 16.0;
 const CANVAS_WIDTH: f32 = 480.0;
@@ -48,12 +48,9 @@ pub struct GameState<'gamestate> {
     drawcontext: DrawContext<'gamestate>,
 
     time_till_next_beat: f32,
-    beat_box_size: f32,
-    beat_box_growth: f32,
 
     pongi_pos: WorldPoint,
     pongi_vel: Vec2,
-    pongi_readjust_vel_after_dir_change: bool,
 
     mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
@@ -365,15 +362,15 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             top: field_bounds.bottom,
             bottom: field_bounds.bottom + UNIT_SIZE,
         };
-        let field_border_center =
-            Rect::unit_rect_centered().scaled_from_center(Vec2::ones() * UNIT_SIZE);
+        // let field_border_center =
+        //     Rect::unit_rect_centered().scaled_from_center(Vec2::ones() * UNIT_SIZE);
 
         for (&field_border, &color) in [
             field_border_left,
             field_border_right,
             field_border_top,
             field_border_bottom,
-            field_border_center,
+            //field_border_center,
         ].iter()
             .zip(
                 [
@@ -381,21 +378,30 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
                     draw::COLOR_GREEN,
                     draw::COLOR_BLUE,
                     draw::COLOR_BLACK,
-                    draw::COLOR_YELLOW,
+                    //draw::COLOR_YELLOW,
                 ].iter(),
             ) {
             dc.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
         }
 
-        // Update pongi
-        let mut dir_change_happened = false;
+        // Update beat
+        const BPM: f32 = 100.0;
+        const BEAT_LENGTH: f32 = 60.0 / BPM;
 
+        let mut time_till_next_beat = gs.time_till_next_beat;
+        time_till_next_beat -= delta_time;
+        while time_till_next_beat < 0.0 {
+            time_till_next_beat += BEAT_LENGTH;
+        }
+        let beat_value = beat_visualizer_value(time_till_next_beat, BEAT_LENGTH);
+
+        // Update pongi
         let mut collision_mesh = CollisionMesh::new("play_field");
         collision_mesh.add_rect("left_wall", field_border_left);
         collision_mesh.add_rect("right_wall", field_border_right);
         collision_mesh.add_rect("top_wall", field_border_top);
         collision_mesh.add_rect("bottom_wall", field_border_bottom);
-        collision_mesh.add_rect("center_wall", field_border_center);
+        //collision_mesh.add_rect("center_wall", field_border_center);
 
         let mut debug_num_loops = 0;
 
@@ -415,12 +421,12 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             .map(|rect| RectSphereSum::new(rect, PONGI_RADIUS))
             .for_each(|sum| dc.draw_lines(&sum.to_lines(), 0.0, COLOR_YELLOW, DrawSpace::World));
 
-        if let Some(collision) = collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS) {
-            println!(
-                "Intersection with '{}' on shape '{:?}' on segment '{:?}':\n {:?}",
-                collision_mesh.name, collision.shape, collision.segment, collision.intersection
-            );
-        }
+        //if let Some(collision) = collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS) {
+        //    println!(
+        //        "Intersection with '{}' on shape '{:?}' on segment '{:?}':\n {:?}",
+        //        collision_mesh.name, collision.shape, collision.segment, collision.intersection
+        //    );
+        //}
 
         while let Some(collision) =
             collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS)
@@ -434,10 +440,11 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             }
 
             // Move ourselves to the position right before the actual collision point
-            dir_change_happened = true;
             pos += safe_collision_point_distance * dir;
-            vel = vel.reflected_on_normal(collision.intersection.normal);
-            dir = vel.normalized();
+            dir = vel
+                .normalized()
+                .reflected_on_normal(collision.intersection.normal);
+            vel = dir * PONGI_BASE_SPEED;
             travel_distance -= safe_collision_point_distance;
 
             look_ahead_raycast =
@@ -454,16 +461,12 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         }
         pos += travel_distance * dir;
 
-        // Update beat
-        const BPM: f32 = 100.0;
-        const BEAT_LENGTH: f32 = 60.0 / BPM;
-
-        let mut time_till_next_beat = gs.time_till_next_beat;
-        time_till_next_beat -= delta_time;
-        while time_till_next_beat < 0.0 {
-            time_till_next_beat += BEAT_LENGTH;
+        // Write back to gamestate
+        if gs.game_has_crashed.is_none() {
+            gs.pongi_vel = vel;
+            gs.pongi_pos = pos;
+            gs.time_till_next_beat = time_till_next_beat;
         }
-        let beat_value = beat_visualizer_value(time_till_next_beat, BEAT_LENGTH);
 
         // Draw beat visualizer
         let beat_box_pos = Vec2::new(canvas_rect.right - 2.0 * UNIT_SIZE, 1.5 * UNIT_SIZE - 1.0);
@@ -474,39 +477,6 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             draw::COLOR_MAGENTA,
             DrawSpace::Canvas,
         );
-
-        if dir_change_happened && gs.game_has_crashed.is_none() {
-            let dir = vel.normalized();
-            let speed = PONGI_BASE_SPEED;
-            let ray = Line::new(pos, pos + 100.0 * UNIT_SIZE * vel);
-
-            if let Some(collision) = collision_mesh.sweepcast_sphere(ray, PONGI_RADIUS) {
-                let distance_till_hit = f32::max(
-                    0.0,
-                    (collision.intersection.point - pos).magnitude() - COLLISION_SAFETY_MARGIN,
-                );
-                let time_till_hit = distance_till_hit / speed;
-                let target_time_till_hit = if time_till_hit < time_till_next_beat {
-                    time_till_hit
-                } else {
-                    round_to_nearest_multiple_of_target(
-                        time_till_hit - time_till_next_beat,
-                        BEAT_LENGTH,
-                    ) + time_till_next_beat
-                };
-                let speed = distance_till_hit / target_time_till_hit;
-
-                vel = dir * speed;
-            } else {
-                gs.game_has_crashed = Some(String::from("Could not find next wall"));
-            }
-        }
-
-        if gs.game_has_crashed.is_none() {
-            gs.pongi_pos = pos;
-            gs.pongi_vel = vel;
-            gs.time_till_next_beat = time_till_next_beat;
-        }
 
         // Draw pongi
         dc.debug_draw_text(&dformat!(gs.pongi_vel), draw::COLOR_WHITE);
@@ -610,7 +580,7 @@ fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
     increasing + decreasing
 }
 
-fn do_collision_tests(dc: &mut DrawContext, new_mouse_pos_world: WorldPoint) {
+fn _do_collision_tests(dc: &mut DrawContext, new_mouse_pos_world: WorldPoint) {
     let mouse_ray = Line::new(Vec2::zero(), new_mouse_pos_world);
 
     // Rect

@@ -236,7 +236,7 @@ pub fn raycast_sphere(ray: Line, sphere: Circle) -> Option<Intersection> {
     intersection_near
 }
 
-pub fn raycast_rect(ray: Line, rect: Rect) -> Option<Intersection> {
+pub fn raycast_rect(_ray: Line, _rect: Rect) -> Option<Intersection> {
     // TODO(JaSc): We need to solve first how we are going to return which segment of the rect
     //             was hit.
     unimplemented!()

@@ -877,8 +877,7 @@ pub fn intersection_line_line(a: Line, b: Line) -> Option<Intersection> {
             return Some(intersection);
         }
     }
-
-    return None;
+    None
 }
 //==================================================================================================
 // Camera and coordinate systems
