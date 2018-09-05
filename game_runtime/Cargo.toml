@@ -5,10 +5,10 @@ authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
 [dependencies]
 gfx = "0.17"
-gfx_window_glutin = "0.25"
-glutin = "0.17"
-rand = "0.5.4"
-log = "0.4.3"
+gfx_window_glutin = "0.26"
+glutin = "0.18"
+rand = "0.5.5"
+log = "0.4.5"
 fern = "0.5.6"
 libloading = "0.5"
 failure = "0.1"

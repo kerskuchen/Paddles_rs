@@ -30,6 +30,16 @@ pub use math::*;
 const PONGI_RADIUS: f32 = 7.5;
 const PONGI_BASE_SPEED: f32 = 15.0 * UNIT_SIZE;
 
+const WALL_THICKNESS: f32 = 0.5 * UNIT_SIZE;
+const PADDLE_SIZE: f32 = 3.0 * UNIT_SIZE;
+
+const FIELD_BOUNDS: Rect = Rect {
+    left: -10.0 * UNIT_SIZE,
+    right: 10.0 * UNIT_SIZE,
+    top: -6.0 * UNIT_SIZE,
+    bottom: 6.0 * UNIT_SIZE,
+};
+
 const UNIT_SIZE: f32 = 16.0;
 const CANVAS_WIDTH: f32 = 480.0;
 const CANVAS_HEIGHT: f32 = 270.0;
@@ -41,13 +51,16 @@ const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
 #[derive(Default)]
 pub struct GameState<'gamestate> {
-    game_has_crashed: Option<String>,
+    error_happened: Option<String>,
 
     screen_dim: Vec2,
 
     drawcontext: DrawContext<'gamestate>,
 
     time_till_next_beat: f32,
+
+    paddle_left_pos: f32,
+    paddle_right_pos: f32,
 
     pongi_pos: WorldPoint,
     pongi_vel: Vec2,
@@ -92,7 +105,8 @@ pub struct GameInput {
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
     /// where (0,0) is the top left of the screen
-    pub mouse_pos_screen: CanvasPoint,
+    pub mouse_pos_screen: Point,
+    pub mouse_delta_pos_screen: Vec2,
 
     pub mouse_button_left: GameButton,
     pub mouse_button_middle: GameButton,
@@ -188,7 +202,7 @@ fn reinitialize_gamestate(gs: &mut GameState) {
     let angle: f32 = 40.0;
     gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
     gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 15.0 * UNIT_SIZE;
-    gs.game_has_crashed = None;
+    gs.error_happened = None;
 
     // gs.pongi_pos = Point::new(-151.48575, -88.0);
     // gs.pongi_vel = Vec2::new(-4644.807, 6393.034);
@@ -213,7 +227,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         gs.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
     }
 
-    let delta_time = if input.game_paused || gs.game_has_crashed.is_some() {
+    let delta_time = if input.game_paused || gs.error_happened.is_some() {
         0.0
     } else {
         let time_factor = if input.fast_time == 0 {
@@ -330,37 +344,31 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         }
 
         // Draw playing field
-        let field_bounds = Rect {
-            left: -10.0 * UNIT_SIZE,
-            right: 10.0 * UNIT_SIZE,
-            top: -6.0 * UNIT_SIZE,
-            bottom: 6.0 * UNIT_SIZE,
-        };
         let field_depth = -0.4;
 
         let field_border_left = Rect {
-            left: field_bounds.left - UNIT_SIZE,
-            right: field_bounds.left,
-            top: field_bounds.top,
-            bottom: field_bounds.bottom,
+            left: FIELD_BOUNDS.left - WALL_THICKNESS,
+            right: FIELD_BOUNDS.left,
+            top: FIELD_BOUNDS.top,
+            bottom: FIELD_BOUNDS.bottom,
         };
         let field_border_right = Rect {
-            left: field_bounds.right,
-            right: field_bounds.right + UNIT_SIZE,
-            top: field_bounds.top,
-            bottom: field_bounds.bottom,
+            left: FIELD_BOUNDS.right,
+            right: FIELD_BOUNDS.right + WALL_THICKNESS,
+            top: FIELD_BOUNDS.top,
+            bottom: FIELD_BOUNDS.bottom,
         };
         let field_border_top = Rect {
-            left: field_bounds.left - UNIT_SIZE,
-            right: field_bounds.right + UNIT_SIZE,
-            top: field_bounds.top - UNIT_SIZE,
-            bottom: field_bounds.top,
+            left: FIELD_BOUNDS.left - WALL_THICKNESS,
+            right: FIELD_BOUNDS.right + WALL_THICKNESS,
+            top: FIELD_BOUNDS.top - WALL_THICKNESS,
+            bottom: FIELD_BOUNDS.top,
         };
         let field_border_bottom = Rect {
-            left: field_bounds.left - UNIT_SIZE,
-            right: field_bounds.right + UNIT_SIZE,
-            top: field_bounds.bottom,
-            bottom: field_bounds.bottom + UNIT_SIZE,
+            left: FIELD_BOUNDS.left - WALL_THICKNESS,
+            right: FIELD_BOUNDS.right + WALL_THICKNESS,
+            top: FIELD_BOUNDS.bottom,
+            bottom: FIELD_BOUNDS.bottom + WALL_THICKNESS,
         };
         // let field_border_center =
         //     Rect::unit_rect_centered().scaled_from_center(Vec2::ones() * UNIT_SIZE);
@@ -396,6 +404,9 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let beat_value = beat_visualizer_value(time_till_next_beat, BEAT_LENGTH);
 
         // Update pongi
+        let pongi_pos = gs.pongi_pos;
+        let pongi_vel = gs.pongi_vel;
+
         let mut collision_mesh = CollisionMesh::new("play_field");
         collision_mesh.add_rect("left_wall", field_border_left);
         collision_mesh.add_rect("right_wall", field_border_right);
@@ -403,16 +414,31 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         collision_mesh.add_rect("bottom_wall", field_border_bottom);
         //collision_mesh.add_rect("center_wall", field_border_center);
 
-        let mut debug_num_loops = 0;
+        let mut error_happened = None;
+        let (new_pongi_pos, new_pongi_vel) = move_sphere_with_full_elastic_collision(
+            &mut collision_mesh,
+            pongi_pos,
+            pongi_vel,
+            PONGI_RADIUS,
+            delta_time,
+        ).unwrap_or_else(|error| {
+            error_happened = Some(error);
+            (pongi_pos, pongi_vel)
+        });
 
-        let speed = gs.pongi_vel.magnitude();
-        let mut pos = gs.pongi_pos;
-        let mut vel = gs.pongi_vel;
-        let mut dir = vel.normalized();
-        let mut travel_distance = speed * delta_time;
-
-        let mut look_ahead_raycast =
-            Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
+        // Write back to gamestate
+        gs.error_happened = error_happened;
+        if gs.error_happened.is_none() {
+            gs.pongi_vel = new_pongi_vel;
+            gs.pongi_pos = new_pongi_pos;
+            gs.time_till_next_beat = time_till_next_beat;
+            gs.paddle_left_pos = clamp(
+                gs.paddle_left_pos
+                    + input.mouse_delta_pos_screen.y / screen_rect.height() * canvas_rect.height(),
+                FIELD_BOUNDS.top,
+                FIELD_BOUNDS.bottom - PADDLE_SIZE,
+            );
+        }
 
         // Debug draw sphere sweeping
         collision_mesh
@@ -427,46 +453,6 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         //        collision_mesh.name, collision.shape, collision.segment, collision.intersection
         //    );
         //}
-
-        while let Some(collision) =
-            collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS)
-        {
-            // Determine a point that is right before the actual collision point
-            let distance_till_hit = (collision.intersection.point - pos).magnitude();
-            let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
-            if travel_distance < safe_collision_point_distance {
-                // We won't hit anything yet in this frame
-                break;
-            }
-
-            // Move ourselves to the position right before the actual collision point
-            pos += safe_collision_point_distance * dir;
-            dir = vel
-                .normalized()
-                .reflected_on_normal(collision.intersection.normal);
-            vel = dir * PONGI_BASE_SPEED;
-            travel_distance -= safe_collision_point_distance;
-
-            look_ahead_raycast =
-                Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
-
-            debug_num_loops += 1;
-            if debug_num_loops == 3 {
-                gs.game_has_crashed = Some(format!(
-                    "Collision loop took {} iterations",
-                    debug_num_loops
-                ));
-                break;
-            }
-        }
-        pos += travel_distance * dir;
-
-        // Write back to gamestate
-        if gs.game_has_crashed.is_none() {
-            gs.pongi_vel = vel;
-            gs.pongi_pos = pos;
-            gs.time_till_next_beat = time_till_next_beat;
-        }
 
         // Draw beat visualizer
         let beat_box_pos = Vec2::new(canvas_rect.right - 2.0 * UNIT_SIZE, 1.5 * UNIT_SIZE - 1.0);
@@ -497,6 +483,28 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             DrawSpace::World,
         );
 
+        // Draw paddles
+        dc.draw_rect_filled(
+            Rect::from_point(
+                WorldPoint::new(FIELD_BOUNDS.left - WALL_THICKNESS, gs.paddle_left_pos),
+                WALL_THICKNESS,
+                PADDLE_SIZE,
+            ),
+            -0.2,
+            COLOR_WHITE,
+            DrawSpace::World,
+        );
+        dc.draw_rect_filled(
+            Rect::from_point(
+                WorldPoint::new(FIELD_BOUNDS.right, gs.paddle_right_pos),
+                WALL_THICKNESS,
+                PADDLE_SIZE,
+            ),
+            -0.2,
+            COLOR_WHITE,
+            DrawSpace::World,
+        );
+
         // Draw cursor
         let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
         if input.mouse_button_left.is_pressed {
@@ -508,6 +516,12 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         if input.mouse_button_right.is_pressed {
             cursor_color.z = 1.0;
         }
+        dc.debug_draw_cursor(
+            new_mouse_pos_world.pixel_snapped(),
+            -0.3,
+            COLOR_WHITE,
+            DrawSpace::World,
+        );
         dc.draw_rect_filled(
             Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
             -0.2,
@@ -521,6 +535,20 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let update = pretty_format_duration_ms(f64::from(input.time_update));
         dc.debug_draw_text(
             &format!("delta: {}\ndraw: {}\nupdate: {}\n", delta, draw, update),
+            draw::COLOR_WHITE,
+        );
+        dc.debug_draw_text(
+            &format!(
+                "mouse_screen: {}x{}",
+                input.mouse_pos_screen.x, input.mouse_pos_screen.y
+            ),
+            draw::COLOR_WHITE,
+        );
+        dc.debug_draw_text(
+            &format!(
+                "mouse_delta_screen: {}x{}",
+                input.mouse_delta_pos_screen.x, input.mouse_delta_pos_screen.y
+            ),
             draw::COLOR_WHITE,
         );
         dc.debug_draw_text(
@@ -558,11 +586,11 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             dc.debug_draw_text("The game is paused", draw::COLOR_CYAN);
         }
         // Debug crash message
-        if gs.game_has_crashed.is_some() {
+        if gs.error_happened.is_some() {
             dc.debug_draw_text(
                 &format!(
                     "The game has crashed: {}",
-                    gs.game_has_crashed.clone().unwrap()
+                    gs.error_happened.clone().unwrap()
                 ),
                 draw::COLOR_RED,
             );
@@ -570,6 +598,53 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
     }
     let transform = gs.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
+}
+
+fn move_sphere_with_full_elastic_collision(
+    collision_mesh: &CollisionMesh,
+    mut pos: WorldPoint,
+    mut vel: Vec2,
+    sphere_radius: f32,
+    delta_time: f32,
+) -> Result<(WorldPoint, Vec2), String> {
+    let speed = vel.magnitude();
+    let mut dir = vel.normalized();
+    let mut travel_distance = speed * delta_time;
+
+    let mut travel_raycast =
+        Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
+
+    let mut debug_num_loops = 0;
+    while let Some(collision) = collision_mesh.sweepcast_sphere(travel_raycast, sphere_radius) {
+        // Determine a point that is right before the actual collision point
+        let distance_till_hit = (collision.intersection.point - pos).magnitude();
+        let safe_collision_point_distance = distance_till_hit - COLLISION_SAFETY_MARGIN;
+        if travel_distance < safe_collision_point_distance {
+            // We won't hit anything yet in this frame
+            break;
+        }
+
+        // Move ourselves to the position right before the actual collision point
+        pos += safe_collision_point_distance * dir;
+        dir = vel
+            .normalized()
+            .reflected_on_normal(collision.intersection.normal);
+        vel = dir * speed;
+        travel_distance -= safe_collision_point_distance;
+
+        travel_raycast = Line::new(pos, pos + (travel_distance + COLLISION_SAFETY_MARGIN) * dir);
+
+        debug_num_loops += 1;
+        if debug_num_loops == 3 {
+            return Err(format!(
+                "Collision loop took {} iterations",
+                debug_num_loops
+            ));
+        }
+    }
+    pos += travel_distance * dir;
+
+    Ok((pos, vel))
 }
 
 fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {

@@ -124,7 +124,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
-        let mesh = self.linemesh_by_draw_space(draw_space);
+        let mesh = self.line_mesh_by_draw_space(draw_space);
         for line in lines {
             mesh.push_line(*line, line_uv, sprite.atlas_index, depth, color);
         }
@@ -134,7 +134,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
-        let mesh = self.linemesh_by_draw_space(draw_space);
+        let mesh = self.line_mesh_by_draw_space(draw_space);
         mesh.push_line(line, line_uv, sprite.atlas_index, depth, color);
     }
 
@@ -176,7 +176,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     ) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
-        let mesh = self.polymesh_by_draw_space(draw_space);
+        let mesh = self.polygon_mesh_by_draw_space(draw_space);
         mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
@@ -188,7 +188,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         draw_space: DrawSpace,
     ) {
         let sprite = self.atlas.sprites["images/textured"];
-        let mesh = self.polymesh_by_draw_space(draw_space);
+        let mesh = self.polygon_mesh_by_draw_space(draw_space);
         mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
@@ -201,7 +201,25 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     ) {
         let sprite = self.atlas.animations["images/test"].frames[0];
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
-        let mesh = self.polymesh_by_draw_space(draw_space);
+        let mesh = self.polygon_mesh_by_draw_space(draw_space);
+        mesh.push_quad(
+            vertex_bounds,
+            sprite.uv_bounds,
+            sprite.atlas_index,
+            depth,
+            color,
+        );
+    }
+    pub fn debug_draw_cursor(
+        &mut self,
+        pos: Point,
+        depth: f32,
+        color: Color,
+        draw_space: DrawSpace,
+    ) {
+        let sprite = self.atlas.sprites["images/cursor_test"];
+        let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
+        let mesh = self.polygon_mesh_by_draw_space(draw_space);
         mesh.push_quad(
             vertex_bounds,
             sprite.uv_bounds,
@@ -220,7 +238,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         draw_space: DrawSpace,
     ) {
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
-        let mesh = self.polymesh_by_draw_space(draw_space);
+        let mesh = self.polygon_mesh_by_draw_space(draw_space);
         mesh.push_quad(
             vertex_bounds,
             sprite.uv_bounds,
@@ -447,14 +465,14 @@ impl<'drawcontext> DrawContext<'drawcontext> {
     // ---------------------------------------------------------------------------------------------
     // Utility
     //
-    fn linemesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut LineMesh {
+    fn line_mesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut LineMesh {
         match draw_space {
             DrawSpace::World => &mut self.world_lines,
             DrawSpace::Canvas => &mut self.canvas_lines,
             DrawSpace::Debug => &mut self.debug_lines,
         }
     }
-    fn polymesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut PolygonMesh {
+    fn polygon_mesh_by_draw_space(&mut self, draw_space: DrawSpace) -> &mut PolygonMesh {
         match draw_space {
             DrawSpace::World => &mut self.world_polygons,
             DrawSpace::Canvas => &mut self.canvas_polygons,

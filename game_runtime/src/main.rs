@@ -39,7 +39,7 @@ BACKLOG(JaSc):
     - Drawing debug overlays (grids/camera-frustums/crosshairs/depthbuffer)
     - Gamepad input
     x Correct mouse zooming and panning
-    - Raycasting and collision detection
+    x Raycasting and collision detection
     x Fixed sized pixel perfect canvase (framebuffer)
     - Flexible sized pixel perfect canvase (framebuffer)
     - Live looped input playback and recording
@@ -49,7 +49,7 @@ BACKLOG(JaSc):
 
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{GameInput, GameState, Point, Vec2};
+use game_lib::{GameInput, GameState, Point, Rect, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -116,8 +116,14 @@ fn main() -> Result<(), Error> {
     //
 
     // TODO(JaSc): Read MONITOR_ID and FULLSCREEN_MODE from config file
+    // TODO(JaSc): Once https://github.com/tomaka/winit/issues/574 is solved, fix windowed mode
+    //             for relative mouse movement. For this we need not only check when we have focus
+    //             but also only enable mouse grabbing/hiding when we click into the window content.
+    //             If we don't do that we cannot click on 'x' or resize because our mouse will
+    //             get dragged to the window center instantly.
     const MONITOR_ID: usize = 0;
     const FULLSCREEN_MODE: bool = true;
+    const RELATIVE_MOUSE_MODE: bool = true;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
@@ -188,8 +194,10 @@ fn main() -> Result<(), Error> {
     // State variables
     let mut is_running = true;
     let mut screen_cursor_pos = Point::zero();
+    let mut screen_cursor_delta_pos = Vec2::zero();
     let mut screen_dimensions = Vec2::zero();
-    let mut window_entered_fullscreen = false;
+    let mut ready_to_modify_cursor = false;
+    let mut window_has_focus = true;
 
     let mut input = GameInput::new();
     input.do_reinit_gamestate = true;
@@ -248,11 +256,17 @@ fn main() -> Result<(), Error> {
                     }
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
-                        if FULLSCREEN_MODE && window_entered_fullscreen {
-                            // NOTE: We need to grab/ungrab mouse cursor when ALT-TABBING in and out
-                            //       or the user cannot use their computer correctly in a
-                            //       multi-monitor setup while running our app.
-                            window.grab_cursor(has_focus).unwrap();
+                        window_has_focus = has_focus;
+                        // NOTE: We need to grab/ungrab and hide/unhide mouse cursor when
+                        //       ALT-TABBING in and out or the user cannot use their computer
+                        //       correctly in a multi-monitor setup while running our app.
+                        if ready_to_modify_cursor {
+                            if FULLSCREEN_MODE {
+                                window.grab_cursor(has_focus).unwrap();
+                            }
+                            if RELATIVE_MOUSE_MODE {
+                                window.hide_cursor(has_focus);
+                            }
                         }
                     }
                     WindowEvent::Resized(new_dim) => {
@@ -265,7 +279,7 @@ fn main() -> Result<(), Error> {
                         rc.update_screen_dimensions(new_dim.width as u16, new_dim.height as u16);
                         screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
 
-                        // Grab mouse cursor in window
+                        // Grab and/or hide mouse cursor in window
                         // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
                         //       make sure that our resized window now spans the full screen before
                         //       we allow grabbing the mouse cursor.
@@ -273,15 +287,24 @@ fn main() -> Result<(), Error> {
                         if FULLSCREEN_MODE && new_dim == monitor_logical_dimensions {
                             // Our window now has its final size, we can safely grab the cursor now
                             info!("Mouse cursor grabbed");
-                            window_entered_fullscreen = true;
+                            ready_to_modify_cursor = true;
                             window.grab_cursor(true).unwrap();
+                        }
+                        if RELATIVE_MOUSE_MODE && ready_to_modify_cursor {
+                            window.hide_cursor(true);
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
                         // NOTE: screen_cursor_pos is in the following interval:
                         //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
                         //       where (0,0) is the top left of the screen
-                        screen_cursor_pos = Point::new(position.x as f32, position.y as f32);
+                        let pos = Point::new(position.x as f32, position.y as f32);
+                        if RELATIVE_MOUSE_MODE {
+                            screen_cursor_delta_pos = pos - screen_dimensions / 2.0;
+                        } else {
+                            screen_cursor_delta_pos += pos - screen_cursor_pos;
+                            screen_cursor_pos = pos;
+                        }
                     }
                     WindowEvent::MouseWheel { delta, .. } => {
                         input.mouse_wheel_delta += match delta {
@@ -309,8 +332,27 @@ fn main() -> Result<(), Error> {
             }
         });
 
+        if RELATIVE_MOUSE_MODE && window_has_focus {
+            screen_cursor_pos += screen_cursor_delta_pos;
+            screen_cursor_pos = screen_cursor_pos.clamped_in_rect(Rect::from_width_height(
+                screen_dimensions.x - 1.0,
+                screen_dimensions.y - 1.0,
+            ));
+
+            // TODO(JaSc): Maybe we need to set this more frequently?
+            window
+                .set_cursor_position(glutin::dpi::LogicalPosition::new(
+                    screen_dimensions.x as f64 / 2.0,
+                    screen_dimensions.y as f64 / 2.0,
+                ))
+                .unwrap();
+        }
+
         // Prepare input and update game
         input.mouse_pos_screen = screen_cursor_pos;
+        input.mouse_delta_pos_screen = screen_cursor_delta_pos;
+        screen_cursor_delta_pos = Vec2::zero();
+
         input.screen_dim = screen_dimensions;
         input.time_since_startup = timer_startup.elapsed_time();
         input.time_delta = timer_delta.elapsed_time() as f32;
