@@ -517,10 +517,10 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             cursor_color.z = 1.0;
         }
         dc.debug_draw_cursor(
-            new_mouse_pos_world.pixel_snapped(),
+            gs.cam.world_to_canvas(new_mouse_pos_world.pixel_snapped()),
             -0.3,
             COLOR_WHITE,
-            DrawSpace::World,
+            DrawSpace::Canvas,
         );
         dc.draw_rect_filled(
             Rect::from_point_dimension(new_mouse_pos_world.pixel_snapped(), Vec2::ones()),
