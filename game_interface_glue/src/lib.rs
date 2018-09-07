@@ -41,13 +41,13 @@
 //! [`game_runtime`]: ../game_runtime/index.html
 //!
 extern crate game_lib;
-use game_lib::{GameInput, GameState};
+use game_lib::{GameContext, GameInput};
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]
-pub fn update_and_draw<'gamestate>(
+pub fn update_and_draw<'game_context>(
     input: &GameInput,
-    gamestate: &'gamestate mut GameState<'gamestate>,
+    game_context: &'game_context mut GameContext<'game_context>,
 ) {
-    game_lib::update_and_draw(input, gamestate);
+    game_lib::update_and_draw(input, game_context);
 }

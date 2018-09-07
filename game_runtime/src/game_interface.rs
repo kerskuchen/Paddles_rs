@@ -1,4 +1,4 @@
-use game_lib::{GameInput, GameState};
+use game_lib::{GameContext, GameInput};
 use libloading::Library;
 use std;
 
@@ -19,11 +19,11 @@ pub struct GameLib {
 
 impl GameLib {
     /// Forwards to the dynamic libraries' corresponding `update_and_draw` function
-    pub fn update_and_draw(&self, input: &GameInput, game_state: &mut GameState) {
+    pub fn update_and_draw(&self, input: &GameInput, game_state: &mut GameContext) {
         unsafe {
             let f = self
                 .lib
-                .get::<fn(&GameInput, &mut GameState)>(b"update_and_draw\0")
+                .get::<fn(&GameInput, &mut GameContext)>(b"update_and_draw\0")
                 .unwrap_or_else(|error| {
                     panic!(
                         "Could not load `update_and_draw` function from GameLib: {}",

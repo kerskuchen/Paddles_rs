@@ -20,13 +20,21 @@ pub mod math;
 
 pub type ResourcePath = String;
 
-// TODO(JaSc): We need more consistency in names: Is it FrameBuffer or Framebuffer?
-//             Is it GameState or Gamestate? When its GameState why do variables are then called
-//             gamestate and not game_state?
 pub use collision::*;
 pub use draw::*;
 pub use math::*;
 
+//==================================================================================================
+// SystemCommand
+
+pub enum SystemCommand {
+    EnableRelativeMouseMovementCapture(bool),
+}
+
+//==================================================================================================
+// GameContext
+//==================================================================================================
+//
 const PONGI_RADIUS: f32 = 7.5;
 const PONGI_BASE_SPEED: f32 = 15.0 * UNIT_SIZE;
 
@@ -49,13 +57,21 @@ const LOG_LEVEL_GAME_LIB: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_MATH: log::LevelFilter = log::LevelFilter::Trace;
 const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
+enum GameState {
+    Startup,
+    Menu,
+    Game,
+    Paused,
+}
+
 #[derive(Default)]
-pub struct GameState<'gamestate> {
+pub struct GameContext<'game_context> {
     error_happened: Option<String>,
 
     screen_dim: Vec2,
 
-    drawcontext: DrawContext<'gamestate>,
+    drawcontext: DrawContext<'game_context>,
+    system_commands: Vec<SystemCommand>,
 
     time_till_next_beat: f32,
 
@@ -68,16 +84,22 @@ pub struct GameState<'gamestate> {
     mouse_pos_canvas: CanvasPoint,
     mouse_pos_world: WorldPoint,
 
+    is_in_menu: bool,
+
     origin: WorldPoint,
     cam: Camera,
 }
 
-impl<'gamestate> GameState<'gamestate> {
+impl<'game_context> GameContext<'game_context> {
     pub fn get_draw_commands(&mut self) -> Vec<DrawCommand> {
         std::mem::replace(&mut self.drawcontext.draw_commands, Vec::new())
     }
 
-    pub fn new() -> GameState<'gamestate> {
+    pub fn get_system_commands(&mut self) -> Vec<SystemCommand> {
+        std::mem::replace(&mut self.system_commands, Vec::new())
+    }
+
+    pub fn new() -> GameContext<'game_context> {
         Default::default()
     }
 }
@@ -174,6 +196,7 @@ impl GameButton {
 fn reinitialize_after_hotreload() {
     // Initializing logger
     // NOTE: When hot reloading the game lib dll the logging must be reinitialized
+    // TODO(JaSc): Do we actually need the logging?
     //
     fern::Dispatch::new()
         .format(|out, message, record| out.finish(format_args!("{}: {}", record.level(), message)))
@@ -186,36 +209,42 @@ fn reinitialize_after_hotreload() {
         .expect("Could not initialize logger");
 }
 
-fn reinitialize_gamestate(gs: &mut GameState) {
-    gs.origin = WorldPoint::zero();
-    gs.cam = Camera::new(
-        gs.origin,
+fn reinitialize_gamestate(gc: &mut GameContext) {
+    gc.origin = WorldPoint::zero();
+    gc.cam = Camera::new(
+        gc.origin,
         CANVAS_WIDTH,
         CANVAS_HEIGHT,
         DEFAULT_WORLD_ZNEAR,
         DEFAULT_WORLD_ZFAR,
     );
 
-    //gs.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
-    //gs.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
+    //gc.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
+    //gc.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
 
     let angle: f32 = 40.0;
-    gs.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
-    gs.pongi_vel = Vec2::from_angle(angle.to_radians()) * 15.0 * UNIT_SIZE;
-    gs.error_happened = None;
+    gc.pongi_pos = Point::new(8.0, -4.0) * UNIT_SIZE;
+    gc.pongi_vel = Vec2::from_angle(angle.to_radians()) * PONGI_BASE_SPEED;
+    gc.error_happened = None;
 
-    // gs.pongi_pos = Point::new(-151.48575, -88.0);
-    // gs.pongi_vel = Vec2::new(-4644.807, 6393.034);
+    // gc.pongi_pos = Point::new(-151.48575, -88.0);
+    // gc.pongi_vel = Vec2::new(-4644.807, 6393.034);
+
+    gc.system_commands
+        .push(SystemCommand::EnableRelativeMouseMovementCapture(true));
 }
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
 //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
-pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameState<'gamestate>) {
+pub fn update_and_draw<'game_context>(
+    input: &GameInput,
+    gc: &'game_context mut GameContext<'game_context>,
+) {
     if input.hotreload_happened {
         reinitialize_after_hotreload();
     }
     if input.do_reinit_gamestate {
-        reinitialize_gamestate(gs);
+        reinitialize_gamestate(gc);
     }
 
     if input.do_reinit_drawstate {
@@ -224,10 +253,10 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         } else {
             (input.screen_dim.x as u16, input.screen_dim.y as u16)
         };
-        gs.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
+        gc.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
     }
 
-    let delta_time = if input.game_paused || gs.error_happened.is_some() {
+    let delta_time = if input.game_paused || gc.error_happened.is_some() {
         0.0
     } else {
         let time_factor = if input.fast_time == 0 {
@@ -243,9 +272,9 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
     // ---------------------------------------------------------------------------------------------
     // Screen size changed
     //
-    if gs.screen_dim != input.screen_dim {
-        gs.screen_dim = input.screen_dim;
-        let screen_rect = Rect::from_dimension(gs.screen_dim);
+    if gc.screen_dim != input.screen_dim {
+        gc.screen_dim = input.screen_dim;
+        let screen_rect = Rect::from_dimension(gc.screen_dim);
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
         let blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
@@ -272,42 +301,42 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
     // ---------------------------------------------------------------------------------------------
     // Mouse input
     //
-    let screen_rect = Rect::from_dimension(gs.screen_dim);
+    let screen_rect = Rect::from_dimension(gc.screen_dim);
     let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
     let canvas_blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
     // Canvas mouse position
     let new_mouse_pos_canvas =
         screen_pos_to_canvas_pos(input.mouse_pos_screen, screen_rect, canvas_rect);
-    let mouse_delta_canvas = new_mouse_pos_canvas - gs.mouse_pos_canvas;
-    gs.mouse_pos_canvas = new_mouse_pos_canvas;
+    let mouse_delta_canvas = new_mouse_pos_canvas - gc.mouse_pos_canvas;
+    gc.mouse_pos_canvas = new_mouse_pos_canvas;
 
     // World mouse position
-    let new_mouse_pos_world = gs.cam.canvas_to_world(new_mouse_pos_canvas);
-    let _mouse_delta_world = new_mouse_pos_world - gs.mouse_pos_world;
-    gs.mouse_pos_world = new_mouse_pos_world;
+    let new_mouse_pos_world = gc.cam.canvas_to_world(new_mouse_pos_canvas);
+    let _mouse_delta_world = new_mouse_pos_world - gc.mouse_pos_world;
+    gc.mouse_pos_world = new_mouse_pos_world;
 
     if input.mouse_button_right.is_pressed {
-        gs.cam.pan(mouse_delta_canvas);
+        gc.cam.pan(mouse_delta_canvas);
     }
 
     if input.mouse_button_middle.is_pressed {
-        gs.cam.zoom_to_world_point(new_mouse_pos_world, 1.0);
+        gc.cam.zoom_to_world_point(new_mouse_pos_world, 1.0);
     }
 
     if input.mouse_wheel_delta > 0 {
-        let new_zoom_level = f32::min(gs.cam.zoom_level * 2.0, 8.0);
-        gs.cam
+        let new_zoom_level = f32::min(gc.cam.zoom_level * 2.0, 8.0);
+        gc.cam
             .zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
     } else if input.mouse_wheel_delta < 0 {
-        let new_zoom_level = f32::max(gs.cam.zoom_level / 2.0, 1.0 / 32.0);
-        gs.cam
+        let new_zoom_level = f32::max(gc.cam.zoom_level / 2.0, 1.0 / 32.0);
+        gc.cam
             .zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
     }
     // ---------------------------------------------------------------------------------------------
     // Generate draw commands
     //
-    let dc = &mut gs.drawcontext;
+    let dc = &mut gc.drawcontext;
     dc.start_drawing();
     {
         //do_collision_tests(dc, new_mouse_pos_world);
@@ -321,7 +350,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         for x in -30..30 {
             for diagonal in -20..20 {
                 let pos =
-                    Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE + gs.origin;
+                    Point::new((x + diagonal) as f32, diagonal as f32) * UNIT_SIZE + gc.origin;
                 if x % 2 == 0 {
                     dc.draw_rect_filled(
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
@@ -396,7 +425,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         const BPM: f32 = 100.0;
         const BEAT_LENGTH: f32 = 60.0 / BPM;
 
-        let mut time_till_next_beat = gs.time_till_next_beat;
+        let mut time_till_next_beat = gc.time_till_next_beat;
         time_till_next_beat -= delta_time;
         while time_till_next_beat < 0.0 {
             time_till_next_beat += BEAT_LENGTH;
@@ -404,8 +433,8 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         let beat_value = beat_visualizer_value(time_till_next_beat, BEAT_LENGTH);
 
         // Update pongi
-        let pongi_pos = gs.pongi_pos;
-        let pongi_vel = gs.pongi_vel;
+        let pongi_pos = gc.pongi_pos;
+        let pongi_vel = gc.pongi_vel;
 
         let mut collision_mesh = CollisionMesh::new("play_field");
         collision_mesh.add_rect("left_wall", field_border_left);
@@ -426,14 +455,14 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             (pongi_pos, pongi_vel)
         });
 
-        // Write back to gamestate
-        gs.error_happened = error_happened;
-        if gs.error_happened.is_none() {
-            gs.pongi_vel = new_pongi_vel;
-            gs.pongi_pos = new_pongi_pos;
-            gs.time_till_next_beat = time_till_next_beat;
-            gs.paddle_left_pos = clamp(
-                gs.paddle_left_pos
+        // Write back to game_context
+        gc.error_happened = error_happened;
+        if gc.error_happened.is_none() {
+            gc.pongi_vel = new_pongi_vel;
+            gc.pongi_pos = new_pongi_pos;
+            gc.time_till_next_beat = time_till_next_beat;
+            gc.paddle_left_pos = clamp(
+                gc.paddle_left_pos
                     + input.mouse_delta_pos_screen.y / screen_rect.height() * canvas_rect.height(),
                 FIELD_BOUNDS.top,
                 FIELD_BOUNDS.bottom - PADDLE_SIZE,
@@ -465,19 +494,19 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
 
         // Draw pongi
-        dc.debug_draw_text(&dformat!(gs.pongi_vel), draw::COLOR_WHITE);
-        dc.debug_draw_text(&dformat!(gs.pongi_pos), draw::COLOR_WHITE);
+        dc.debug_draw_text(&dformat!(gc.pongi_vel), draw::COLOR_WHITE);
+        dc.debug_draw_text(&dformat!(gc.pongi_pos), draw::COLOR_WHITE);
         dc.draw_arrow(
-            gs.pongi_pos.pixel_snapped(),
-            gs.pongi_vel.normalized(),
-            0.3 * gs.pongi_vel.magnitude(),
+            gc.pongi_pos.pixel_snapped(),
+            gc.pongi_vel.normalized(),
+            0.3 * gc.pongi_vel.magnitude(),
             -0.1,
             draw::COLOR_GREEN,
             DrawSpace::World,
         );
 
         dc.debug_draw_circle_textured(
-            gs.pongi_pos.pixel_snapped(),
+            gc.pongi_pos.pixel_snapped(),
             -0.3,
             Color::new(1.0 - beat_value, 1.0 - beat_value, 1.0, 1.0),
             DrawSpace::World,
@@ -486,7 +515,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         // Draw paddles
         dc.draw_rect_filled(
             Rect::from_point(
-                WorldPoint::new(FIELD_BOUNDS.left - WALL_THICKNESS, gs.paddle_left_pos),
+                WorldPoint::new(FIELD_BOUNDS.left - WALL_THICKNESS, gc.paddle_left_pos),
                 WALL_THICKNESS,
                 PADDLE_SIZE,
             ),
@@ -496,7 +525,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
         );
         dc.draw_rect_filled(
             Rect::from_point(
-                WorldPoint::new(FIELD_BOUNDS.right, gs.paddle_right_pos),
+                WorldPoint::new(FIELD_BOUNDS.right, gc.paddle_right_pos),
                 WALL_THICKNESS,
                 PADDLE_SIZE,
             ),
@@ -517,7 +546,7 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             cursor_color.z = 1.0;
         }
         dc.debug_draw_cursor(
-            gs.cam.world_to_canvas(new_mouse_pos_world.pixel_snapped()),
+            gc.cam.world_to_canvas(new_mouse_pos_world.pixel_snapped()),
             -0.3,
             COLOR_WHITE,
             DrawSpace::Canvas,
@@ -586,17 +615,17 @@ pub fn update_and_draw<'gamestate>(input: &GameInput, gs: &'gamestate mut GameSt
             dc.debug_draw_text("The game is paused", draw::COLOR_CYAN);
         }
         // Debug crash message
-        if gs.error_happened.is_some() {
+        if gc.error_happened.is_some() {
             dc.debug_draw_text(
                 &format!(
                     "The game has crashed: {}",
-                    gs.error_happened.clone().unwrap()
+                    gc.error_happened.clone().unwrap()
                 ),
                 draw::COLOR_RED,
             );
         }
     }
-    let transform = gs.cam.proj_view_matrix();
+    let transform = gc.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
 }
 

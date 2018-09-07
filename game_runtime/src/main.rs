@@ -13,6 +13,8 @@ TODO(JaSc):
     x Depth clearing after switching from worldspace -> screenspace -> debugspace
     x Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
   - Game input + keyboard/mouse-support
+    - Change absolute/relative mouse position mode with system commands depending on being 
+      in-menu/in-game
   - Gamestate + logic + timing
   - Audio playback
   - Some nice glowing shader effects
@@ -24,6 +26,7 @@ TODO(JaSc): (Bigger things for vacations)
     restructure the platform layer a little
   - Make it possible for debug overlays like intersections to draw to world-space as well as 
     canvas-space to make i.e. arrow-heads uniformly sized regardless of arrow-size/zoom-level
+  - Allow do draw lines with arbitrary thickness
   - Add system commands from client to platform that can change settings like vsync without 
     restart. This requires some major codeflow refactoring but would allow us to better modularize
     the platform layer. We also would need to re-upload all textures to the graphics context.
@@ -49,7 +52,7 @@ BACKLOG(JaSc):
 
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{GameInput, GameState, Point, Rect, Vec2};
+use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -123,7 +126,6 @@ fn main() -> Result<(), Error> {
     //             get dragged to the window center instantly.
     const MONITOR_ID: usize = 0;
     const FULLSCREEN_MODE: bool = true;
-    const RELATIVE_MOUSE_MODE: bool = true;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
@@ -198,6 +200,7 @@ fn main() -> Result<(), Error> {
     let mut screen_dimensions = Vec2::zero();
     let mut ready_to_modify_cursor = false;
     let mut window_has_focus = true;
+    let mut relative_mouse_mode_enabled = false;
 
     let mut input = GameInput::new();
     input.do_reinit_gamestate = true;
@@ -206,7 +209,7 @@ fn main() -> Result<(), Error> {
     input.game_paused = true;
 
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
-    let mut gamestate = GameState::new();
+    let mut game_context = GameContext::new();
 
     let timer_startup = Timer::new();
     let mut timer_delta = Timer::new();
@@ -264,7 +267,7 @@ fn main() -> Result<(), Error> {
                             if FULLSCREEN_MODE {
                                 window.grab_cursor(has_focus).unwrap();
                             }
-                            if RELATIVE_MOUSE_MODE {
+                            if relative_mouse_mode_enabled {
                                 window.hide_cursor(has_focus);
                             }
                         }
@@ -290,7 +293,7 @@ fn main() -> Result<(), Error> {
                             ready_to_modify_cursor = true;
                             window.grab_cursor(true).unwrap();
                         }
-                        if RELATIVE_MOUSE_MODE && ready_to_modify_cursor {
+                        if relative_mouse_mode_enabled && ready_to_modify_cursor {
                             window.hide_cursor(true);
                         }
                     }
@@ -299,7 +302,9 @@ fn main() -> Result<(), Error> {
                         //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
                         //       where (0,0) is the top left of the screen
                         let pos = Point::new(position.x as f32, position.y as f32);
-                        if RELATIVE_MOUSE_MODE {
+                        if relative_mouse_mode_enabled {
+                            // NOTE: We do not use '+=' as we only want to save the last delta
+                            //       that we registered during the last frame.
                             screen_cursor_delta_pos = pos - screen_dimensions / 2.0;
                         } else {
                             screen_cursor_delta_pos += pos - screen_cursor_pos;
@@ -332,7 +337,7 @@ fn main() -> Result<(), Error> {
             }
         });
 
-        if RELATIVE_MOUSE_MODE && window_has_focus {
+        if relative_mouse_mode_enabled && window_has_focus {
             screen_cursor_pos += screen_cursor_delta_pos;
             screen_cursor_pos = screen_cursor_pos.clamped_in_rect(Rect::from_width_height(
                 screen_dimensions.x - 1.0,
@@ -359,12 +364,30 @@ fn main() -> Result<(), Error> {
         timer_delta.reset();
 
         let timer_update = Timer::new();
-        game_lib.update_and_draw(&input, &mut gamestate);
+        game_lib.update_and_draw(&input, &mut game_context);
         input.time_update = timer_update.elapsed_time() as f32;
+
+        // Process Systemcommands
+        for command in game_context.get_system_commands() {
+            match command {
+                SystemCommand::EnableRelativeMouseMovementCapture(do_enable) => {
+                    if ready_to_modify_cursor {
+                        window.hide_cursor(do_enable && window_has_focus);
+                    } else {
+                        unimplemented!();
+                        // TODO(JaSc): We need to remember to hide the cursor once we can modify it.
+                        //             Or we could just wait for
+                        //             https://github.com/tomaka/winit/issues/574 to be fixed
+                        //             and just drop the 'ready_to_modify_cursor' concept altogether
+                    }
+                    relative_mouse_mode_enabled = do_enable;
+                }
+            }
+        }
 
         // Draw to screen
         let timer_draw = Timer::new();
-        rc.process_draw_commands(gamestate.get_draw_commands())
+        rc.process_draw_commands(game_context.get_draw_commands())
             .context("Could not to process a draw command")?;
         input.time_draw = timer_draw.elapsed_time() as f32;
 
