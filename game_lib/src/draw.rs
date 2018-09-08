@@ -248,6 +248,29 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         );
     }
 
+    pub fn get_text_dimensions(&self, text: &str) -> Vec2 {
+        let font = &self.atlas.fonts["fonts/default"];
+        let mut offset = Vec2::zero();
+        let mut dim = Vec2::zero();
+
+        // TODO(JaSc): Maybe we can make a 'font-iterator' that takes a lambda so we do not need to
+        //             repeat this for loop in multiple methods
+        for c in text.chars() {
+            if c == '\n' {
+                offset.x = 0.0;
+                offset.y += font.vertical_advance;
+            } else {
+                let glyph = font.glyphs[(c as u8) as usize];
+                let sprite = glyph.sprite;
+                offset.x += glyph.horizontal_advance;
+
+                dim.x = f32::max(dim.x, offset.x);
+                dim.y = f32::max(dim.y, offset.y + font.font_height);
+            }
+        }
+        dim
+    }
+
     pub fn draw_text(
         &mut self,
         origin: Point,

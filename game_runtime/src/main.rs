@@ -195,8 +195,8 @@ fn main() -> Result<(), Error> {
 
     // State variables
     let mut is_running = true;
-    let mut screen_cursor_pos = Point::zero();
-    let mut screen_cursor_delta_pos = Vec2::zero();
+    let mut mouse_pos_screen = Point::zero();
+    let mut mouse_delta_screen = Vec2::zero();
     let mut screen_dimensions = Vec2::zero();
     let mut ready_to_modify_cursor = false;
     let mut window_has_focus = true;
@@ -298,17 +298,17 @@ fn main() -> Result<(), Error> {
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
-                        // NOTE: screen_cursor_pos is in the following interval:
+                        // NOTE: mouse_pos_screen is in the following interval:
                         //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
                         //       where (0,0) is the top left of the screen
                         let pos = Point::new(position.x as f32, position.y as f32);
                         if relative_mouse_mode_enabled {
                             // NOTE: We do not use '+=' as we only want to save the last delta
                             //       that we registered during the last frame.
-                            screen_cursor_delta_pos = pos - screen_dimensions / 2.0;
+                            mouse_delta_screen = pos - screen_dimensions / 2.0;
                         } else {
-                            screen_cursor_delta_pos += pos - screen_cursor_pos;
-                            screen_cursor_pos = pos;
+                            mouse_delta_screen += pos - mouse_pos_screen;
+                            mouse_pos_screen = pos;
                         }
                     }
                     WindowEvent::MouseWheel { delta, .. } => {
@@ -338,8 +338,8 @@ fn main() -> Result<(), Error> {
         });
 
         if relative_mouse_mode_enabled && window_has_focus {
-            screen_cursor_pos += screen_cursor_delta_pos;
-            screen_cursor_pos = screen_cursor_pos.clamped_in_rect(Rect::from_width_height(
+            mouse_pos_screen += mouse_delta_screen;
+            mouse_pos_screen = mouse_pos_screen.clamped_in_rect(Rect::from_width_height(
                 screen_dimensions.x - 1.0,
                 screen_dimensions.y - 1.0,
             ));
@@ -347,16 +347,16 @@ fn main() -> Result<(), Error> {
             // TODO(JaSc): Maybe we need to set this more frequently?
             window
                 .set_cursor_position(glutin::dpi::LogicalPosition::new(
-                    screen_dimensions.x as f64 / 2.0,
-                    screen_dimensions.y as f64 / 2.0,
+                    f64::from(screen_dimensions.x) / 2.0,
+                    f64::from(screen_dimensions.y) / 2.0,
                 ))
                 .unwrap();
         }
 
         // Prepare input and update game
-        input.mouse_pos_screen = screen_cursor_pos;
-        input.mouse_delta_pos_screen = screen_cursor_delta_pos;
-        screen_cursor_delta_pos = Vec2::zero();
+        input.mouse_pos_screen = mouse_pos_screen;
+        input.mouse_delta_screen = mouse_delta_screen;
+        mouse_delta_screen = Vec2::zero();
 
         input.screen_dim = screen_dimensions;
         input.time_since_startup = timer_startup.elapsed_time();

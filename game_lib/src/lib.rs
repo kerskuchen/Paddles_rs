@@ -49,7 +49,9 @@ const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 #[derive(Default)]
 pub struct GameContext<'game_context> {
     globals: Globals,
+
     gameplay_scene: GameplayScene,
+    menu_scene: MenuScene,
     debug_scene: DebugScene,
 
     drawcontext: DrawContext<'game_context>,
@@ -94,7 +96,7 @@ pub struct GameInput {
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
     /// where (0,0) is the top left of the screen
     pub mouse_pos_screen: Point,
-    pub mouse_delta_pos_screen: Vec2,
+    pub mouse_delta_screen: Vec2,
 
     pub mouse_button_left: GameButton,
     pub mouse_button_middle: GameButton,
@@ -159,21 +161,6 @@ impl GameButton {
 // Game
 //==================================================================================================
 //
-fn reinitialize_after_hotreload() {
-    // Initializing logger
-    // NOTE: When hot reloading the game lib dll the logging must be reinitialized
-    // TODO(JaSc): Do we actually need the logging?
-    //
-    fern::Dispatch::new()
-        .format(|out, message, record| out.finish(format_args!("{}: {}", record.level(), message)))
-        .level(LOG_LEVEL_GENERAL)
-        .level_for("game_lib", LOG_LEVEL_GAME_LIB)
-        .level_for("game_lib::math", LOG_LEVEL_MATH)
-        .level_for("game_lib::draw", LOG_LEVEL_DRAW)
-        .chain(std::io::stdout())
-        .apply()
-        .expect("Could not initialize logger");
-}
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
 //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
@@ -181,9 +168,27 @@ pub fn update_and_draw<'game_context>(
     input: &GameInput,
     gc: &'game_context mut GameContext<'game_context>,
 ) {
+    // ---------------------------------------------------------------------------------------------
+    // Init / re-init
+    //
     if input.hotreload_happened {
-        reinitialize_after_hotreload();
+        // Initializing logger
+        // NOTE: When hot reloading the game lib dll the logging must be reinitialized
+        // TODO(JaSc): Do we actually need the logging?
+        //
+        fern::Dispatch::new()
+            .format(|out, message, record| {
+                out.finish(format_args!("{}: {}", record.level(), message))
+            })
+            .level(LOG_LEVEL_GENERAL)
+            .level_for("game_lib", LOG_LEVEL_GAME_LIB)
+            .level_for("game_lib::math", LOG_LEVEL_MATH)
+            .level_for("game_lib::draw", LOG_LEVEL_DRAW)
+            .chain(std::io::stdout())
+            .apply()
+            .expect("Could not initialize logger");
     }
+
     if input.do_reinit_gamestate {
         gc.globals.cam = Camera::new(
             WorldPoint::zero(),
@@ -195,6 +200,7 @@ pub fn update_and_draw<'game_context>(
         gc.globals.error_happened = None;
         gc.gameplay_scene.reinitialize(&mut gc.system_commands);
         gc.debug_scene.reinitialize(&mut gc.system_commands);
+        gc.menu_scene.reinitialize(&mut gc.system_commands);
     }
 
     if input.do_reinit_drawstate {
@@ -207,17 +213,20 @@ pub fn update_and_draw<'game_context>(
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Mouse input
+    // Mouse input and camera
     //
     let screen_rect = Rect::from_dimension(input.screen_dim);
     let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
     let canvas_blit_rect = canvas_blit_rect(screen_rect, canvas_rect);
 
     // Canvas mouse position
+    // TODO(JaSc): new_mouse_pos_canvas and accumulations of new_mouse_delta_canvas will go
+    //             out of sync due to rounding errors. Maybe only allow just one or the other
+    //             when we get to implement event based input?
     let new_mouse_pos_canvas =
         screen_pos_to_canvas_pos(input.mouse_pos_screen, screen_rect, canvas_rect);
     let new_mouse_delta_canvas =
-        screen_vec_to_canvas_vec(input.mouse_delta_pos_screen, screen_rect, canvas_rect);
+        screen_vec_to_canvas_vec(input.mouse_delta_screen, screen_rect, canvas_rect);
 
     // World mouse position
     let new_mouse_pos_world = gc
@@ -229,6 +238,7 @@ pub fn update_and_draw<'game_context>(
         .cam
         .canvas_vec_to_world_vec(new_mouse_delta_canvas);
 
+    // Camera movement
     if input.mouse_button_right.is_pressed {
         gc.globals.cam.pan(new_mouse_delta_canvas);
     }
@@ -262,8 +272,10 @@ pub fn update_and_draw<'game_context>(
     dc.start_drawing();
     {
         //_do_collision_tests(dc, new_mouse_pos_world);
-
         gc.gameplay_scene
+            .update_and_draw(input, &mut gc.globals, &mut dc);
+
+        gc.menu_scene
             .update_and_draw(input, &mut gc.globals, &mut dc);
 
         gc.debug_scene
@@ -273,9 +285,10 @@ pub fn update_and_draw<'game_context>(
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
 }
 
-fn _do_collision_tests(dc: &mut DrawContext, new_mouse_pos_world: WorldPoint) {
-    let mouse_ray = Line::new(Vec2::zero(), new_mouse_pos_world);
-    let mouse_rect = Rect::from_point_dimension(new_mouse_pos_world, Vec2::ones() * 2.0);
+// Some intersection tests
+fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
+    let mouse_ray = Line::new(Vec2::zero(), mouse_pos_world);
+    let mouse_rect = Rect::from_point_dimension(mouse_pos_world, Vec2::ones() * 2.0);
 
     // Rect
     let test_rect = Rect {
@@ -440,7 +453,7 @@ fn _do_collision_tests(dc: &mut DrawContext, new_mouse_pos_world: WorldPoint) {
 }
 
 // =================================================================================================
-// TODO(JaSc): Find a better place for the following three functions
+// TODO(JaSc): Find a better place for the following functions
 // =================================================================================================
 
 /// Returns the `blit_rectangle` of for given canvas and screen rectangles.
@@ -512,12 +525,11 @@ fn screen_pos_to_canvas_pos(screen_point: Point, screen_rect: Rect, canvas_rect:
     blit_rect.right += 1.0;
     blit_rect.bottom += 1.0;
 
-    let result = canvas_rect.dim() * ((clamped_point - blit_rect.pos()) / blit_rect.dim());
-    Point::new(f32::floor(result.x), f32::floor(result.y))
+    (canvas_rect.dim() * ((clamped_point - blit_rect.pos()) / blit_rect.dim())).pixel_snapped()
 }
 
 fn screen_vec_to_canvas_vec(screen_vec: Vec2, screen_rect: Rect, canvas_rect: Rect) -> CanvasVec {
-    canvas_rect.dim() * (screen_vec / screen_rect.dim())
+    (canvas_rect.dim() * (screen_vec / screen_rect.dim())).pixel_snapped()
 }
 
 fn pretty_format_duration_ms(duration: f64) -> String {

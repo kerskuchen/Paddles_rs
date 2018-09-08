@@ -463,6 +463,10 @@ impl Rect {
         }
     }
 
+    pub fn from_xy_dimension(x: f32, y: f32, dim: Vec2) -> Rect {
+        Rect::from_xy_width_height(x, y, dim.x, dim.y)
+    }
+
     pub fn from_width_height(width: f32, height: f32) -> Rect {
         Rect::from_xy_width_height(0.0, 0.0, width, height)
     }
@@ -518,6 +522,13 @@ impl Rect {
     // ---------------------------------------------------------------------------------------------
     // Modify geometry
     //
+
+    pub fn with_pixel_snapped_position(self) -> Rect {
+        let pos = self.pos().pixel_snapped();
+        let dim = self.dim();
+        Rect::from_point_dimension(pos, dim)
+    }
+
     pub fn translated_by(self, translation: Vec2) -> Rect {
         Rect {
             left: self.left + translation.x,
@@ -583,6 +594,20 @@ impl Rect {
     pub fn centered_in_rect(self, target: Rect) -> Rect {
         let offset_centered = target.pos() + 0.5 * (target.dim() - self.dim());
         Rect::from_point_dimension(offset_centered, self.dim())
+    }
+
+    /// Returns a version of the rectangle that is centered horizontally in a given rect, leaving
+    /// the original vertical position intact
+    pub fn centered_horizontally_in_rect(self, target: Rect) -> Rect {
+        let offset_centered = target.pos() + 0.5 * (target.dim() - self.dim());
+        Rect::from_xy_dimension(offset_centered.x, self.pos().y, self.dim())
+    }
+
+    /// Returns a version of the rectangle that is centered vertically in a given rect, leaving
+    /// the original horizontal position intact
+    pub fn centered_vertically_in_rect(self, target: Rect) -> Rect {
+        let offset_centered = target.pos() + 0.5 * (target.dim() - self.dim());
+        Rect::from_xy_dimension(self.pos().x, offset_centered.y, self.dim())
     }
 
     /// Returns the biggest proportionally stretched version of the rectangle that can fit
