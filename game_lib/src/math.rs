@@ -424,6 +424,10 @@ impl Mat4Helper for Mat4 {
 //
 
 // TODO(JaSc): Write some docs, unittests/examples for these
+// TODO(JaSc): Do we have a drawing/collision convention for rects? I.e. do we draw 4x4
+//             pixels when using Rect{left: 0.0, right 4.0, top: 0.0, right: 4.0}
+//             or do we draw 5x5. Also what about collisions? Does the collision match its visuals?
+///
 /// Origin -> top-left
 #[derive(Default, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect {
@@ -801,6 +805,11 @@ pub fn intersections_line_circle(
     let line_dir = line.end - line.start;
     let center_to_line_start = line.start - circle.center;
     let a = Vec2::dot(line_dir, line_dir);
+    if is_effectively_zero(a) {
+        // line.start == line.end
+        debug_assert!(false);
+        return (None, None);
+    }
     let b = 2.0 * Vec2::dot(center_to_line_start, line_dir);
     let c = Vec2::dot(center_to_line_start, center_to_line_start) - circle.radius * circle.radius;
 
@@ -810,7 +819,6 @@ pub fn intersections_line_circle(
         return (None, None);
     }
 
-    debug_assert!(!is_effectively_zero(a));
     let discriminant = f32::sqrt(discriminant);
     let recip_a = f32::recip(2.0 * a);
     // NOTE: t_min <= t_max because a > 0 and discriminant >= 0
@@ -964,17 +972,15 @@ impl WorldPoint {
 /// let mut cam = Camera::new(Point::zero(), canvas_width, canvas_height, -1.0, 1.0);
 ///
 /// // Current and old mouse state
-/// let old_mouse_pos_canvas = Point::new(50.0, 130.0);
-/// let new_mouse_pos_canvas = Point::new(60.0, 130.0);
+/// let mouse_pos_canvas = CanvasPoint::new(50.0, 130.0);
+/// let mouse_delta_canvas = CanvasVec::new(15.0, -20.0);
 /// let mouse_button_right_pressed = true;
 /// let mouse_button_middle_pressed = false;
 /// let mouse_wheel_delta = 0;
 ///
 /// // World mouse position and delta
-/// let mouse_delta_canvas = new_mouse_pos_canvas - old_mouse_pos_canvas;
-/// let old_mouse_pos_world = cam.canvas_to_world(old_mouse_pos_canvas);
-/// let new_mouse_pos_world = cam.canvas_to_world(new_mouse_pos_canvas);
-/// let _mouse_delta_world = new_mouse_pos_world - old_mouse_pos_world;
+/// let mouse_pos_world = cam.canvas_point_to_world_point(mouse_pos_canvas);
+/// let mouse_delta_world = cam.canvas_vec_to_world_vec(mouse_pos_canvas);
 ///
 /// // Pan camera
 /// if mouse_button_right_pressed {
@@ -982,17 +988,17 @@ impl WorldPoint {
 /// }
 /// // Reset zoom
 /// if mouse_button_middle_pressed {
-///     cam.zoom_to_world_point(new_mouse_pos_world, 1.0);
+///     cam.zoom_to_world_point(mouse_pos_world, 1.0);
 /// }
 /// // Zoom in or out by factors of two
 /// if mouse_wheel_delta > 0 {
 ///     // Magnify up till 8x
 ///     let new_zoom_level = f32::min(cam.zoom_level * 2.0, 8.0);
-///     cam.zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
+///     cam.zoom_to_world_point(mouse_pos_world, new_zoom_level);
 /// } else if mouse_wheel_delta < 0 {
 ///     // Minify down till 1/8
 ///     let new_zoom_level = f32::max(cam.zoom_level / 2.0, 1.0 / 8.0);
-///     cam.zoom_to_world_point(new_mouse_pos_world, new_zoom_level);
+///     cam.zoom_to_world_point(mouse_pos_world, new_zoom_level);
 /// }
 ///
 /// // Get project-view-matrix from cam and use it for drawing
@@ -1048,14 +1054,24 @@ impl Camera {
             .scaled_from_center(Vec2::ones() / self.zoom_level)
     }
 
-    /// Converts a [`CanvasPoint`] into a [`WorldPoint`]
-    pub fn canvas_to_world(&self, point: CanvasPoint) -> WorldPoint {
+    /// Converts a [`CanvasPoint`] to a [`WorldPoint`]
+    pub fn canvas_point_to_world_point(&self, point: CanvasPoint) -> WorldPoint {
         (point - 0.5 * self.frustum.dim()) / self.zoom_level + self.pos().pixel_snapped()
     }
 
-    /// Converts a [`WorldPoint`] into a [`CanvasPoint`]
-    pub fn world_to_canvas(&self, point: WorldPoint) -> CanvasPoint {
+    /// Converts a [`WorldPoint`] to a [`CanvasPoint`]
+    pub fn world_point_to_canvas_point(&self, point: WorldPoint) -> CanvasPoint {
         (point - self.pos().pixel_snapped()) * self.zoom_level + 0.5 * self.frustum.dim()
+    }
+
+    /// Converts a [`CanvasVec`] to a [`WorldVec`]
+    pub fn canvas_vec_to_world_vec(&self, vec: CanvasVec) -> WorldVec {
+        vec / self.zoom_level
+    }
+
+    /// Converts a [`WorldVec`] to a [`CanvasVec`]
+    pub fn world_vec_to_canvas_vec(&self, vec: WorldVec) -> CanvasVec {
+        vec * self.zoom_level
     }
 
     /// Zooms the camera to or away from a given world point.
@@ -1105,18 +1121,31 @@ mod tests {
 
     #[test]
     fn converting_between_canvas_and_world_coordinates_and_back() {
-        let cam = Camera::new(WorldPoint::zero(), 100.0, 100.0, -1.0, 1.0);
+        let mut cam = Camera::new(WorldPoint::zero(), 100.0, 100.0, -1.0, 1.0);
+        cam.zoom_level = 2.0;
 
         let canvas_point = CanvasPoint::new(0.75, -0.23);
         assert!(is_effectively_zero(CanvasPoint::distance(
             canvas_point,
-            cam.world_to_canvas(cam.canvas_to_world(canvas_point))
+            cam.world_point_to_canvas_point(cam.canvas_point_to_world_point(canvas_point))
         )));
 
         let world_point = WorldPoint::new(-12.3, 134.0);
         assert!(is_effectively_zero(WorldPoint::distance(
             world_point,
-            cam.canvas_to_world(cam.world_to_canvas(world_point))
+            cam.canvas_point_to_world_point(cam.world_point_to_canvas_point(world_point))
+        )));
+
+        let canvas_vec = CanvasPoint::new(0.75, -0.23);
+        assert!(is_effectively_zero(CanvasPoint::distance(
+            canvas_vec,
+            cam.world_point_to_canvas_point(cam.canvas_point_to_world_point(canvas_vec))
+        )));
+
+        let world_vec = WorldPoint::new(-12.3, 134.0);
+        assert!(is_effectively_zero(WorldPoint::distance(
+            world_vec,
+            cam.canvas_point_to_world_point(cam.world_point_to_canvas_point(world_vec))
         )));
     }
 
