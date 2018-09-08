@@ -137,7 +137,8 @@ impl Scene for DebugScene {
 //
 #[derive(Default)]
 pub struct GameplayScene {
-    is_multiplayer: bool,
+    right_player_is_human: bool,
+    left_player_is_human: bool,
 
     paddle_left_pos: f32,
     paddle_left_vel: f32,
@@ -437,10 +438,25 @@ fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
 //==================================================================================================
 //
 
+const MAIN_MENU_ITEMS: &[MenuItem] = &[
+    MenuItem::StartSinglePlayer,
+    MenuItem::StartTwoPlayers,
+    MenuItem::Quit,
+];
+
+const DIFFICULTY_MENU_ITEMS: &[MenuItem] = &[
+    MenuItem::DifficultyEasy,
+    MenuItem::DifficultyMedium,
+    MenuItem::DifficultyHard,
+];
+
 enum MenuItem {
     StartSinglePlayer,
     StartTwoPlayers,
     Quit,
+    DifficultyEasy,
+    DifficultyMedium,
+    DifficultyHard,
 }
 
 impl MenuItem {
@@ -449,40 +465,27 @@ impl MenuItem {
             MenuItem::StartSinglePlayer => "Play with computer",
             MenuItem::StartTwoPlayers => "Play with human",
             MenuItem::Quit => "Quit game",
+            MenuItem::DifficultyEasy => "Easy",
+            MenuItem::DifficultyMedium => "Medium",
+            MenuItem::DifficultyHard => "Hard",
         }
-    }
-}
-
-impl Default for MenuItem {
-    fn default() -> Self {
-        MenuItem::StartSinglePlayer
     }
 }
 
 #[derive(Default)]
 pub struct MenuScene {
-    menu_items: Vec<MenuItem>,
     highlighted_menu_item_index: usize,
 }
 
 impl Scene for MenuScene {
     fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>) {
         system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
-
-        self.menu_items = vec![
-            MenuItem::StartSinglePlayer,
-            MenuItem::StartTwoPlayers,
-            MenuItem::Quit,
-        ];
-
         self.highlighted_menu_item_index = 0;
     }
 
     fn update_and_draw(&mut self, input: &GameInput, globals: &mut Globals, dc: &mut DrawContext) {
-        let button_margin = 2.0;
-        let button_padding = 2.0;
+        // Overlay below scene
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
-
         dc.draw_rect_filled(
             canvas_rect,
             0.0,
@@ -490,65 +493,103 @@ impl Scene for MenuScene {
             DrawSpace::Canvas,
         );
 
-        let button_rects: Vec<_> = self
-            .menu_items
-            .iter()
-            .map(|item| {
-                let text_rect = Rect::from_dimension(dc.get_text_dimensions(item.as_str()));
-                text_rect.extended_uniformly_by(button_padding)
-            })
-            .collect();
+        create_button_menu(
+            &MAIN_MENU_ITEMS
+                .iter()
+                .map(|item| item.as_str())
+                .collect::<Vec<_>>(),
+            &mut self.highlighted_menu_item_index,
+            canvas_rect,
+            input,
+            globals,
+            dc,
+        );
+        // create_button_menu(
+        //     &DIFFICULTY_MENU_ITEMS
+        //         .iter()
+        //         .map(|item| item.as_str())
+        //         .collect::<Vec<_>>(),
+        //     &mut self.highlighted_menu_item_index,
+        //     canvas_rect,
+        //     input,
+        //     globals,
+        //     dc,
+        // );
+    }
+}
 
-        let menu_height = button_rects
-            .iter()
-            .map(|rect| rect.height() + button_margin)
-            .sum::<f32>() + button_margin;
-        let menu_width = button_rects
-            .iter()
-            .map(|rect| rect.width() + 2.0 * button_margin)
-            .max_by(|a, b| compare_floats(*a, *b))
-            .unwrap_or_else(|| panic!("Menu has no buttons"));
+fn create_button_menu(
+    menu_items: &[&str],
+    highlighted_menu_item_index: &mut usize,
+    canvas_rect: Rect,
+    input: &GameInput,
+    globals: &mut Globals,
+    dc: &mut DrawContext,
+) {
+    // Create button sizes
+    let button_margin = 1.0;
+    let button_padding = 4.0;
+    let button_dim = menu_items
+        .iter()
+        .map(|item| dc.get_text_dimensions(item) + 2.0 * button_padding)
+        .fold(Rect::zero(), |acc, dim| {
+            Rect::smallest_rect_that_contains_both_rects(acc, Rect::from_dimension(dim))
+        })
+        .dim();
 
-        let menu_rect = Rect::from_width_height(menu_width, menu_height)
-            .centered_in_rect(canvas_rect)
+    // Create and draw menu box
+    let menu_padding = 2.0;
+    let menu_height = 2.0 * menu_padding
+        + menu_items.len() as f32 * button_dim.y
+        + ((menu_items.len() - 1) as f32) * button_margin;
+    let menu_width = button_dim.x + 2.0 * menu_padding;
+    let menu_box = Rect::from_width_height(menu_width, menu_height)
+        .centered_in_rect(canvas_rect)
+        .with_pixel_snapped_position();
+    dc.draw_rect_filled(menu_box, 0.0, COLOR_CYAN, DrawSpace::Canvas);
+    dc.draw_rect(
+        menu_box,
+        0.0,
+        Color::new(0.4, 0.4, 0.4, 0.4),
+        DrawSpace::Canvas,
+    );
+
+    // Create and draw buttons
+    let mut vertical_offset = menu_padding;
+    for (index, item) in menu_items.iter().enumerate() {
+        // Draw button rect
+        let button_rect = Rect::from_dimension(button_dim)
+            .translated_to_pos(menu_box.pos())
+            .translated_by(Vec2::unit_y() * vertical_offset)
+            .centered_horizontally_in_rect(menu_box)
             .with_pixel_snapped_position();
-        dc.draw_rect_filled(menu_rect, 0.0, COLOR_WHITE, DrawSpace::Canvas);
+        vertical_offset += button_rect.height() + button_margin;
 
-        let mut vertical_offset = button_margin;
-        for (index, item) in self.menu_items.iter().enumerate() {
-            // Draw button rect
-            let button_rect = button_rects[index]
-                .translated_to_pos(menu_rect.pos())
-                .translated_by(Vec2::unit_y() * vertical_offset)
-                .centered_horizontally_in_rect(menu_rect)
-                .with_pixel_snapped_position();
-            vertical_offset += button_rect.height() + button_margin;
-
-            if globals.mouse_pos_canvas.intersects_rect(button_rect) {
-                self.highlighted_menu_item_index = index;
-            }
-
-            dc.draw_rect_filled(
-                button_rect,
-                0.0,
-                if index == self.highlighted_menu_item_index {
-                    COLOR_MAGENTA
-                } else {
-                    COLOR_BLUE
-                },
-                DrawSpace::Canvas,
-            );
-
-            // Draw text
-            let text_rect = Rect::from_dimension(dc.get_text_dimensions(item.as_str()))
-                .centered_in_rect(button_rect);
-            dc.draw_text(
-                text_rect.pos(),
-                item.as_str(),
-                0.0,
-                COLOR_WHITE,
-                DrawSpace::Canvas,
-            );
+        if globals.mouse_pos_canvas.intersects_rect(button_rect) {
+            *highlighted_menu_item_index = index;
         }
+
+        // Draw buttons with outlines
+        dc.draw_rect_filled(
+            button_rect,
+            0.0,
+            if index == *highlighted_menu_item_index {
+                COLOR_MAGENTA
+            } else {
+                COLOR_BLUE
+            },
+            DrawSpace::Canvas,
+        );
+        dc.draw_rect(
+            button_rect,
+            0.0,
+            Color::new(0.4, 0.4, 0.4, 0.4),
+            DrawSpace::Canvas,
+        );
+
+        // Draw button text
+        let text_rect =
+            Rect::from_dimension(dc.get_text_dimensions(item)).centered_in_rect(button_rect);
+        dc.draw_text(text_rect.pos(), item, 0.0, COLOR_WHITE, DrawSpace::Canvas);
     }
 }

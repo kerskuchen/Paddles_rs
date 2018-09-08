@@ -496,6 +496,15 @@ impl Rect {
         Rect::unit_rect().centered()
     }
 
+    pub fn smallest_rect_that_contains_both_rects(a: Rect, b: Rect) -> Rect {
+        Rect {
+            left: f32::min(a.left, b.left),
+            right: f32::max(a.right, b.right),
+            top: f32::min(a.top, b.top),
+            bottom: f32::max(a.bottom, b.bottom),
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Accessors
     //
@@ -667,8 +676,8 @@ impl Rect {
 
     pub fn bottom_segment(&self) -> Line {
         Line::new(
-            Point::new(self.right, self.bottom),
             Point::new(self.left, self.bottom),
+            Point::new(self.right, self.bottom),
         )
     }
 
@@ -696,6 +705,13 @@ pub struct Line {
 impl Line {
     pub fn new(start: Point, end: Point) -> Line {
         Line { start, end }
+    }
+
+    pub fn translated_by(self, translation: Vec2) -> Line {
+        Line {
+            start: self.start + translation,
+            end: self.end + translation,
+        }
     }
 
     pub fn to_intersection_point(&self, t: f32) -> Point {

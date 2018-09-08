@@ -180,6 +180,10 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
     }
 
+    pub fn draw_rect(&mut self, rect: Rect, depth: f32, color: Color, draw_space: DrawSpace) {
+        self.draw_lines(&draw_outlines_from_rect(rect), depth, color, draw_space);
+    }
+
     pub fn debug_draw_rect_textured(
         &mut self,
         rect: Rect,
@@ -967,5 +971,31 @@ pub fn vertices_from_rects(
             uv: [rect_uv.left, rect_uv.top, atlas_index],
             color,
         },
+    ]
+}
+
+/// Returns line segments for drawing in the following order left, right, top, bottom.
+fn draw_outlines_from_rect(rect: Rect) -> [Line; 4] {
+    [
+        // Left segment
+        Line::new(
+            Point::new(rect.left + 1.0, rect.bottom),
+            Point::new(rect.left + 1.0, rect.top),
+        ),
+        // Right segment
+        Line::new(
+            Point::new(rect.right, rect.top),
+            Point::new(rect.right, rect.bottom),
+        ),
+        // Top segment
+        Line::new(
+            Point::new(rect.left + 1.0, rect.top),
+            Point::new(rect.right - 1.0, rect.top),
+        ),
+        // Bottom segment
+        Line::new(
+            Point::new(rect.left + 1.0, rect.bottom - 1.0),
+            Point::new(rect.right - 1.0, rect.bottom - 1.0),
+        ),
     ]
 }
