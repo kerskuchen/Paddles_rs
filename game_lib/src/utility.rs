@@ -1,3 +1,5 @@
+use math;
+
 /// A macro for debugging which returns a string representation of an expression and its value
 ///
 /// It uses the `stringify` macro internally and requires the input to be an expression.
@@ -51,4 +53,59 @@ macro_rules! dprintln {
     ($x:expr) => {
         println!("{}", dformat!($x));
     };
+}
+
+//==================================================================================================
+// CountdownTimer
+//==================================================================================================
+//
+
+#[derive(Debug)]
+pub struct CountdownTimer {
+    cur_time: f32,
+    end_time: f32,
+}
+
+impl Default for CountdownTimer {
+    fn default() -> CountdownTimer {
+        CountdownTimer::with_one_second_end_time()
+    }
+}
+
+impl CountdownTimer {
+    pub fn with_one_second_end_time() -> CountdownTimer {
+        CountdownTimer {
+            cur_time: 0.0,
+            end_time: 1.0,
+        }
+    }
+
+    pub fn with_given_end_time(end_time: f32) -> CountdownTimer {
+        debug_assert!(end_time > math::EPSILON);
+
+        CountdownTimer {
+            cur_time: 0.0,
+            end_time,
+        }
+    }
+
+    pub fn increment(&mut self, delta_time: f32) {
+        self.cur_time = f32::min(self.cur_time + delta_time, self.end_time);
+    }
+
+    pub fn is_finished(&self) -> bool {
+        (self.end_time - self.cur_time) < math::EPSILON
+    }
+
+    pub fn is_running(&self) -> bool {
+        !self.is_finished()
+    }
+
+    pub fn completion_ratio(&self) -> f32 {
+        self.cur_time / self.end_time
+    }
+
+    pub fn restart(&mut self) {
+        self.cur_time = 0.0;
+    }
 }

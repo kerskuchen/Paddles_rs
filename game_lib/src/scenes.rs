@@ -1,3 +1,4 @@
+use utility::CountdownTimer;
 use *;
 
 const PONGI_RADIUS: f32 = 7.5;
@@ -13,8 +14,28 @@ const FIELD_BOUNDS: Rect = Rect {
     bottom: 6.0 * UNIT_SIZE,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum GameDifficulty {
+    Easy,
+    Medium,
+    Hard,
+}
+
+impl Default for GameDifficulty {
+    fn default() -> Self {
+        GameDifficulty::Medium
+    }
+}
+
 #[derive(Default)]
 pub struct Globals {
+    pub restart_game: bool,
+    pub input_disabled: bool,
+
+    game_difficulty: GameDifficulty,
+    right_player_is_human: bool,
+    left_player_is_human: bool,
+
     pub mouse_pos_world: WorldPoint,
     pub mouse_pos_canvas: CanvasPoint,
 
@@ -67,12 +88,12 @@ impl Scene for DebugScene {
         if input.mouse_button_right.is_pressed {
             cursor_color.z = 1.0;
         }
-        dc.debug_draw_cursor(
-            globals.mouse_pos_canvas,
-            -0.3,
-            COLOR_WHITE,
-            DrawSpace::Canvas,
-        );
+        // dc.debug_draw_cursor(
+        //     globals.mouse_pos_canvas,
+        //     -0.3,
+        //     COLOR_WHITE,
+        //     DrawSpace::Canvas,
+        // );
         dc.draw_rect_filled(
             Rect::from_point_dimension(globals.mouse_pos_world.pixel_snapped(), Vec2::ones()),
             -0.2,
@@ -153,8 +174,7 @@ impl Scene for DebugScene {
 //
 #[derive(Default)]
 pub struct GameplayScene {
-    right_player_is_human: bool,
-    left_player_is_human: bool,
+    is_paused: bool,
 
     paddle_left_pos: f32,
     paddle_left_vel: f32,
@@ -166,10 +186,15 @@ pub struct GameplayScene {
     pongi_vel: Vec2,
 
     time_till_next_beat: f32,
+
+    game_difficulty: GameDifficulty,
+    right_player_is_human: bool,
+    left_player_is_human: bool,
 }
 
 impl Scene for GameplayScene {
     fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>) {
+        self.is_paused = true;
         //gc.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
         //gc.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
 
@@ -179,8 +204,6 @@ impl Scene for GameplayScene {
 
         // gc.pongi_pos = Point::new(-151.48575, -88.0);
         // gc.pongi_vel = Vec2::new(-4644.807, 6393.034);
-
-        system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(true));
     }
 
     fn update_and_draw(
@@ -190,7 +213,15 @@ impl Scene for GameplayScene {
         dc: &mut DrawContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
-        let delta_time = if input.game_paused || globals.error_happened.is_some() {
+        if globals.restart_game {
+            globals.restart_game = false;
+            self.left_player_is_human = globals.left_player_is_human;
+            self.right_player_is_human = globals.right_player_is_human;
+            self.game_difficulty = globals.game_difficulty;
+            self.reinitialize(system_commands);
+        }
+
+        let delta_time = if self.is_paused || globals.error_happened.is_some() {
             0.0
         } else {
             let time_factor = if input.fast_time == 0 {
@@ -518,12 +549,14 @@ const DIFFICULTY_MENU_ITEMS: &[MenuItem] = &[
 
 const PAUSE_MENU_ITEMS: &[MenuItem] = &[MenuItem::PauseResume, MenuItem::PauseQuitMenu];
 
+const FADE_TIME: f32 = 0.2;
+
 #[derive(Debug, Default)]
 pub struct MenuScene {
     highlighted_menu_item_index: usize,
     last_pressed_menu_item_index: Option<usize>,
-    difficulty_chosen: Option<MenuItem>,
     menu_mode: MenuMode,
+    screen_fader: ScreenFader,
 }
 
 impl Scene for MenuScene {
@@ -540,15 +573,57 @@ impl Scene for MenuScene {
         dc: &mut DrawContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
+        let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
+
+        self.screen_fader.increment(input.time_delta);
+        if self.screen_fader.has_finished_fading_out() {
+            self.menu_mode = match self.menu_mode {
+                MenuMode::Ingame => MenuMode::Ingame,
+                MenuMode::Main => MenuMode::Ingame,
+                MenuMode::Difficulty => MenuMode::Ingame,
+                MenuMode::Pause => MenuMode::Main,
+            };
+            globals.restart_game = true;
+            self.screen_fader.start_fading_in(FADE_TIME);
+        }
+        if self.screen_fader.has_finished_fading_in() {
+            // TODO(JaSc): Right now this is excecuted nearly every frame. Maybe those fader
+            //             'has_finished_fading_..' methods should only return true once.
+            //             Alternatively we could pass closures to the increment method that
+            //             will get executed when screen_fader finished fading
+            globals.input_disabled = false;
+        }
+
+        // Fade overlay
+        if self.screen_fader.fading_overlay_opacity() > 0.0 {
+            dc.draw_rect_filled(
+                canvas_rect,
+                0.0,
+                Color::new(0.0, 0.0, 0.0, self.screen_fader.fading_overlay_opacity()),
+                DrawSpace::Canvas,
+            );
+        }
+
         if self.menu_mode == MenuMode::Ingame {
-            return;
+            if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
+                println!("AAAAAAAAAAAAAAAAAAAA");
+                system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
+                self.menu_mode = MenuMode::Pause;
+                // NOTE: We return here immediately so we can start fresh in the pause menu next
+                //       time we call this method. Otherwise the escape key press will be evaluated
+                //       again later in this method which causes some issues.
+                return;
+            } else {
+                // No need to show a menu if we are in-game
+                system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(true));
+                return;
+            }
         }
 
         // Overlay below scene
-        let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
         dc.draw_rect_filled(
             canvas_rect,
-            0.0,
+            -0.2,
             Color::new(0.4, 0.4, 0.4, 0.3),
             DrawSpace::Canvas,
         );
@@ -565,26 +640,71 @@ impl Scene for MenuScene {
             .map(|item| item.as_str())
             .collect::<Vec<_>>();
 
-        if let Some(clicked_menu_item) = create_button_menu(
+        let mut clicked_menu_item = create_button_menu(
             &menu_items_strings,
             &mut self.highlighted_menu_item_index,
             &mut self.last_pressed_menu_item_index,
+            -0.1,
             canvas_rect,
             input,
             globals,
             dc,
-        ).map(|index| menu_items[index])
-        {
-            match clicked_menu_item {
-                MenuItem::MainStartSinglePlayer => self.menu_mode = MenuMode::Difficulty,
-                MenuItem::MainStartTwoPlayers => {}
-                MenuItem::MainQuit => system_commands.push(SystemCommand::ShutdownGame),
-                MenuItem::DifficultyEasy => {}
-                MenuItem::DifficultyMedium => {}
-                MenuItem::DifficultyHard => {}
-                MenuItem::DifficultyBack => self.menu_mode = MenuMode::Main,
-                MenuItem::PauseResume => {}
-                MenuItem::PauseQuitMenu => {}
+        ).map(|index| menu_items[index]);
+
+        if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
+            println!("BBBBBBBBBBBBBBBBBBBBBB");
+            if self.menu_mode == MenuMode::Pause {
+                clicked_menu_item = Some(MenuItem::PauseQuitMenu);
+            } else if self.menu_mode == MenuMode::Main {
+                clicked_menu_item = Some(MenuItem::MainQuit);
+            }
+        }
+
+        if let Some(clicked_menu_item) = clicked_menu_item {
+            if !globals.input_disabled {
+                match clicked_menu_item {
+                    MenuItem::MainStartSinglePlayer => self.menu_mode = MenuMode::Difficulty,
+                    MenuItem::MainStartTwoPlayers => {
+                        globals.input_disabled = true;
+                        globals.game_difficulty = GameDifficulty::Medium;
+                        globals.left_player_is_human = true;
+                        globals.right_player_is_human = true;
+                        self.screen_fader.start_fading_out(FADE_TIME);
+                    }
+                    MenuItem::MainQuit => system_commands.push(SystemCommand::ShutdownGame),
+                    MenuItem::DifficultyEasy => {
+                        globals.input_disabled = true;
+                        globals.game_difficulty = GameDifficulty::Easy;
+                        globals.left_player_is_human = true;
+                        globals.right_player_is_human = false;
+                        self.screen_fader.start_fading_out(FADE_TIME);
+                    }
+                    MenuItem::DifficultyMedium => {
+                        globals.input_disabled = true;
+                        globals.game_difficulty = GameDifficulty::Medium;
+                        globals.left_player_is_human = true;
+                        globals.right_player_is_human = false;
+                        self.screen_fader.start_fading_out(FADE_TIME);
+                    }
+                    MenuItem::DifficultyHard => {
+                        globals.input_disabled = true;
+                        globals.game_difficulty = GameDifficulty::Hard;
+                        globals.left_player_is_human = true;
+                        globals.right_player_is_human = false;
+                        self.screen_fader.start_fading_out(FADE_TIME);
+                    }
+                    MenuItem::DifficultyBack => self.menu_mode = MenuMode::Main,
+                    MenuItem::PauseResume => {
+                        self.menu_mode = MenuMode::Ingame;
+                    }
+                    MenuItem::PauseQuitMenu => {
+                        globals.input_disabled = true;
+                        globals.game_difficulty = GameDifficulty::Medium;
+                        globals.left_player_is_human = false;
+                        globals.right_player_is_human = false;
+                        self.screen_fader.start_fading_out(FADE_TIME);
+                    }
+                }
             }
         }
     }
@@ -594,6 +714,7 @@ fn create_button_menu(
     menu_items: &[&str],
     highlighted_menu_item_index: &mut usize,
     last_pressed_menu_item_index: &mut Option<usize>,
+    depth: f32,
     canvas_rect: Rect,
     input: &GameInput,
     globals: &mut Globals,
@@ -623,10 +744,10 @@ fn create_button_menu(
     let menu_box = Rect::from_width_height(menu_width, menu_height)
         .centered_in_rect(canvas_rect)
         .with_pixel_snapped_position();
-    dc.draw_rect_filled(menu_box, 0.0, COLOR_CYAN, DrawSpace::Canvas);
+    dc.draw_rect_filled(menu_box, depth, COLOR_CYAN, DrawSpace::Canvas);
     dc.draw_rect(
         menu_box,
-        0.0,
+        depth,
         Color::new(0.4, 0.4, 0.4, 0.4),
         DrawSpace::Canvas,
     );
@@ -668,7 +789,7 @@ fn create_button_menu(
         // Draw buttons with outlines
         dc.draw_rect_filled(
             button_rect,
-            0.0,
+            depth,
             if last_pressed_menu_item_index.is_none() && index == *highlighted_menu_item_index {
                 COLOR_MAGENTA
             } else if last_pressed_menu_item_index.is_some()
@@ -682,7 +803,7 @@ fn create_button_menu(
         );
         dc.draw_rect(
             button_rect,
-            0.0,
+            depth,
             Color::new(0.4, 0.4, 0.4, 0.4),
             DrawSpace::Canvas,
         );
@@ -690,7 +811,7 @@ fn create_button_menu(
         // Draw button text
         let text_rect =
             Rect::from_dimension(dc.get_text_dimensions(item)).centered_in_rect(button_rect);
-        dc.draw_text(text_rect.pos(), item, 0.0, COLOR_WHITE, DrawSpace::Canvas);
+        dc.draw_text(text_rect.pos(), item, depth, COLOR_WHITE, DrawSpace::Canvas);
     }
 
     // NOTE: We need to clear the mouse pressed flag only after we checked all buttons so that
@@ -700,4 +821,89 @@ fn create_button_menu(
     }
 
     clicked_button_index
+}
+
+//==================================================================================================
+// FadeOutIn
+//==================================================================================================
+//
+
+#[derive(Debug, PartialEq)]
+enum FadeState {
+    FadingOut,
+    FadingIn,
+    FadedOut,
+    FadedIn,
+}
+
+#[derive(Debug)]
+struct ScreenFader {
+    fade_timer: CountdownTimer,
+    fade_state: FadeState,
+}
+
+impl Default for ScreenFader {
+    fn default() -> Self {
+        ScreenFader {
+            fade_timer: CountdownTimer::default(),
+            fade_state: FadeState::FadedIn,
+        }
+    }
+}
+
+impl ScreenFader {
+    pub fn new() -> ScreenFader {
+        ScreenFader::default()
+    }
+
+    pub fn fading_overlay_opacity(&self) -> f32 {
+        match self.fade_state {
+            FadeState::FadedIn => 0.0,
+            FadeState::FadedOut => 1.0,
+            FadeState::FadingIn => 1.0 - self.fade_timer.completion_ratio(),
+            FadeState::FadingOut => self.fade_timer.completion_ratio(),
+        }
+    }
+
+    pub fn increment(&mut self, delta_time: f32) {
+        self.fade_timer.increment(delta_time);
+        if self.fade_timer.is_finished() {
+            self.fade_state = match self.fade_state {
+                FadeState::FadedIn => FadeState::FadedIn,
+                FadeState::FadedOut => FadeState::FadedOut,
+                FadeState::FadingIn => FadeState::FadedIn,
+                FadeState::FadingOut => FadeState::FadedOut,
+            };
+        }
+    }
+
+    pub fn start_fading_out(&mut self, fade_time: f32) {
+        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
+        self.fade_state = FadeState::FadingOut;
+    }
+
+    pub fn start_fading_in(&mut self, fade_time: f32) {
+        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
+        self.fade_state = FadeState::FadingIn;
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.fade_state == FadeState::FadingIn || self.fade_state == FadeState::FadingOut
+    }
+
+    pub fn has_finished_fading_out(&self) -> bool {
+        // NOTE: It only makes sense to call this function if we acually are (or were) fading out
+        // debug_assert!(
+        //     self.fade_state == FadeState::FadedOut || self.fade_state == FadeState::FadingOut
+        // );
+        self.fade_state == FadeState::FadedOut
+    }
+
+    pub fn has_finished_fading_in(&self) -> bool {
+        // NOTE: It only makes sense to call this function if we acually are (or were) fading in
+        // debug_assert!(
+        //     self.fade_state == FadeState::FadedIn || self.fade_state == FadeState::FadingIn
+        // );
+        self.fade_state == FadeState::FadedIn
+    }
 }

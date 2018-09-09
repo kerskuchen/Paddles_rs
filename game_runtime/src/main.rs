@@ -76,6 +76,7 @@ extern crate gfx_window_glutin;
 extern crate glutin;
 use gfx::Device;
 use glutin::GlContext;
+use glutin::VirtualKeyCode::*;
 
 pub trait OptionHelper {
     fn none_or(self, err: Error) -> Result<(), Error>;
@@ -235,28 +236,38 @@ fn main() -> Result<(), Error> {
                     WindowEvent::KeyboardInput {
                         input:
                             KeyboardInput {
+                                state: glutin::ElementState::Released,
+                                virtual_keycode: Some(key),
+                                // modifiers,
+                                ..
+                            },
+                        ..
+                    } => match key {
+                        Escape => input.escape_button.set_state(false),
+                        _ => (),
+                    },
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
                                 state: glutin::ElementState::Pressed,
                                 virtual_keycode: Some(key),
                                 // modifiers,
                                 ..
                             },
                         ..
-                    } => {
-                        use glutin::VirtualKeyCode::*;
-                        match key {
-                            Escape => is_running = false,
-                            F1 => input.do_reinit_gamestate = true,
-                            F5 => input.do_reinit_drawstate = true,
-                            F9 => {
-                                input.direct_screen_drawing = !input.direct_screen_drawing;
-                                input.do_reinit_drawstate = true;
-                            }
-                            Add => input.fast_time += 1,
-                            Subtract => input.fast_time -= 1,
-                            Space => input.game_paused = !input.game_paused,
-                            _ => (),
+                    } => match key {
+                        Escape => input.escape_button.set_state(true),
+                        F1 => input.do_reinit_gamestate = true,
+                        F5 => input.do_reinit_drawstate = true,
+                        F9 => {
+                            input.direct_screen_drawing = !input.direct_screen_drawing;
+                            input.do_reinit_drawstate = true;
                         }
-                    }
+                        Add => input.fast_time += 1,
+                        Subtract => input.fast_time -= 1,
+                        Space => input.game_paused = !input.game_paused,
+                        _ => (),
+                    },
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
                         window_has_focus = has_focus;
