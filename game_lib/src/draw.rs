@@ -485,7 +485,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             target_rect: canvas_blit_rect,
         });
 
-        // Debug draw batches
+        // Screen draw batches
         self.draw_commands.push(DrawCommand::ClearDepth {
             framebuffer: FramebufferTarget::Screen,
             depth: DEFAULT_SCREEN_ZFAR,

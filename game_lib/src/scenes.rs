@@ -597,6 +597,7 @@ impl Scene for MenuScene {
     ) {
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
 
+        // Update screen fader
         self.screen_fader.increment(input.time_delta);
         if self.screen_fader.has_finished_fading_out() {
             self.menu_mode = match self.menu_mode {
@@ -621,17 +622,16 @@ impl Scene for MenuScene {
             dc.draw_rect_filled(
                 canvas_rect,
                 0.0,
-                Color::new(
-                    0.0,
-                    0.0,
-                    0.0,
-                    f32::sqrt(self.screen_fader.fading_overlay_opacity()),
-                ),
+                Color::new(1.0, 1.0, 1.0, self.screen_fader.fading_overlay_opacity()),
                 ADDITIVITY_NONE,
-                DrawSpace::Canvas,
+                // TODO(JaSc): For now we just use the debug-drawspace as a hack until we implement
+                //             transparency sorting. If we would draw this in canvas-drawspace
+                //             it would interfere with menu overlay.
+                DrawSpace::Debug,
             );
         }
 
+        // Enable or disable relative mouse movement capture
         if self.menu_mode == MenuMode::Ingame {
             if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
                 system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
@@ -651,7 +651,7 @@ impl Scene for MenuScene {
         dc.draw_rect_filled(
             canvas_rect,
             -0.2,
-            Color::new(0.0, 0.0, 0.0, 0.8),
+            Color::new(1.0, 1.0, 1.0, 0.3),
             ADDITIVITY_NONE,
             DrawSpace::Canvas,
         );
@@ -679,6 +679,7 @@ impl Scene for MenuScene {
             dc,
         ).map(|index| menu_items[index]);
 
+        // Override clicked_menu_item if we pressed escape this frame
         if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
             if self.menu_mode == MenuMode::Pause {
                 clicked_menu_item = Some(MenuItem::PauseQuitMenu);
@@ -687,6 +688,7 @@ impl Scene for MenuScene {
             }
         }
 
+        // Evaluate the clicked_menu_item
         if let Some(clicked_menu_item) = clicked_menu_item {
             if !globals.input_disabled {
                 match clicked_menu_item {
