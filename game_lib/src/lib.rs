@@ -31,6 +31,7 @@ use scenes::*;
 
 pub enum SystemCommand {
     EnableRelativeMouseMovementCapture(bool),
+    ShutdownGame,
 }
 
 //==================================================================================================
@@ -273,13 +274,13 @@ pub fn update_and_draw<'game_context>(
     {
         //_do_collision_tests(dc, new_mouse_pos_world);
         gc.gameplay_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc);
+            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
 
         gc.menu_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc);
+            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
 
         gc.debug_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc);
+            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
     }
     let transform = gc.globals.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);

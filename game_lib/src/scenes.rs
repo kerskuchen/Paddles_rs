@@ -25,9 +25,19 @@ pub struct Globals {
     pub error_happened: Option<String>,
 }
 
+// The Scene system is heavily inspired by ggez and amethyst
 pub trait Scene {
     fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>);
-    fn update_and_draw(&mut self, input: &GameInput, globals: &mut Globals, dc: &mut DrawContext);
+    fn update_and_draw(
+        &mut self,
+        input: &GameInput,
+        globals: &mut Globals,
+        dc: &mut DrawContext,
+        system_commands: &mut Vec<SystemCommand>,
+    );
+    fn update_and_draw_previous_scene(&self) -> bool {
+        false
+    }
 }
 
 //==================================================================================================
@@ -39,7 +49,13 @@ pub struct DebugScene;
 
 impl Scene for DebugScene {
     fn reinitialize(&mut self, _system_commands: &mut Vec<SystemCommand>) {}
-    fn update_and_draw(&mut self, input: &GameInput, globals: &mut Globals, dc: &mut DrawContext) {
+    fn update_and_draw(
+        &mut self,
+        input: &GameInput,
+        globals: &mut Globals,
+        dc: &mut DrawContext,
+        system_commands: &mut Vec<SystemCommand>,
+    ) {
         // Draw cursor
         let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
         if input.mouse_button_left.is_pressed {
@@ -167,7 +183,13 @@ impl Scene for GameplayScene {
         system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(true));
     }
 
-    fn update_and_draw(&mut self, input: &GameInput, globals: &mut Globals, dc: &mut DrawContext) {
+    fn update_and_draw(
+        &mut self,
+        input: &GameInput,
+        globals: &mut Globals,
+        dc: &mut DrawContext,
+        system_commands: &mut Vec<SystemCommand>,
+    ) {
         let delta_time = if input.game_paused || globals.error_happened.is_some() {
             0.0
         } else {
@@ -438,52 +460,90 @@ fn beat_visualizer_value(time_till_next_beat: f32, beat_length: f32) -> f32 {
 //==================================================================================================
 //
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MenuMode {
+    Ingame,
+    Main,
+    Difficulty,
+    Pause,
+}
+
+impl Default for MenuMode {
+    fn default() -> Self {
+        MenuMode::Main
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MenuItem {
+    MainStartSinglePlayer,
+    MainStartTwoPlayers,
+    MainQuit,
+    DifficultyEasy,
+    DifficultyMedium,
+    DifficultyHard,
+    DifficultyBack,
+    PauseResume,
+    PauseQuitMenu,
+}
+
+impl MenuItem {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MenuItem::MainStartSinglePlayer => "Play with computer",
+            MenuItem::MainStartTwoPlayers => "Play with human",
+            MenuItem::MainQuit => "Quit game",
+            MenuItem::DifficultyEasy => "Easy",
+            MenuItem::DifficultyMedium => "Medium",
+            MenuItem::DifficultyHard => "Hard",
+            MenuItem::DifficultyBack => "Back",
+            MenuItem::PauseResume => "Resume",
+            MenuItem::PauseQuitMenu => "Quit to menu",
+        }
+    }
+}
+
 const MAIN_MENU_ITEMS: &[MenuItem] = &[
-    MenuItem::StartSinglePlayer,
-    MenuItem::StartTwoPlayers,
-    MenuItem::Quit,
+    MenuItem::MainStartSinglePlayer,
+    MenuItem::MainStartTwoPlayers,
+    MenuItem::MainQuit,
 ];
 
 const DIFFICULTY_MENU_ITEMS: &[MenuItem] = &[
     MenuItem::DifficultyEasy,
     MenuItem::DifficultyMedium,
     MenuItem::DifficultyHard,
+    MenuItem::DifficultyBack,
 ];
 
-enum MenuItem {
-    StartSinglePlayer,
-    StartTwoPlayers,
-    Quit,
-    DifficultyEasy,
-    DifficultyMedium,
-    DifficultyHard,
-}
+const PAUSE_MENU_ITEMS: &[MenuItem] = &[MenuItem::PauseResume, MenuItem::PauseQuitMenu];
 
-impl MenuItem {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            MenuItem::StartSinglePlayer => "Play with computer",
-            MenuItem::StartTwoPlayers => "Play with human",
-            MenuItem::Quit => "Quit game",
-            MenuItem::DifficultyEasy => "Easy",
-            MenuItem::DifficultyMedium => "Medium",
-            MenuItem::DifficultyHard => "Hard",
-        }
-    }
-}
-
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct MenuScene {
     highlighted_menu_item_index: usize,
+    last_pressed_menu_item_index: Option<usize>,
+    difficulty_chosen: Option<MenuItem>,
+    menu_mode: MenuMode,
 }
 
 impl Scene for MenuScene {
     fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>) {
         system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
         self.highlighted_menu_item_index = 0;
+        self.last_pressed_menu_item_index = None;
     }
 
-    fn update_and_draw(&mut self, input: &GameInput, globals: &mut Globals, dc: &mut DrawContext) {
+    fn update_and_draw(
+        &mut self,
+        input: &GameInput,
+        globals: &mut Globals,
+        dc: &mut DrawContext,
+        system_commands: &mut Vec<SystemCommand>,
+    ) {
+        if self.menu_mode == MenuMode::Ingame {
+            return;
+        }
+
         // Overlay below scene
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
         dc.draw_rect_filled(
@@ -493,39 +553,56 @@ impl Scene for MenuScene {
             DrawSpace::Canvas,
         );
 
-        create_button_menu(
-            &MAIN_MENU_ITEMS
-                .iter()
-                .map(|item| item.as_str())
-                .collect::<Vec<_>>(),
+        // Create menu
+        let menu_items = match self.menu_mode {
+            MenuMode::Ingame => &[],
+            MenuMode::Main => MAIN_MENU_ITEMS,
+            MenuMode::Difficulty => DIFFICULTY_MENU_ITEMS,
+            MenuMode::Pause => PAUSE_MENU_ITEMS,
+        };
+        let menu_items_strings = menu_items
+            .iter()
+            .map(|item| item.as_str())
+            .collect::<Vec<_>>();
+
+        if let Some(clicked_menu_item) = create_button_menu(
+            &menu_items_strings,
             &mut self.highlighted_menu_item_index,
+            &mut self.last_pressed_menu_item_index,
             canvas_rect,
             input,
             globals,
             dc,
-        );
-        // create_button_menu(
-        //     &DIFFICULTY_MENU_ITEMS
-        //         .iter()
-        //         .map(|item| item.as_str())
-        //         .collect::<Vec<_>>(),
-        //     &mut self.highlighted_menu_item_index,
-        //     canvas_rect,
-        //     input,
-        //     globals,
-        //     dc,
-        // );
+        ).map(|index| menu_items[index])
+        {
+            match clicked_menu_item {
+                MenuItem::MainStartSinglePlayer => self.menu_mode = MenuMode::Difficulty,
+                MenuItem::MainStartTwoPlayers => {}
+                MenuItem::MainQuit => system_commands.push(SystemCommand::ShutdownGame),
+                MenuItem::DifficultyEasy => {}
+                MenuItem::DifficultyMedium => {}
+                MenuItem::DifficultyHard => {}
+                MenuItem::DifficultyBack => self.menu_mode = MenuMode::Main,
+                MenuItem::PauseResume => {}
+                MenuItem::PauseQuitMenu => {}
+            }
+        }
     }
 }
 
 fn create_button_menu(
     menu_items: &[&str],
     highlighted_menu_item_index: &mut usize,
+    last_pressed_menu_item_index: &mut Option<usize>,
     canvas_rect: Rect,
     input: &GameInput,
     globals: &mut Globals,
     dc: &mut DrawContext,
-) {
+) -> Option<usize> {
+    if menu_items.len() == 0 {
+        return None;
+    }
+
     // Create button sizes
     let button_margin = 1.0;
     let button_padding = 4.0;
@@ -554,6 +631,8 @@ fn create_button_menu(
         DrawSpace::Canvas,
     );
 
+    let mut clicked_button_index = None;
+
     // Create and draw buttons
     let mut vertical_offset = menu_padding;
     for (index, item) in menu_items.iter().enumerate() {
@@ -565,7 +644,24 @@ fn create_button_menu(
             .with_pixel_snapped_position();
         vertical_offset += button_rect.height() + button_margin;
 
-        if globals.mouse_pos_canvas.intersects_rect(button_rect) {
+        // Mouse input
+        if input.mouse_button_left.num_state_transitions > 0 {
+            if input.mouse_button_left.is_pressed {
+                if globals.mouse_pos_canvas.intersects_rect(button_rect) {
+                    *last_pressed_menu_item_index = Some(index);
+                }
+            } else {
+                if last_pressed_menu_item_index.is_some()
+                    && last_pressed_menu_item_index.unwrap() == index
+                    && globals.mouse_pos_canvas.intersects_rect(button_rect)
+                {
+                    clicked_button_index = Some(index);
+                }
+            }
+        }
+        if last_pressed_menu_item_index.is_none()
+            && globals.mouse_pos_canvas.intersects_rect(button_rect)
+        {
             *highlighted_menu_item_index = index;
         }
 
@@ -573,8 +669,12 @@ fn create_button_menu(
         dc.draw_rect_filled(
             button_rect,
             0.0,
-            if index == *highlighted_menu_item_index {
+            if last_pressed_menu_item_index.is_none() && index == *highlighted_menu_item_index {
                 COLOR_MAGENTA
+            } else if last_pressed_menu_item_index.is_some()
+                && index == last_pressed_menu_item_index.unwrap()
+            {
+                COLOR_RED
             } else {
                 COLOR_BLUE
             },
@@ -592,4 +692,12 @@ fn create_button_menu(
             Rect::from_dimension(dc.get_text_dimensions(item)).centered_in_rect(button_rect);
         dc.draw_text(text_rect.pos(), item, 0.0, COLOR_WHITE, DrawSpace::Canvas);
     }
+
+    // NOTE: We need to clear the mouse pressed flag only after we checked all buttons so that
+    //       a button cannot clear it on its own
+    if input.mouse_button_left.num_state_transitions > 0 && !input.mouse_button_left.is_pressed {
+        *last_pressed_menu_item_index = None;
+    }
+
+    clicked_button_index
 }

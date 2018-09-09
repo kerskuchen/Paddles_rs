@@ -382,6 +382,7 @@ fn main() -> Result<(), Error> {
                     }
                     relative_mouse_mode_enabled = do_enable;
                 }
+                SystemCommand::ShutdownGame => is_running = false,
             }
         }
 
