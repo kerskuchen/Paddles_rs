@@ -306,24 +306,28 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         Rect::from_point_dimension(Point::new(0.0, 0.0), Vec2::ones()),
         -0.2,
         COLOR_GREEN,
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     dc.draw_rect_filled(
         Rect::from_point_dimension(Point::new(1.0, 0.0), Vec2::ones()),
         -0.2,
         COLOR_BLUE,
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     dc.draw_rect_filled(
         Rect::from_point_dimension(Point::new(0.0, 1.0), Vec2::ones()),
         -0.2,
         COLOR_BLUE,
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     dc.draw_rect_filled(
         Rect::from_point_dimension(Point::new(1.0, 1.0), Vec2::ones()),
         -0.2,
         COLOR_GREEN,
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
 
@@ -335,6 +339,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         } else {
             COLOR_BLACK
         },
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
 
@@ -346,6 +351,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         } else {
             COLOR_BLACK
         },
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
 
@@ -356,6 +362,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
                 Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
                 -0.1,
                 COLOR_CYAN,
+                ADDITIVITY_NONE,
                 DrawSpace::World,
             );
             dc.draw_arrow(
@@ -364,6 +371,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
                 UNIT_SIZE,
                 -0.2,
                 COLOR_GREEN,
+                ADDITIVITY_NONE,
                 DrawSpace::World,
             );
         }
@@ -382,6 +390,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         } else {
             COLOR_BLACK
         },
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     if let Some(intersection) = intersection_line_line(mouse_ray, test_line) {
@@ -389,6 +398,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
             -0.1,
             COLOR_CYAN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
         dc.draw_arrow(
@@ -397,6 +407,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             UNIT_SIZE,
             -0.2,
             COLOR_GREEN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
     }
@@ -411,6 +422,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         } else {
             COLOR_BLACK
         },
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     dc.draw_arrow(
@@ -419,6 +431,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
         mouse_ray.length(),
         0.0,
         COLOR_BLUE,
+        ADDITIVITY_NONE,
         DrawSpace::World,
     );
     let (near, far) = intersections_line_circle(mouse_ray, test_sphere);
@@ -427,6 +440,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
             -0.1,
             COLOR_MAGENTA,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
         dc.draw_arrow(
@@ -435,6 +449,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             UNIT_SIZE,
             -0.2,
             COLOR_GREEN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
     }
@@ -443,6 +458,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             Rect::from_point_dimension(intersection.point, Vec2::ones()).centered(),
             -0.1,
             COLOR_CYAN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
         dc.draw_arrow(
@@ -451,6 +467,7 @@ fn _do_collision_tests(dc: &mut DrawContext, mouse_pos_world: WorldPoint) {
             UNIT_SIZE,
             -0.2,
             COLOR_GREEN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
     }

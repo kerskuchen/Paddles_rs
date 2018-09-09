@@ -98,6 +98,7 @@ impl Scene for DebugScene {
             Rect::from_point_dimension(globals.mouse_pos_world.pixel_snapped(), Vec2::ones()),
             -0.2,
             cursor_color,
+            0.0,
             DrawSpace::World,
         );
 
@@ -251,6 +252,7 @@ impl Scene for GameplayScene {
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
                         -1.0,
                         grid_light,
+                        ADDITIVITY_NONE,
                         DrawSpace::World,
                     );
                 } else {
@@ -261,6 +263,7 @@ impl Scene for GameplayScene {
                         Rect::from_point_dimension(pos, Vec2::ones() * UNIT_SIZE),
                         -1.0,
                         Color::new(r, g, b, 1.0),
+                        ADDITIVITY_NONE,
                         DrawSpace::World,
                     );
                 }
@@ -313,7 +316,13 @@ impl Scene for GameplayScene {
                     //draw::COLOR_YELLOW,
                 ].iter(),
             ) {
-            dc.draw_rect_filled(field_border, field_depth, color, DrawSpace::World);
+            dc.draw_rect_filled(
+                field_border,
+                field_depth,
+                color,
+                ADDITIVITY_NONE,
+                DrawSpace::World,
+            );
         }
 
         // Update beat
@@ -369,7 +378,15 @@ impl Scene for GameplayScene {
             .shapes
             .iter()
             .map(|rect| RectSphereSum::new(rect, PONGI_RADIUS))
-            .for_each(|sum| dc.draw_lines(&sum.to_lines(), 0.0, COLOR_YELLOW, DrawSpace::World));
+            .for_each(|sum| {
+                dc.draw_lines(
+                    &sum.to_lines(),
+                    0.0,
+                    COLOR_YELLOW,
+                    ADDITIVITY_NONE,
+                    DrawSpace::World,
+                )
+            });
 
         //if let Some(collision) = collision_mesh.sweepcast_sphere(look_ahead_raycast, PONGI_RADIUS) {
         //    println!(
@@ -385,6 +402,7 @@ impl Scene for GameplayScene {
             Rect::from_point_dimension(beat_box_pos, Vec2::ones() * beat_box_size).centered(),
             0.0,
             draw::COLOR_MAGENTA,
+            ADDITIVITY_NONE,
             DrawSpace::Canvas,
         );
 
@@ -397,6 +415,7 @@ impl Scene for GameplayScene {
             0.3 * self.pongi_vel.magnitude(),
             -0.1,
             draw::COLOR_GREEN,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
 
@@ -404,6 +423,7 @@ impl Scene for GameplayScene {
             self.pongi_pos.pixel_snapped(),
             -0.3,
             Color::new(1.0 - beat_value, 1.0 - beat_value, 1.0, 1.0),
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
 
@@ -416,6 +436,7 @@ impl Scene for GameplayScene {
             ),
             -0.2,
             COLOR_WHITE,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
         dc.draw_rect_filled(
@@ -426,6 +447,7 @@ impl Scene for GameplayScene {
             ),
             -0.2,
             COLOR_WHITE,
+            ADDITIVITY_NONE,
             DrawSpace::World,
         );
     }
@@ -599,14 +621,19 @@ impl Scene for MenuScene {
             dc.draw_rect_filled(
                 canvas_rect,
                 0.0,
-                Color::new(0.0, 0.0, 0.0, self.screen_fader.fading_overlay_opacity()),
+                Color::new(
+                    0.0,
+                    0.0,
+                    0.0,
+                    f32::sqrt(self.screen_fader.fading_overlay_opacity()),
+                ),
+                ADDITIVITY_NONE,
                 DrawSpace::Canvas,
             );
         }
 
         if self.menu_mode == MenuMode::Ingame {
             if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
-                println!("AAAAAAAAAAAAAAAAAAAA");
                 system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
                 self.menu_mode = MenuMode::Pause;
                 // NOTE: We return here immediately so we can start fresh in the pause menu next
@@ -624,7 +651,8 @@ impl Scene for MenuScene {
         dc.draw_rect_filled(
             canvas_rect,
             -0.2,
-            Color::new(0.4, 0.4, 0.4, 0.3),
+            Color::new(0.0, 0.0, 0.0, 0.8),
+            ADDITIVITY_NONE,
             DrawSpace::Canvas,
         );
 
@@ -652,7 +680,6 @@ impl Scene for MenuScene {
         ).map(|index| menu_items[index]);
 
         if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
-            println!("BBBBBBBBBBBBBBBBBBBBBB");
             if self.menu_mode == MenuMode::Pause {
                 clicked_menu_item = Some(MenuItem::PauseQuitMenu);
             } else if self.menu_mode == MenuMode::Main {
@@ -744,11 +771,12 @@ fn create_button_menu(
     let menu_box = Rect::from_width_height(menu_width, menu_height)
         .centered_in_rect(canvas_rect)
         .with_pixel_snapped_position();
-    dc.draw_rect_filled(menu_box, depth, COLOR_CYAN, DrawSpace::Canvas);
+    dc.draw_rect_filled(menu_box, depth, COLOR_CYAN, 0.0, DrawSpace::Canvas);
     dc.draw_rect(
         menu_box,
         depth,
         Color::new(0.4, 0.4, 0.4, 0.4),
+        ADDITIVITY_NONE,
         DrawSpace::Canvas,
     );
 
@@ -799,19 +827,28 @@ fn create_button_menu(
             } else {
                 COLOR_BLUE
             },
+            ADDITIVITY_NONE,
             DrawSpace::Canvas,
         );
         dc.draw_rect(
             button_rect,
             depth,
             Color::new(0.4, 0.4, 0.4, 0.4),
+            ADDITIVITY_NONE,
             DrawSpace::Canvas,
         );
 
         // Draw button text
         let text_rect =
             Rect::from_dimension(dc.get_text_dimensions(item)).centered_in_rect(button_rect);
-        dc.draw_text(text_rect.pos(), item, depth, COLOR_WHITE, DrawSpace::Canvas);
+        dc.draw_text(
+            text_rect.pos(),
+            item,
+            depth,
+            COLOR_WHITE,
+            ADDITIVITY_NONE,
+            DrawSpace::Canvas,
+        );
     }
 
     // NOTE: We need to clear the mouse pressed flag only after we checked all buttons so that

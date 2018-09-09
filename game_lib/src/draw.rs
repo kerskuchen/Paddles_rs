@@ -17,6 +17,7 @@ pub struct Vertex {
     pub pos: [f32; 4],
     pub uv: [f32; 3],
     pub color: [f32; 4],
+    pub additivity: f32,
 }
 
 // NOTE: This translates to the depth range [-ZNEAR, -ZFAR].
@@ -29,6 +30,9 @@ pub const DEFAULT_CANVAS_ZFAR: f32 = 1.0;
 
 pub const DEFAULT_SCREEN_ZNEAR: f32 = 0.0;
 pub const DEFAULT_SCREEN_ZFAR: f32 = 1.0;
+
+pub const ADDITIVITY_NONE: f32 = 0.0;
+pub const ADDITIVITY_MAX: f32 = 1.0;
 
 pub const COLOR_RED: Color = Color {
     x: 1.0,
@@ -120,22 +124,36 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         Default::default()
     }
 
-    pub fn draw_lines(&mut self, lines: &[Line], depth: f32, color: Color, draw_space: DrawSpace) {
+    pub fn draw_lines(
+        &mut self,
+        lines: &[Line],
+        depth: f32,
+        color: Color,
+        additivity: f32,
+        draw_space: DrawSpace,
+    ) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
         let mesh = self.line_mesh_by_draw_space(draw_space);
         for line in lines {
-            mesh.push_line(*line, line_uv, sprite.atlas_index, depth, color);
+            mesh.push_line(*line, line_uv, sprite.atlas_index, depth, color, additivity);
         }
     }
 
-    pub fn draw_line(&mut self, line: Line, depth: f32, color: Color, draw_space: DrawSpace) {
+    pub fn draw_line(
+        &mut self,
+        line: Line,
+        depth: f32,
+        color: Color,
+        additivity: f32,
+        draw_space: DrawSpace,
+    ) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let line_uv = rect_uv_to_line_uv(sprite.uv_bounds);
         let mesh = self.line_mesh_by_draw_space(draw_space);
-        mesh.push_line(line, line_uv, sprite.atlas_index, depth, color);
+        mesh.push_line(line, line_uv, sprite.atlas_index, depth, color, additivity);
     }
 
     pub fn draw_arrow(
@@ -145,6 +163,8 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         length: f32,
         depth: f32,
         color: Color,
+
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         let end_point = pos + length * dir;
@@ -152,17 +172,25 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         let head_left_part = (dir.perpendicular() - 2.0 * dir) * head_dimensions;
         let head_right_part = (-dir.perpendicular() - 2.0 * dir) * head_dimensions;
 
-        self.draw_line(Line::new(pos, end_point), depth, color, draw_space);
+        self.draw_line(
+            Line::new(pos, end_point),
+            depth,
+            color,
+            additivity,
+            draw_space,
+        );
         self.draw_line(
             Line::new(end_point, end_point + head_left_part),
             depth,
             color,
+            additivity,
             draw_space,
         );
         self.draw_line(
             Line::new(end_point, end_point + head_right_part),
             depth,
             color,
+            additivity,
             draw_space,
         );
     }
@@ -172,16 +200,37 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         rect: Rect,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         // TODO(JaSc): Cache the plain texture uv for reuse
         let sprite = self.atlas.sprites["images/plain"];
         let mesh = self.polygon_mesh_by_draw_space(draw_space);
-        mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
+        mesh.push_quad(
+            rect,
+            sprite.uv_bounds,
+            sprite.atlas_index,
+            depth,
+            color,
+            additivity,
+        );
     }
 
-    pub fn draw_rect(&mut self, rect: Rect, depth: f32, color: Color, draw_space: DrawSpace) {
-        self.draw_lines(&draw_outlines_from_rect(rect), depth, color, draw_space);
+    pub fn draw_rect(
+        &mut self,
+        rect: Rect,
+        depth: f32,
+        color: Color,
+        additivity: f32,
+        draw_space: DrawSpace,
+    ) {
+        self.draw_lines(
+            &draw_outlines_from_rect(rect),
+            depth,
+            color,
+            additivity,
+            draw_space,
+        );
     }
 
     pub fn debug_draw_rect_textured(
@@ -189,11 +238,19 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         rect: Rect,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         let sprite = self.atlas.sprites["images/textured"];
         let mesh = self.polygon_mesh_by_draw_space(draw_space);
-        mesh.push_quad(rect, sprite.uv_bounds, sprite.atlas_index, depth, color);
+        mesh.push_quad(
+            rect,
+            sprite.uv_bounds,
+            sprite.atlas_index,
+            depth,
+            color,
+            additivity,
+        );
     }
 
     pub fn debug_draw_circle_textured(
@@ -201,6 +258,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         pos: Point,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         let sprite = self.atlas.animations["images/test"].frames[0];
@@ -212,6 +270,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             sprite.atlas_index,
             depth,
             color,
+            additivity,
         );
     }
     pub fn debug_draw_cursor(
@@ -219,6 +278,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         pos: Point,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         let sprite = self.atlas.animations["images/cursor_test"].frames[1];
@@ -230,6 +290,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             sprite.atlas_index,
             depth,
             color,
+            additivity,
         );
     }
 
@@ -239,6 +300,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         pos: Point,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) {
         let vertex_bounds = sprite.vertex_bounds.translated_by(pos);
@@ -249,6 +311,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             sprite.atlas_index,
             depth,
             color,
+            additivity,
         );
     }
 
@@ -265,7 +328,6 @@ impl<'drawcontext> DrawContext<'drawcontext> {
                 offset.y += font.vertical_advance;
             } else {
                 let glyph = font.glyphs[(c as u8) as usize];
-                let sprite = glyph.sprite;
                 offset.x += glyph.horizontal_advance;
 
                 dim.x = f32::max(dim.x, offset.x);
@@ -281,6 +343,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         text: &str,
         depth: f32,
         color: Color,
+        additivity: f32,
         draw_space: DrawSpace,
     ) -> Vec2 {
         let font = &self.atlas.fonts["fonts/default"];
@@ -309,6 +372,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
                     sprite.atlas_index,
                     depth,
                     color,
+                    additivity,
                 );
                 offset.x += glyph.horizontal_advance;
             }
@@ -325,6 +389,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
             &(String::from("\n") + text),
             0.0,
             color,
+            0.0,
             DrawSpace::Debug,
         );
         self.debug_text_origin.y += draw_offset.y;
@@ -751,6 +816,7 @@ impl LineMesh {
         atlas_index: u32,
         depth: f32,
         color: Color,
+        additivity: f32,
     ) {
         let color = color.into();
         let atlas_index = atlas_index as f32;
@@ -759,11 +825,13 @@ impl LineMesh {
                 pos: [line.start.x, line.start.y, depth, 1.0],
                 uv: [line_uv.start.x, line_uv.start.y, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [line.end.x, line.end.y, depth, 1.0],
                 uv: [line_uv.end.x, line_uv.end.y, atlas_index],
                 color,
+                additivity,
             },
         ];
 
@@ -807,6 +875,7 @@ impl PolygonMesh {
         atlas_index: u32,
         depth: f32,
         color: Color,
+        additivity: f32,
     ) {
         let color = color.into();
         let atlas_index = atlas_index as f32;
@@ -815,21 +884,25 @@ impl PolygonMesh {
                 pos: [rect.left, rect.bottom, depth, 1.0],
                 uv: [rect_uv.left, rect_uv.bottom, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [rect.right, rect.bottom, depth, 1.0],
                 uv: [rect_uv.right, rect_uv.bottom, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [rect.right, rect.top, depth, 1.0],
                 uv: [rect_uv.right, rect_uv.top, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [rect.left, rect.top, depth, 1.0],
                 uv: [rect_uv.left, rect_uv.top, atlas_index],
                 color,
+                additivity,
             },
         ];
 
@@ -896,7 +969,13 @@ impl Sprite {
         }
     }
 
-    pub fn into_vertices(self, pos: WorldPoint, depth: f32, color: Color) -> [Vertex; 4] {
+    pub fn into_vertices(
+        self,
+        pos: WorldPoint,
+        depth: f32,
+        color: Color,
+        additivity: f32,
+    ) -> [Vertex; 4] {
         let vertex = self.vertex_bounds;
         let uv = self.uv_bounds;
         let atlas_index = self.atlas_index as f32;
@@ -907,21 +986,25 @@ impl Sprite {
                 pos: [pos.x + vertex.left, pos.y + vertex.bottom, depth, 1.0],
                 uv: [uv.left, uv.bottom, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [pos.x + vertex.right, pos.y + vertex.bottom, depth, 1.0],
                 uv: [uv.right, uv.bottom, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [pos.x + vertex.right, pos.y + vertex.top, depth, 1.0],
                 uv: [uv.right, uv.top, atlas_index],
                 color,
+                additivity,
             },
             Vertex {
                 pos: [pos.x + vertex.left, pos.y + vertex.top, depth, 1.0],
                 uv: [uv.left, uv.top, atlas_index],
                 color,
+                additivity,
             },
         ]
     }
@@ -946,6 +1029,7 @@ pub fn vertices_from_rects(
     atlas_index: u32,
     depth: f32,
     color: Color,
+    additivity: f32,
 ) -> [Vertex; 4] {
     let color = color.into();
     let atlas_index = atlas_index as f32;
@@ -955,21 +1039,25 @@ pub fn vertices_from_rects(
             pos: [rect.left, rect.bottom, depth, 1.0],
             uv: [rect_uv.left, rect_uv.bottom, atlas_index],
             color,
+            additivity,
         },
         Vertex {
             pos: [rect.right, rect.bottom, depth, 1.0],
             uv: [rect_uv.right, rect_uv.bottom, atlas_index],
             color,
+            additivity,
         },
         Vertex {
             pos: [rect.right, rect.top, depth, 1.0],
             uv: [rect_uv.right, rect_uv.top, atlas_index],
             color,
+            additivity,
         },
         Vertex {
             pos: [rect.left, rect.top, depth, 1.0],
             uv: [rect_uv.left, rect_uv.top, atlas_index],
             color,
+            additivity,
         },
     ]
 }

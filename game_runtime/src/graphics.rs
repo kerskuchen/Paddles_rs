@@ -28,21 +28,22 @@ type PipelineStateObject<R> = gfx::PipelineState<R, pipe::Meta>;
 use gfx::state::{Blend, BlendValue, ColorMask, Equation, Factor};
 gfx_defines! {
     vertex VertexGFX {
-        pos: [f32; 4] = "a_Pos",
-        uv: [f32; 3] = "a_Uv",
-        color: [f32; 4] = "a_Color",
+        pos: [f32; 4] = "a_pos",
+        uv: [f32; 3] = "a_uv",
+        color: [f32; 4] = "a_color_modulate",
+        additivity: f32 = "a_additivity",
     }
 
     pipeline pipe {
         vertex_buffer: gfx::VertexBuffer<VertexGFX> = (),
 
-        transform: gfx::Global<[[f32; 4];4]> = "u_Transform",
-        use_texture_array: gfx::Global<i32> = "u_UseTextureArray",
+        transform: gfx::Global<[[f32; 4];4]> = "u_transform",
+        use_texture_array: gfx::Global<i32> = "u_use_texture_array",
 
-        texture: gfx::TextureSampler<[f32; 4]> = "u_Sampler",
-        texture_array: gfx::TextureSampler<[f32; 4]> = "u_SamplerArray",
+        texture: gfx::TextureSampler<[f32; 4]> = "u_sampler",
+        texture_array: gfx::TextureSampler<[f32; 4]> = "u_sampler_array",
 
-        out_color: gfx::BlendTarget<ColorFormat> = ("Target0",
+        out_color: gfx::BlendTarget<ColorFormat> = ("out_color_0",
                                                     ColorMask::all(),
                                                     Blend::new(
                                                         Equation::Add,
@@ -498,6 +499,7 @@ where
             0,
             0.0,
             Color::new(1.0, 1.0, 1.0, 1.0),
+            0.0,
         );
         let indices: [VertexIndex; 6] = [0, 1, 2, 2, 3, 0];
 
