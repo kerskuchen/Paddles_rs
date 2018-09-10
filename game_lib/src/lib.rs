@@ -16,6 +16,7 @@ extern crate bincode;
 pub mod utility;
 pub mod collision;
 pub mod draw;
+mod gui;
 pub mod math;
 mod scenes;
 

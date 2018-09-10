@@ -1,3 +1,4 @@
+use gui::GuiContext;
 use utility::CountdownTimer;
 use *;
 
@@ -579,6 +580,11 @@ pub struct MenuScene {
     last_pressed_menu_item_index: Option<usize>,
     menu_mode: MenuMode,
     screen_fader: ScreenFader,
+
+    slider_r: f32,
+    slider_g: f32,
+    slider_b: f32,
+    gui: GuiContext,
 }
 
 impl Scene for MenuScene {
@@ -595,6 +601,55 @@ impl Scene for MenuScene {
         dc: &mut DrawContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
+        self.gui
+            .start(globals.mouse_pos_canvas, input.mouse_button_left.is_pressed);
+        let button_result_1 =
+            self.gui
+                .button(0, Rect::from_xy_width_height(200.0, 30.0, 50.0, 20.0), dc);
+        let button_result_2 =
+            self.gui
+                .button(1, Rect::from_xy_width_height(260.0, 30.0, 50.0, 20.0), dc);
+        let r = self.gui.horizontal_slider(
+            3,
+            Rect::from_xy_width_height(200.0, 60.0, 100.0, 10.0),
+            self.slider_r,
+            1.0,
+            dc,
+        );
+        let g = self.gui.horizontal_slider(
+            4,
+            Rect::from_xy_width_height(200.0, 75.0, 100.0, 10.0),
+            self.slider_g,
+            1.0,
+            dc,
+        );
+        let b = self.gui.horizontal_slider(
+            5,
+            Rect::from_xy_width_height(200.0, 90.0, 100.0, 10.0),
+            self.slider_b,
+            1.0,
+            dc,
+        );
+
+        if let Some(value) = r {
+            self.slider_r = value;
+        }
+        if let Some(value) = g {
+            self.slider_g = value;
+        }
+        if let Some(value) = b {
+            self.slider_b = value;
+        }
+
+        self.gui.finish();
+        dc.debug_draw_text(&dformat!(button_result_1), COLOR_RED);
+        dc.debug_draw_text(&dformat!(button_result_2), COLOR_RED);
+        dc.debug_draw_text(
+            "COLOR",
+            Color::new(self.slider_r, self.slider_g, self.slider_b, 1.0),
+        );
+        dc.debug_draw_text(&format!("{:#?}", self.gui), COLOR_WHITE);
+
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
 
         // Update screen fader
