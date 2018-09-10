@@ -243,7 +243,12 @@ fn main() -> Result<(), Error> {
                             },
                         ..
                     } => match key {
+                        Up => input.right_up_button.set_state(false),
+                        Down => input.right_down_button.set_state(false),
+                        W => input.left_up_button.set_state(false),
+                        S => input.left_down_button.set_state(false),
                         Escape => input.escape_button.set_state(false),
+
                         _ => (),
                     },
                     WindowEvent::KeyboardInput {
@@ -256,7 +261,12 @@ fn main() -> Result<(), Error> {
                             },
                         ..
                     } => match key {
+                        Up => input.right_up_button.set_state(true),
+                        Down => input.right_down_button.set_state(true),
+                        W => input.left_up_button.set_state(false),
+                        S => input.left_down_button.set_state(false),
                         Escape => input.escape_button.set_state(true),
+
                         F1 => input.do_reinit_gamestate = true,
                         F5 => input.do_reinit_drawstate = true,
                         F9 => {

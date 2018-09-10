@@ -94,6 +94,10 @@ pub struct GameInput {
     pub fast_time: i32,
 
     pub escape_button: GameButton,
+    pub left_up_button: GameButton,
+    pub left_down_button: GameButton,
+    pub right_up_button: GameButton,
+    pub right_down_button: GameButton,
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
@@ -123,6 +127,11 @@ impl GameInput {
 
     pub fn clear_button_transitions(&mut self) {
         self.escape_button.clear_transitions();
+        self.left_down_button.clear_transitions();
+        self.left_up_button.clear_transitions();
+        self.right_down_button.clear_transitions();
+        self.right_up_button.clear_transitions();
+
         self.mouse_button_left.clear_transitions();
         self.mouse_button_middle.clear_transitions();
         self.mouse_button_right.clear_transitions();

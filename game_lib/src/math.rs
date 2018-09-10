@@ -220,6 +220,14 @@ impl Vec2 {
             self.x * sin_angle + self.y * cos_angle,
         )
     }
+
+    pub fn is_zero(self) -> bool {
+        Vec2::dot(self, self) == 0.0
+    }
+
+    pub fn is_effectively_zero(self) -> bool {
+        Vec2::dot(self, self) < EPSILON
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
