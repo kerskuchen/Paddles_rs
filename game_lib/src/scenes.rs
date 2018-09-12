@@ -601,8 +601,7 @@ impl Scene for MenuScene {
         dc: &mut DrawContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
-        self.gui
-            .start(globals.mouse_pos_canvas, input.mouse_button_left.is_pressed);
+        self.gui.start(globals.mouse_pos_canvas, &input);
         let button_result_1 =
             self.gui
                 .button(0, Rect::from_xy_width_height(200.0, 30.0, 50.0, 20.0), dc);
@@ -613,21 +612,18 @@ impl Scene for MenuScene {
             3,
             Rect::from_xy_width_height(200.0, 60.0, 100.0, 10.0),
             self.slider_r,
-            1.0,
             dc,
         );
         let g = self.gui.horizontal_slider(
             4,
             Rect::from_xy_width_height(200.0, 75.0, 100.0, 10.0),
             self.slider_g,
-            1.0,
             dc,
         );
         let b = self.gui.horizontal_slider(
             5,
             Rect::from_xy_width_height(200.0, 90.0, 100.0, 10.0),
             self.slider_b,
-            1.0,
             dc,
         );
 

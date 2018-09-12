@@ -27,6 +27,21 @@ pub use draw::*;
 pub use math::*;
 use scenes::*;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Key {
+    Up,
+    Down,
+    Left,
+    Right,
+    Tab,
+    Enter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Modifier {
+    Shift,
+}
+
 //==================================================================================================
 // SystemCommand
 
@@ -99,6 +114,12 @@ pub struct GameInput {
     pub left_down_button: GameButton,
     pub right_up_button: GameButton,
     pub right_down_button: GameButton,
+    pub left_button: GameButton,
+    pub right_button: GameButton,
+
+    pub shift_button: GameButton,
+    pub tab_button: GameButton,
+    pub enter_button: GameButton,
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
@@ -132,6 +153,11 @@ impl GameInput {
         self.left_up_button.clear_transitions();
         self.right_down_button.clear_transitions();
         self.right_up_button.clear_transitions();
+        self.shift_button.clear_transitions();
+        self.tab_button.clear_transitions();
+        self.enter_button.clear_transitions();
+        self.left_button.clear_transitions();
+        self.right_button.clear_transitions();
 
         self.mouse_button_left.clear_transitions();
         self.mouse_button_middle.clear_transitions();
