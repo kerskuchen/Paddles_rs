@@ -1,5 +1,4 @@
-use gui::GuiContext;
-use utility::CountdownTimer;
+pub use gui::{GuiContext, ScreenFader};
 use *;
 
 const PONGI_RADIUS: f32 = 7.5;
@@ -76,7 +75,7 @@ impl Scene for DebugScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
-        system_commands: &mut Vec<SystemCommand>,
+        _system_commands: &mut Vec<SystemCommand>,
     ) {
         // Draw cursor
         let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
@@ -195,7 +194,7 @@ pub struct GameplayScene {
 }
 
 impl Scene for GameplayScene {
-    fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>) {
+    fn reinitialize(&mut self, _system_commands: &mut Vec<SystemCommand>) {
         self.is_paused = true;
         //gc.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
         //gc.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
@@ -576,22 +575,14 @@ const FADE_TIME: f32 = 0.2;
 
 #[derive(Debug, Default)]
 pub struct MenuScene {
-    highlighted_menu_item_index: usize,
-    last_pressed_menu_item_index: Option<usize>,
     menu_mode: MenuMode,
     screen_fader: ScreenFader,
-
-    slider_r: f32,
-    slider_g: f32,
-    slider_b: f32,
     gui: GuiContext,
 }
 
 impl Scene for MenuScene {
     fn reinitialize(&mut self, system_commands: &mut Vec<SystemCommand>) {
         system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
-        self.highlighted_menu_item_index = 0;
-        self.last_pressed_menu_item_index = None;
     }
 
     fn update_and_draw(
@@ -601,51 +592,6 @@ impl Scene for MenuScene {
         dc: &mut DrawContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
-        self.gui.start(globals.mouse_pos_canvas, &input);
-        let button_result_1 =
-            self.gui
-                .button(0, Rect::from_xy_width_height(200.0, 30.0, 50.0, 20.0), dc);
-        let button_result_2 =
-            self.gui
-                .button(1, Rect::from_xy_width_height(260.0, 30.0, 50.0, 20.0), dc);
-        let r = self.gui.horizontal_slider(
-            3,
-            Rect::from_xy_width_height(200.0, 60.0, 100.0, 10.0),
-            self.slider_r,
-            dc,
-        );
-        let g = self.gui.horizontal_slider(
-            4,
-            Rect::from_xy_width_height(200.0, 75.0, 100.0, 10.0),
-            self.slider_g,
-            dc,
-        );
-        let b = self.gui.horizontal_slider(
-            5,
-            Rect::from_xy_width_height(200.0, 90.0, 100.0, 10.0),
-            self.slider_b,
-            dc,
-        );
-
-        if let Some(value) = r {
-            self.slider_r = value;
-        }
-        if let Some(value) = g {
-            self.slider_g = value;
-        }
-        if let Some(value) = b {
-            self.slider_b = value;
-        }
-
-        self.gui.finish();
-        dc.debug_draw_text(&dformat!(button_result_1), COLOR_RED);
-        dc.debug_draw_text(&dformat!(button_result_2), COLOR_RED);
-        dc.debug_draw_text(
-            "COLOR",
-            Color::new(self.slider_r, self.slider_g, self.slider_b, 1.0),
-        );
-        dc.debug_draw_text(&format!("{:#?}", self.gui), COLOR_WHITE);
-
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);
 
         // Update screen fader
@@ -721,8 +667,7 @@ impl Scene for MenuScene {
 
         let mut clicked_menu_item = create_button_menu(
             &menu_items_strings,
-            &mut self.highlighted_menu_item_index,
-            &mut self.last_pressed_menu_item_index,
+            &mut self.gui,
             -0.1,
             canvas_rect,
             input,
@@ -792,8 +737,7 @@ impl Scene for MenuScene {
 
 fn create_button_menu(
     menu_items: &[&str],
-    highlighted_menu_item_index: &mut usize,
-    last_pressed_menu_item_index: &mut Option<usize>,
+    gui: &mut GuiContext,
     depth: f32,
     canvas_rect: Rect,
     input: &GameInput,
@@ -833,11 +777,12 @@ fn create_button_menu(
         DrawSpace::Canvas,
     );
 
-    let mut clicked_button_index = None;
-
     // Create and draw buttons
+    gui.start(globals.mouse_pos_canvas, &input);
+    let mut clicked_button_index = None;
     let mut vertical_offset = menu_padding;
-    for (index, item) in menu_items.iter().enumerate() {
+
+    for (index, label) in menu_items.iter().enumerate() {
         // Draw button rect
         let button_rect = Rect::from_dimension(button_dim)
             .translated_to_pos(menu_box.pos())
@@ -846,154 +791,11 @@ fn create_button_menu(
             .with_pixel_snapped_position();
         vertical_offset += button_rect.height() + button_margin;
 
-        // Mouse input
-        if input.mouse_button_left.num_state_transitions > 0 {
-            if input.mouse_button_left.is_pressed {
-                if globals.mouse_pos_canvas.intersects_rect(button_rect) {
-                    *last_pressed_menu_item_index = Some(index);
-                }
-            } else {
-                if last_pressed_menu_item_index.is_some()
-                    && last_pressed_menu_item_index.unwrap() == index
-                    && globals.mouse_pos_canvas.intersects_rect(button_rect)
-                {
-                    clicked_button_index = Some(index);
-                }
-            }
+        if gui.button(index, label, button_rect, depth, dc) {
+            clicked_button_index = Some(index);
         }
-        if last_pressed_menu_item_index.is_none()
-            && globals.mouse_pos_canvas.intersects_rect(button_rect)
-        {
-            *highlighted_menu_item_index = index;
-        }
-
-        // Draw buttons with outlines
-        dc.draw_rect_filled(
-            button_rect,
-            depth,
-            if last_pressed_menu_item_index.is_none() && index == *highlighted_menu_item_index {
-                COLOR_MAGENTA
-            } else if last_pressed_menu_item_index.is_some()
-                && index == last_pressed_menu_item_index.unwrap()
-            {
-                COLOR_RED
-            } else {
-                COLOR_BLUE
-            },
-            ADDITIVITY_NONE,
-            DrawSpace::Canvas,
-        );
-        dc.draw_rect(
-            button_rect,
-            depth,
-            Color::new(0.4, 0.4, 0.4, 0.4),
-            ADDITIVITY_NONE,
-            DrawSpace::Canvas,
-        );
-
-        // Draw button text
-        let text_rect =
-            Rect::from_dimension(dc.get_text_dimensions(item)).centered_in_rect(button_rect);
-        dc.draw_text(
-            text_rect.pos(),
-            item,
-            depth,
-            COLOR_WHITE,
-            ADDITIVITY_NONE,
-            DrawSpace::Canvas,
-        );
     }
-
-    // NOTE: We need to clear the mouse pressed flag only after we checked all buttons so that
-    //       a button cannot clear it on its own
-    if input.mouse_button_left.num_state_transitions > 0 && !input.mouse_button_left.is_pressed {
-        *last_pressed_menu_item_index = None;
-    }
+    gui.finish();
 
     clicked_button_index
-}
-
-//==================================================================================================
-// FadeOutIn
-//==================================================================================================
-//
-
-#[derive(Debug, PartialEq)]
-enum FadeState {
-    FadingOut,
-    FadingIn,
-    FadedOut,
-    FadedIn,
-}
-
-#[derive(Debug)]
-struct ScreenFader {
-    fade_timer: CountdownTimer,
-    fade_state: FadeState,
-}
-
-impl Default for ScreenFader {
-    fn default() -> Self {
-        ScreenFader {
-            fade_timer: CountdownTimer::default(),
-            fade_state: FadeState::FadedIn,
-        }
-    }
-}
-
-impl ScreenFader {
-    pub fn new() -> ScreenFader {
-        ScreenFader::default()
-    }
-
-    pub fn fading_overlay_opacity(&self) -> f32 {
-        match self.fade_state {
-            FadeState::FadedIn => 0.0,
-            FadeState::FadedOut => 1.0,
-            FadeState::FadingIn => 1.0 - self.fade_timer.completion_ratio(),
-            FadeState::FadingOut => self.fade_timer.completion_ratio(),
-        }
-    }
-
-    pub fn increment(&mut self, delta_time: f32) {
-        self.fade_timer.increment(delta_time);
-        if self.fade_timer.is_finished() {
-            self.fade_state = match self.fade_state {
-                FadeState::FadedIn => FadeState::FadedIn,
-                FadeState::FadedOut => FadeState::FadedOut,
-                FadeState::FadingIn => FadeState::FadedIn,
-                FadeState::FadingOut => FadeState::FadedOut,
-            };
-        }
-    }
-
-    pub fn start_fading_out(&mut self, fade_time: f32) {
-        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
-        self.fade_state = FadeState::FadingOut;
-    }
-
-    pub fn start_fading_in(&mut self, fade_time: f32) {
-        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
-        self.fade_state = FadeState::FadingIn;
-    }
-
-    pub fn is_fading(&self) -> bool {
-        self.fade_state == FadeState::FadingIn || self.fade_state == FadeState::FadingOut
-    }
-
-    pub fn has_finished_fading_out(&self) -> bool {
-        // NOTE: It only makes sense to call this function if we acually are (or were) fading out
-        // debug_assert!(
-        //     self.fade_state == FadeState::FadedOut || self.fade_state == FadeState::FadingOut
-        // );
-        self.fade_state == FadeState::FadedOut
-    }
-
-    pub fn has_finished_fading_in(&self) -> bool {
-        // NOTE: It only makes sense to call this function if we acually are (or were) fading in
-        // debug_assert!(
-        //     self.fade_state == FadeState::FadedIn || self.fade_state == FadeState::FadingIn
-        // );
-        self.fade_state == FadeState::FadedIn
-    }
 }

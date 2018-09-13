@@ -6,6 +6,7 @@ use draw::{DrawContext, DrawSpace};
 use math;
 use math::{CanvasPoint, Rect};
 use std;
+use utility::CountdownTimer;
 use *;
 
 type ElemId = usize;
@@ -87,7 +88,14 @@ impl GuiContext {
         self.key_entered = None;
     }
 
-    pub fn button(&mut self, id: ElemId, button_rect: Rect, dc: &mut DrawContext) -> bool {
+    pub fn button(
+        &mut self,
+        id: ElemId,
+        label: &str,
+        button_rect: Rect,
+        depth: f32,
+        dc: &mut DrawContext,
+    ) -> bool {
         if self.mouse_pos_canvas.intersects_rect(button_rect) {
             self.highlighted_item = Some(id);
             if self.active_item.is_none() && self.mouse_is_down {
@@ -99,17 +107,7 @@ impl GuiContext {
             self.keyboard_highlight = Some(id);
         }
 
-        if self.keyboard_highlight == Some(id) {
-            dc.draw_rect_filled(
-                button_rect.extended_uniformly_by(2.0),
-                0.0,
-                draw::COLOR_CYAN,
-                0.0,
-                DrawSpace::Canvas,
-            );
-        }
-
-        let color = if self.highlighted_item == Some(id) {
+        let color = if self.highlighted_item == Some(id) || self.keyboard_highlight == Some(id) {
             if self.active_item == Some(id) {
                 draw::COLOR_RED
             } else {
@@ -118,8 +116,36 @@ impl GuiContext {
         } else {
             draw::COLOR_BLUE
         };
-        dc.draw_rect_filled(button_rect, 0.0, color, 0.0, DrawSpace::Canvas);
 
+        // Draw buttons with outlines
+        dc.draw_rect_filled(
+            button_rect,
+            depth,
+            color,
+            ADDITIVITY_NONE,
+            DrawSpace::Canvas,
+        );
+        dc.draw_rect(
+            button_rect,
+            depth,
+            Color::new(0.4, 0.4, 0.4, 0.4),
+            ADDITIVITY_NONE,
+            DrawSpace::Canvas,
+        );
+
+        // Draw button text
+        let text_rect =
+            Rect::from_dimension(dc.get_text_dimensions(label)).centered_in_rect(button_rect);
+        dc.draw_text(
+            text_rect.pos(),
+            label,
+            depth,
+            COLOR_WHITE,
+            ADDITIVITY_NONE,
+            DrawSpace::Canvas,
+        );
+
+        // Keyboard input
         if self.keyboard_highlight == Some(id) {
             if let Some(key) = self.key_entered {
                 match key {
@@ -243,5 +269,90 @@ impl GuiContext {
             }
         }
         None
+    }
+}
+
+//==================================================================================================
+// FadeOutIn
+//==================================================================================================
+//
+
+#[derive(Debug, PartialEq)]
+enum FadeState {
+    FadingOut,
+    FadingIn,
+    FadedOut,
+    FadedIn,
+}
+
+#[derive(Debug)]
+pub struct ScreenFader {
+    fade_timer: CountdownTimer,
+    fade_state: FadeState,
+}
+
+impl Default for ScreenFader {
+    fn default() -> Self {
+        ScreenFader {
+            fade_timer: CountdownTimer::default(),
+            fade_state: FadeState::FadedIn,
+        }
+    }
+}
+
+impl ScreenFader {
+    pub fn new() -> ScreenFader {
+        ScreenFader::default()
+    }
+
+    pub fn fading_overlay_opacity(&self) -> f32 {
+        match self.fade_state {
+            FadeState::FadedIn => 0.0,
+            FadeState::FadedOut => 1.0,
+            FadeState::FadingIn => 1.0 - self.fade_timer.completion_ratio(),
+            FadeState::FadingOut => self.fade_timer.completion_ratio(),
+        }
+    }
+
+    pub fn increment(&mut self, delta_time: f32) {
+        self.fade_timer.increment(delta_time);
+        if self.fade_timer.is_finished() {
+            self.fade_state = match self.fade_state {
+                FadeState::FadedIn => FadeState::FadedIn,
+                FadeState::FadedOut => FadeState::FadedOut,
+                FadeState::FadingIn => FadeState::FadedIn,
+                FadeState::FadingOut => FadeState::FadedOut,
+            };
+        }
+    }
+
+    pub fn start_fading_out(&mut self, fade_time: f32) {
+        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
+        self.fade_state = FadeState::FadingOut;
+    }
+
+    pub fn start_fading_in(&mut self, fade_time: f32) {
+        self.fade_timer = CountdownTimer::with_given_end_time(fade_time);
+        self.fade_state = FadeState::FadingIn;
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.fade_state == FadeState::FadingIn || self.fade_state == FadeState::FadingOut
+    }
+
+    pub fn has_finished_fading_out(&self) -> bool {
+        // NOTE: It only makes sense to call this function if we acually are (or were) fading out
+        // debug_assert!(
+        //     self.fade_state == FadeState::FadedOut || self.fade_state == FadeState::FadingOut
+        // );
+        self.fade_state == FadeState::FadedOut
+    }
+
+    pub fn has_finished_fading_in(&self) -> bool {
+        // NOTE: It only makes sense to call this function if we acually are (or were) fading in
+        // debug_assert!(
+        //     self.fade_state == FadeState::FadedIn || self.fade_state == FadeState::FadingIn
+        // );
+        self.fade_state == FadeState::FadedIn
     }
 }
