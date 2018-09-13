@@ -1,13 +1,12 @@
 use math::{CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, Vec2, WorldPoint};
+use utility;
 
-use bincode;
 use lodepng;
 use rgb;
 pub use rgb::ComponentBytes;
 
 use std;
 use std::collections::HashMap;
-use std::fs::File;
 
 pub type Pixel = rgb::RGBA8;
 pub type VertexIndex = u16;
@@ -511,10 +510,7 @@ impl<'drawcontext> DrawContext<'drawcontext> {
         // Sprite creation
         //
         // Create atlas from metafile
-        let mut atlas_metafile =
-            File::open("data/atlas.tex").expect("Could not load atlas metafile");
-        self.atlas = bincode::deserialize_from(&mut atlas_metafile)
-            .expect("Could not deserialize sprite map");
+        self.atlas = utility::deserialize_from_binary_file("data/atlas.tex");
 
         // Delete old atlas textures if they exists
         if let Some(old_atlas_texture_array_info) = self.atlas_texture_array.take() {

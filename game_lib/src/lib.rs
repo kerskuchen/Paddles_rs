@@ -11,6 +11,8 @@ extern crate fern;
 #[macro_use]
 extern crate serde_derive;
 extern crate bincode;
+extern crate ron;
+extern crate serde;
 
 #[macro_use]
 pub mod utility;
@@ -26,6 +28,7 @@ pub use collision::*;
 pub use draw::*;
 pub use math::*;
 use scenes::*;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Key {
@@ -93,6 +96,13 @@ impl<'game_context> GameContext<'game_context> {
 // GameInput
 //==================================================================================================
 //
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ButtonMapping {
+    key_mapping: HashMap<String, String>,
+    gamepad_mapping: HashMap<String, String>,
+}
+
 #[derive(Default)]
 pub struct GameInput {
     pub time_since_startup: f64,
@@ -108,6 +118,9 @@ pub struct GameInput {
     pub direct_screen_drawing: bool,
     pub game_paused: bool,
     pub fast_time: i32,
+
+    button_mapping: ButtonMapping,
+    buttons: HashMap<String, GameButton>,
 
     pub escape_button: GameButton,
     pub left_up_button: GameButton,

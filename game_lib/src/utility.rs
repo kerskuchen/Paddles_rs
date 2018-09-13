@@ -1,4 +1,8 @@
+use bincode;
 use math;
+use ron;
+use serde;
+use std;
 
 /// A macro for debugging which returns a string representation of an expression and its value
 ///
@@ -56,10 +60,87 @@ macro_rules! dprintln {
 }
 
 //==================================================================================================
+// Serialize struct to file
+//==================================================================================================
+//
+pub fn serialize_to_binary_file<T>(filename: &str, data: &T)
+where
+    T: serde::Serialize,
+{
+    let encoded_data = bincode::serialize(data).unwrap_or_else(|error| {
+        panic!(
+            "Could not encode data for serializing to file '{}': {}",
+            filename, error
+        );
+    });
+    write_binary_data_to_file(filename, &encoded_data);
+}
+
+pub fn deserialize_from_binary_file<T>(filename: &str) -> T
+where
+    for<'de> T: serde::Deserialize<'de>,
+{
+    let file = open_file(filename);
+    bincode::deserialize_from(&file).unwrap_or_else(|error| {
+        panic!("Could not deserialize from file '{}' : {}", filename, error);
+    })
+}
+
+pub fn serialize_to_ron_file<T>(filename: &str, data: &T)
+where
+    T: serde::Serialize,
+{
+    let pretty = ron::ser::PrettyConfig {
+        depth_limit: 3,
+        separate_tuple_members: true,
+        enumerate_arrays: true,
+        ..ron::ser::PrettyConfig::default()
+    };
+
+    let encoded_data = ron::ser::to_string_pretty(&data, pretty).unwrap_or_else(|error| {
+        panic!(
+            "Could not encode data for serializing to file '{}': {}",
+            filename, error
+        );
+    });
+    write_string_to_file(filename, &encoded_data);
+}
+
+pub fn deserialize_from_ron_file<T>(filename: &str) -> T
+where
+    for<'de> T: serde::Deserialize<'de>,
+{
+    let file = open_file(filename);
+    ron::de::from_reader(&file).unwrap_or_else(|error| {
+        panic!("Could not deserialize from file '{}' : {}", filename, error);
+    })
+}
+
+pub fn open_file(filename: &str) -> std::fs::File {
+    std::fs::File::open(filename).unwrap_or_else(|error| {
+        panic!(
+            "Could not open file '{}' for deserializing : {}",
+            filename, error
+        );
+    })
+}
+
+pub fn write_binary_data_to_file(filename: &str, data: &[u8]) {
+    std::fs::write(filename, data).unwrap_or_else(|error| {
+        panic!("Could write data to file '{}' : {}", filename, error);
+    });
+}
+
+pub fn write_string_to_file(filename: &str, data: &str) {
+    std::fs::write(filename, data).unwrap_or_else(|error| {
+        panic!("Could write string to file '{}' : {}", filename, error);
+    });
+}
+
+//==================================================================================================
 // CountdownTimer
 //==================================================================================================
 //
-
 #[derive(Debug)]
 pub struct CountdownTimer {
     cur_time: f32,
