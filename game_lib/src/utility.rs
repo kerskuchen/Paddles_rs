@@ -91,9 +91,9 @@ where
     T: serde::Serialize,
 {
     let pretty = ron::ser::PrettyConfig {
-        depth_limit: 3,
+        depth_limit: 10,
         separate_tuple_members: true,
-        enumerate_arrays: true,
+        enumerate_arrays: false,
         ..ron::ser::PrettyConfig::default()
     };
 

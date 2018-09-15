@@ -1,0 +1,25 @@
+(
+    key_mapping: {
+        Add: [
+            "debug_time_speedup",
+        ],
+        Subtract: [
+            "debug_time_slowdown",
+        ],
+        F1: [
+            "debug_reset_gamestate_oneshot",
+        ],
+        F5: [
+            "debug_hotreload_assets_oneshot",
+        ],
+        Sleep: [
+            "debug_hotreload_code_oneshot",
+        ],
+        F9: [
+            "debug_highres_drawing_toggle",
+        ],
+        Space: [
+            "debug_pause_game_toggle",
+        ],
+    },
+)

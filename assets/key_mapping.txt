@@ -1,0 +1,21 @@
+(
+    key_mapping: {
+        Up: [
+            "ui_previous",
+            "paddle_up",
+        ],
+        Down: [
+            "ui_next",
+            "paddle_down",
+        ],
+        Return: [
+            "ui_accept",
+        ],
+        NumpadEnter: [
+            "ui_accept",
+        ],
+        Escape: [
+            "ui_escape",
+        ],
+    },
+)

@@ -9,6 +9,15 @@ use std;
 use utility::CountdownTimer;
 use *;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GuiAction {
+    Next,
+    Previous,
+    Accept,
+    Increase,
+    Decrease,
+}
+
 type ElemId = usize;
 
 #[derive(Debug, Default)]
@@ -17,8 +26,7 @@ pub struct GuiContext {
     mouse_is_down: bool,
 
     keyboard_highlight: Option<ElemId>,
-    key_entered: Option<Key>,
-    key_modifier: Option<Modifier>,
+    key_entered: Option<GuiAction>,
 
     last_widget: Option<ElemId>,
 
@@ -32,42 +40,15 @@ impl GuiContext {
         self.mouse_pos_canvas = mouse_pos_canvas;
         self.highlighted_item = None;
 
-        self.key_entered = if input.tab_button.is_pressed
-            && input.tab_button.num_state_transitions > 0
-        {
-            Some(Key::Tab)
-        } else if input.enter_button.is_pressed && input.enter_button.num_state_transitions > 0 {
-            Some(Key::Enter)
-        } else if input.left_up_button.is_pressed && input.left_up_button.num_state_transitions > 0
-        {
-            Some(Key::Up)
-        } else if input.left_down_button.is_pressed
-            && input.left_down_button.num_state_transitions > 0
-        {
-            Some(Key::Down)
-        } else if input.right_up_button.is_pressed
-            && input.right_up_button.num_state_transitions > 0
-        {
-            Some(Key::Up)
-        } else if input.right_down_button.is_pressed
-            && input.right_down_button.num_state_transitions > 0
-        {
-            Some(Key::Down)
-        } else if input.left_button.is_pressed && input.left_button.num_state_transitions > 0 {
-            Some(Key::Left)
-        } else if input.right_button.is_pressed && input.right_button.num_state_transitions > 0 {
-            Some(Key::Right)
+        self.key_entered = if input.had_press_event("ui_next") {
+            Some(GuiAction::Next)
+        } else if input.had_press_event("ui_previous") {
+            Some(GuiAction::Previous)
+        } else if input.had_press_event("ui_accept") {
+            Some(GuiAction::Accept)
         } else {
             None
         };
-
-        if input.shift_button.num_state_transitions > 0 {
-            self.key_modifier = if input.shift_button.is_pressed {
-                Some(Modifier::Shift)
-            } else {
-                None
-            }
-        }
     }
 
     pub fn finish(&mut self) {
@@ -82,7 +63,7 @@ impl GuiContext {
             self.active_item = None;
         }
 
-        if self.key_entered == Some(Key::Tab) {
+        if self.key_entered == Some(GuiAction::Next) {
             self.keyboard_highlight = None;
         }
         self.key_entered = None;
@@ -149,16 +130,9 @@ impl GuiContext {
         if self.keyboard_highlight == Some(id) {
             if let Some(key) = self.key_entered {
                 match key {
-                    Key::Enter => return true,
-                    Key::Tab => {
-                        if self.key_modifier == Some(Modifier::Shift) {
-                            self.keyboard_highlight = self.last_widget;
-                        } else {
-                            self.keyboard_highlight = None;
-                        }
-                    }
-                    Key::Up => self.keyboard_highlight = self.last_widget,
-                    Key::Down => self.keyboard_highlight = None,
+                    GuiAction::Accept => return true,
+                    GuiAction::Previous => self.keyboard_highlight = self.last_widget,
+                    GuiAction::Next => self.keyboard_highlight = None,
                     _ => {}
                 }
                 self.key_entered = None;
@@ -226,29 +200,10 @@ impl GuiContext {
         if self.keyboard_highlight == Some(id) {
             if let Some(key) = self.key_entered {
                 match key {
-                    Key::Tab => {
-                        if self.key_modifier == Some(Modifier::Shift) {
-                            self.keyboard_highlight = self.last_widget;
-                        } else {
-                            self.keyboard_highlight = None;
-                        }
-                    }
-                    Key::Up => self.keyboard_highlight = self.last_widget,
-                    Key::Down => self.keyboard_highlight = None,
-                    Key::Left => {
-                        if self.key_modifier == Some(Modifier::Shift) {
-                            return Some(math::clamp(cur_value - 0.01, 0.0, 1.0));
-                        } else {
-                            return Some(math::clamp(cur_value - 0.1, 0.0, 1.0));
-                        }
-                    }
-                    Key::Right => {
-                        if self.key_modifier == Some(Modifier::Shift) {
-                            return Some(math::clamp(cur_value + 0.01, 0.0, 1.0));
-                        } else {
-                            return Some(math::clamp(cur_value + 0.1, 0.0, 1.0));
-                        }
-                    }
+                    GuiAction::Previous => self.keyboard_highlight = self.last_widget,
+                    GuiAction::Next => self.keyboard_highlight = None,
+                    GuiAction::Decrease => return Some(math::clamp(cur_value - 0.1, 0.0, 1.0)),
+                    GuiAction::Increase => return Some(math::clamp(cur_value + 0.1, 0.0, 1.0)),
                     _ => {}
                 }
                 self.key_entered = None;

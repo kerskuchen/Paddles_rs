@@ -30,21 +30,6 @@ pub use math::*;
 use scenes::*;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Key {
-    Up,
-    Down,
-    Left,
-    Right,
-    Tab,
-    Enter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Modifier {
-    Shift,
-}
-
 //==================================================================================================
 // SystemCommand
 
@@ -68,8 +53,9 @@ const LOG_LEVEL_DRAW: log::LevelFilter = log::LevelFilter::Trace;
 
 #[derive(Default)]
 pub struct GameContext<'game_context> {
-    globals: Globals,
+    is_initialized: bool,
 
+    globals: Globals,
     gameplay_scene: GameplayScene,
     menu_scene: MenuScene,
     debug_scene: DebugScene,
@@ -97,11 +83,7 @@ impl<'game_context> GameContext<'game_context> {
 //==================================================================================================
 //
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ButtonMapping {
-    key_mapping: HashMap<String, String>,
-    gamepad_mapping: HashMap<String, String>,
-}
+type InputAction = String;
 
 #[derive(Default)]
 pub struct GameInput {
@@ -112,27 +94,13 @@ pub struct GameInput {
 
     pub screen_dim: Vec2,
 
-    pub do_reinit_gamestate: bool,
-    pub do_reinit_drawstate: bool,
-    pub hotreload_happened: bool,
-    pub direct_screen_drawing: bool,
-    pub game_paused: bool,
-    pub fast_time: i32,
-
-    button_mapping: ButtonMapping,
-    buttons: HashMap<String, GameButton>,
-
-    pub escape_button: GameButton,
-    pub left_up_button: GameButton,
-    pub left_down_button: GameButton,
-    pub right_up_button: GameButton,
-    pub right_down_button: GameButton,
-    pub left_button: GameButton,
-    pub right_button: GameButton,
-
-    pub shift_button: GameButton,
-    pub tab_button: GameButton,
-    pub enter_button: GameButton,
+    /// Regular buttons
+    pub buttons: HashMap<InputAction, GameButton>,
+    /// Buttons that toggle its state on key-press
+    pub buttons_toggle: HashMap<InputAction, GameButton>,
+    /// Buttons that go into pressed state on key-press but reset back into unpressed
+    /// after the current frame is over
+    pub buttons_oneshot: HashMap<InputAction, GameButton>,
 
     /// Mouse position is given in the following interval:
     /// [0 .. screen_width - 1] x [0 .. screen_height - 1]
@@ -154,32 +122,95 @@ impl GameInput {
         Default::default()
     }
 
-    pub fn clear_flags(&mut self) {
-        self.do_reinit_gamestate = false;
-        self.do_reinit_drawstate = false;
-        self.hotreload_happened = false;
+    pub fn register_input_action(&mut self, action: &str) {
+        if action.ends_with("toggle") {
+            self.buttons_toggle
+                .insert(action.to_owned(), GameButton::new());
+        } else if action.ends_with("oneshot") {
+            self.buttons_oneshot
+                .insert(action.to_owned(), GameButton::new());
+        } else {
+            self.buttons.insert(action.to_owned(), GameButton::new());
+        }
     }
 
-    pub fn clear_button_transitions(&mut self) {
-        self.escape_button.clear_transitions();
-        self.left_down_button.clear_transitions();
-        self.left_up_button.clear_transitions();
-        self.right_down_button.clear_transitions();
-        self.right_up_button.clear_transitions();
-        self.shift_button.clear_transitions();
-        self.tab_button.clear_transitions();
-        self.enter_button.clear_transitions();
-        self.left_button.clear_transitions();
-        self.right_button.clear_transitions();
+    pub fn had_press_event(&self, action: &str) -> bool {
+        let button = self.get_button(action);
+        button.is_pressed && button.num_state_transitions > 0
+    }
 
+    pub fn had_release_event(&self, action: &str) -> bool {
+        let button = self.get_button(action);
+        !button.is_pressed && button.num_state_transitions > 0
+    }
+
+    pub fn had_transition_event(&self, action: &str) -> bool {
+        let button = self.get_button(action);
+        button.num_state_transitions > 0
+    }
+
+    pub fn is_pressed(&self, action: &str) -> bool {
+        self.get_button(action).is_pressed
+    }
+
+    fn get_button(&self, action: &str) -> GameButton {
+        if let Some(button) = self.buttons.get(action) {
+            button.clone()
+        } else if let Some(button) = self.buttons_toggle.get(action) {
+            button.clone()
+        } else if let Some(button) = self.buttons_oneshot.get(action) {
+            button.clone()
+        } else {
+            panic!("Button for input action '{}' does not exist", action);
+        }
+    }
+
+    pub fn process_button_event(&mut self, action: &str, is_pressed: bool) {
+        if let Some(button) = self.buttons.get_mut(action) {
+            button.set_state(is_pressed);
+            return;
+        }
+        if let Some(button) = self.buttons_toggle.get_mut(action) {
+            // Toggles activate only on a press event
+            if is_pressed {
+                let previous_state = button.is_pressed;
+                button.set_state(!previous_state);
+            }
+            return;
+        }
+        if let Some(button) = self.buttons_oneshot.get_mut(action) {
+            // One-shots activate only on a press event
+            if is_pressed {
+                button.set_state(is_pressed);
+            }
+            return;
+        }
+        panic!("Button for input action '{}' does not exist", action);
+    }
+
+    pub fn prepare_for_next_frame(&mut self) {
         self.mouse_button_left.clear_transitions();
         self.mouse_button_middle.clear_transitions();
         self.mouse_button_right.clear_transitions();
         self.mouse_wheel_delta = 0;
+
+        for (_, button) in self
+            .buttons
+            .iter_mut()
+            .chain(self.buttons_toggle.iter_mut())
+            .chain(self.buttons_oneshot.iter_mut())
+        {
+            button.clear_transitions();
+        }
+
+        for (_, button) in self.buttons_oneshot.iter_mut() {
+            button.set_state(false);
+            button.clear_transitions();
+        }
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct GameButton {
     pub num_state_transitions: u32,
     pub is_pressed: bool,
@@ -224,7 +255,7 @@ pub fn update_and_draw<'game_context>(
     // ---------------------------------------------------------------------------------------------
     // Init / re-init
     //
-    if input.hotreload_happened {
+    if !gc.is_initialized || input.had_press_event("debug_hotreload_code_oneshot") {
         // Initializing logger
         // NOTE: When hot reloading the game lib dll the logging must be reinitialized
         // TODO(JaSc): Do we actually need the logging?
@@ -242,7 +273,7 @@ pub fn update_and_draw<'game_context>(
             .expect("Could not initialize logger");
     }
 
-    if input.do_reinit_gamestate {
+    if !gc.is_initialized || input.had_press_event("debug_reset_gamestate_oneshot") {
         gc.globals.cam = Camera::new(
             WorldPoint::zero(),
             CANVAS_WIDTH,
@@ -256,14 +287,30 @@ pub fn update_and_draw<'game_context>(
         gc.menu_scene.reinitialize(&mut gc.system_commands);
     }
 
-    if input.do_reinit_drawstate {
-        let canvas_dim = if !input.direct_screen_drawing {
-            (CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16)
-        } else {
+    if !gc.is_initialized
+        || input.had_press_event("debug_hotreload_assets_oneshot")
+        || input.had_transition_event("debug_highres_drawing_toggle")
+    {
+        let canvas_dim = if input.is_pressed("debug_highres_drawing_toggle") {
             (input.screen_dim.x as u16, input.screen_dim.y as u16)
+        } else {
+            (CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16)
         };
         gc.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
     }
+
+    if !gc.is_initialized {
+        gc.is_initialized = true;
+    }
+
+    // Additional debug input
+    if input.had_press_event("debug_time_speedup") {
+        gc.globals.debug_time_factor_increment += 1;
+    }
+    if input.had_press_event("debug_time_slowdown") {
+        gc.globals.debug_time_factor_increment -= 1;
+    }
+    gc.globals.debug_game_paused = input.is_pressed("debug_pause_game_toggle");
 
     // ---------------------------------------------------------------------------------------------
     // Mouse input and camera

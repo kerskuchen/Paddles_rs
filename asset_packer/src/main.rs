@@ -105,5 +105,10 @@ fn main() -> Result<(), Error> {
         std::fs::write("data/atlas_debug.txt", &debug_output)?;
     }
 
+    std::fs::copy("assets/key_mapping.txt", "data/key_mapping.txt")
+        .context("Could not copy keymapping file")?;
+
+    std::fs::copy("assets/key_mapping_debug.txt", "data/key_mapping_debug.txt")
+        .context("Could not copy debug keymapping file")?;
     Ok(())
 }

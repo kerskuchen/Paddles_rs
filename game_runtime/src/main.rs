@@ -56,6 +56,7 @@ use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
 
 mod game_interface;
 mod graphics;
+mod input;
 mod timer;
 
 use game_interface::GameLib;
@@ -71,12 +72,15 @@ extern crate fern;
 extern crate rand;
 
 #[macro_use]
+extern crate serde_derive;
+extern crate serde;
+
+#[macro_use]
 extern crate gfx;
 extern crate gfx_window_glutin;
 extern crate glutin;
 use gfx::Device;
 use glutin::GlContext;
-use glutin::VirtualKeyCode::*;
 
 pub trait OptionHelper {
     fn none_or(self, err: Error) -> Result<(), Error>;
@@ -203,12 +207,32 @@ fn main() -> Result<(), Error> {
     let mut window_has_focus = true;
     let mut relative_mouse_mode_enabled = false;
 
+    // Init keymappings and gamebuttons for input
     let mut input = GameInput::new();
-    input.do_reinit_gamestate = true;
-    input.do_reinit_drawstate = true;
-    input.hotreload_happened = true;
-    input.game_paused = true;
+    let key_mapping = {
+        let mut key_mapping = game_lib::utility::deserialize_from_ron_file::<input::Keymapping>(
+            "data/key_mapping.txt",
+        ).key_mapping;
 
+        // Add debug keymapping if it exist
+        if std::path::Path::new("data/key_mapping_debug.txt").exists() {
+            let debug_key_mapping = game_lib::utility::deserialize_from_ron_file::<input::Keymapping>(
+                "data/key_mapping_debug.txt",
+            ).key_mapping;
+            key_mapping.extend(debug_key_mapping);
+        }
+
+        // Create buttons for input actions
+        for actions in key_mapping.values() {
+            for action in actions {
+                input.register_input_action(action);
+            }
+        }
+
+        key_mapping
+    };
+
+    // Gamelib loading and timing
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
     let mut game_context = GameContext::new();
 
@@ -224,7 +248,7 @@ fn main() -> Result<(), Error> {
             game_lib = game_lib.reload();
             if !game_lib.needs_reloading() {
                 // The game actually reloaded
-                input.hotreload_happened = true;
+                input.process_button_event("debug_hotreload_code_oneshot", true);
             }
         }
 
@@ -234,61 +258,28 @@ fn main() -> Result<(), Error> {
                 match event {
                     WindowEvent::CloseRequested => is_running = false,
                     WindowEvent::KeyboardInput {
+                        //device_id,
                         input:
                             KeyboardInput {
-                                state: glutin::ElementState::Released,
+                                //scancode,
+                                state,
                                 virtual_keycode: Some(key),
-                                // modifiers,
+                                //modifiers,
                                 ..
                             },
                         ..
-                    } => match key {
-                        Up => input.right_up_button.set_state(false),
-                        Down => input.right_down_button.set_state(false),
-                        W => input.left_up_button.set_state(false),
-                        S => input.left_down_button.set_state(false),
-                        Left => input.left_button.set_state(false),
-                        Right => input.right_button.set_state(false),
-
-                        Escape => input.escape_button.set_state(false),
-                        Tab => input.tab_button.set_state(false),
-                        RShift | LShift => input.shift_button.set_state(false),
-                        Return | NumpadEnter => input.enter_button.set_state(false),
-                        _ => (),
-                    },
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: glutin::ElementState::Pressed,
-                                virtual_keycode: Some(key),
-                                // modifiers,
-                                ..
-                            },
-                        ..
-                    } => match key {
-                        Up => input.right_up_button.set_state(true),
-                        Down => input.right_down_button.set_state(true),
-                        W => input.left_up_button.set_state(true),
-                        S => input.left_down_button.set_state(true),
-                        Left => input.left_button.set_state(true),
-                        Right => input.right_button.set_state(true),
-
-                        Escape => input.escape_button.set_state(true),
-                        Tab => input.tab_button.set_state(true),
-                        RShift | LShift => input.shift_button.set_state(true),
-                        Return | NumpadEnter => input.enter_button.set_state(true),
-
-                        F1 => input.do_reinit_gamestate = true,
-                        F5 => input.do_reinit_drawstate = true,
-                        F9 => {
-                            input.direct_screen_drawing = !input.direct_screen_drawing;
-                            input.do_reinit_drawstate = true;
+                    } => {
+                        if let Some(input_actions) =
+                            key_mapping.get(&input::convert_glutin_keycode(key))
+                        {
+                            for action in input_actions {
+                                input.process_button_event(
+                                    &action,
+                                    state == glutin::ElementState::Pressed,
+                                );
+                            }
                         }
-                        Add => input.fast_time += 1,
-                        Subtract => input.fast_time -= 1,
-                        Space => input.game_paused = !input.game_paused,
-                        _ => (),
-                    },
+                    }
                     WindowEvent::Focused(has_focus) => {
                         info!("Window has focus: {}", has_focus);
                         window_has_focus = has_focus;
@@ -432,8 +423,7 @@ fn main() -> Result<(), Error> {
         device.cleanup();
 
         // Reset input
-        input.clear_button_transitions();
-        input.clear_flags();
+        input.prepare_for_next_frame();
     }
 
     Ok(())

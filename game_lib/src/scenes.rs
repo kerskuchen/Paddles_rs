@@ -32,6 +32,10 @@ pub struct Globals {
     pub restart_game: bool,
     pub input_disabled: bool,
 
+    pub debug_time_factor_increment: i32,
+    pub debug_game_paused: bool,
+    pub game_paused: bool,
+
     game_difficulty: GameDifficulty,
     right_player_is_human: bool,
     left_player_is_human: bool,
@@ -139,21 +143,24 @@ impl Scene for DebugScene {
             draw::COLOR_WHITE,
         );
 
-        if input.fast_time != 0 {
-            if input.fast_time > 0 {
+        if globals.debug_time_factor_increment != 0 {
+            if globals.debug_time_factor_increment > 0 {
                 dc.debug_draw_text(
-                    &format!("Time speedup {}x", input.fast_time + 1),
+                    &format!("Time speedup {}x", globals.debug_time_factor_increment + 1),
                     draw::COLOR_GREEN,
                 );
-            } else if input.fast_time < 0 {
+            } else if globals.debug_time_factor_increment < 0 {
                 dc.debug_draw_text(
-                    &format!("Time slowdown {}x", i32::abs(input.fast_time) + 1),
+                    &format!(
+                        "Time slowdown {}x",
+                        i32::abs(globals.debug_time_factor_increment) + 1
+                    ),
                     draw::COLOR_YELLOW,
                 );
             } else {
             };
         }
-        if input.game_paused {
+        if globals.game_paused {
             dc.debug_draw_text("The game is paused", draw::COLOR_CYAN);
         }
         // Debug crash message
@@ -195,7 +202,7 @@ pub struct GameplayScene {
 
 impl Scene for GameplayScene {
     fn reinitialize(&mut self, _system_commands: &mut Vec<SystemCommand>) {
-        self.is_paused = true;
+        self.is_paused = false;
         //gc.pongi_pos = Point::new(0.0, -3.0 * UNIT_SIZE);
         //gc.pongi_vel = Vec2::new(0.0, -5.0 * UNIT_SIZE);
 
@@ -222,18 +229,19 @@ impl Scene for GameplayScene {
             self.reinitialize(system_commands);
         }
 
-        let delta_time = if self.is_paused || globals.error_happened.is_some() {
-            0.0
-        } else {
-            let time_factor = if input.fast_time == 0 {
-                1.0
-            } else if input.fast_time > 0 {
-                (input.fast_time + 1) as f32
+        let delta_time =
+            if self.is_paused || globals.debug_game_paused || globals.error_happened.is_some() {
+                0.0
             } else {
-                1.0 / (((i32::abs(input.fast_time)) + 1) as f32)
+                let time_factor = if globals.debug_time_factor_increment == 0 {
+                    1.0
+                } else if globals.debug_time_factor_increment > 0 {
+                    (globals.debug_time_factor_increment + 1) as f32
+                } else {
+                    1.0 / (((i32::abs(globals.debug_time_factor_increment)) + 1) as f32)
+                };
+                input.time_delta * time_factor
             };
-            input.time_delta * time_factor
-        };
 
         // ---------------------------------------------------------------------------------------------
         // Playfield
@@ -630,7 +638,7 @@ impl Scene for MenuScene {
 
         // Enable or disable relative mouse movement capture
         if self.menu_mode == MenuMode::Ingame {
-            if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
+            if input.had_press_event("ui_escape") {
                 system_commands.push(SystemCommand::EnableRelativeMouseMovementCapture(false));
                 self.menu_mode = MenuMode::Pause;
                 // NOTE: We return here immediately so we can start fresh in the pause menu next
@@ -676,7 +684,7 @@ impl Scene for MenuScene {
         ).map(|index| menu_items[index]);
 
         // Override clicked_menu_item if we pressed escape this frame
-        if input.escape_button.num_state_transitions > 0 && input.escape_button.is_pressed {
+        if input.had_press_event("ui_escape") {
             if self.menu_mode == MenuMode::Pause {
                 clicked_menu_item = Some(MenuItem::PauseQuitMenu);
             } else if self.menu_mode == MenuMode::Main {
