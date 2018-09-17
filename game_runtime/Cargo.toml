@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
 [dependencies]
+cpal = "0.8"
 gfx = "0.17"
 gfx_window_glutin = "0.26"
 glutin = "0.18"

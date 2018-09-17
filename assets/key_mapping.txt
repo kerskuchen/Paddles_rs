@@ -1,5 +1,13 @@
 (
     key_mapping: {
+        W: [
+            "ui_previous",
+            "paddle_up",
+        ],
+        S: [
+            "ui_next",
+            "paddle_down",
+        ],
         Up: [
             "ui_previous",
             "paddle_up",

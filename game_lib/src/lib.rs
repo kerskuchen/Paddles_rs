@@ -62,11 +62,18 @@ pub struct GameContext<'game_context> {
 
     drawcontext: DrawContext<'game_context>,
     system_commands: Vec<SystemCommand>,
+
+    debug_sine_time: f64,
+    sound_output: Vec<f32>,
 }
 
 impl<'game_context> GameContext<'game_context> {
     pub fn get_draw_commands(&mut self) -> Vec<DrawCommand> {
         std::mem::replace(&mut self.drawcontext.draw_commands, Vec::new())
+    }
+
+    pub fn get_sound_output(&mut self) -> Vec<f32> {
+        std::mem::replace(&mut self.sound_output, Vec::new())
     }
 
     pub fn get_system_commands(&mut self) -> Vec<SystemCommand> {
@@ -311,6 +318,23 @@ pub fn update_and_draw<'game_context>(
         gc.globals.debug_time_factor_increment -= 1;
     }
     gc.globals.debug_game_paused = input.is_pressed("debug_pause_game_toggle");
+
+    // Test sound output
+    const SOUND_SAMPLE_RATE_HZ: usize = 44100;
+    let sample_length = 1.0 / SOUND_SAMPLE_RATE_HZ as f32;
+    let num_stereo_sound_samples_to_write =
+        (input.time_delta * SOUND_SAMPLE_RATE_HZ as f32) as usize;
+    const NOTE_A_HZ: f32 = 440.0;
+
+    for _ in 0..num_stereo_sound_samples_to_write {
+        let sine_amplitude =
+            0.5 * f32::sin(NOTE_A_HZ * gc.debug_sine_time as f32 * 2.0 * std::f32::consts::PI);
+        gc.debug_sine_time += sample_length as f64;
+
+        // Stereo
+        gc.sound_output.push(sine_amplitude);
+        gc.sound_output.push(sine_amplitude);
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Mouse input and camera

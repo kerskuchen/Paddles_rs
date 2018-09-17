@@ -12,8 +12,8 @@ TODO(JaSc):
     x Worldspace/Screenspace placement
     x Depth clearing after switching from worldspace -> screenspace -> debugspace
     x Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
-  - Game input + keyboard/mouse-support
-    - Change absolute/relative mouse position mode with system commands depending on being 
+  x Game input + keyboard/mouse-support
+    x Change absolute/relative mouse position mode with system commands depending on being 
       in-menu/in-game
   - Gamestate + logic + timing
   - Audio playback
@@ -50,6 +50,7 @@ BACKLOG(JaSc):
     - Disable hot reloading when making a publish build
 */
 
+#[macro_use]
 extern crate game_lib;
 extern crate libloading;
 use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
@@ -65,6 +66,8 @@ use timer::Timer;
 
 extern crate failure;
 use failure::{Error, ResultExt};
+
+extern crate cpal;
 
 #[macro_use]
 extern crate log;
@@ -193,6 +196,86 @@ fn main() -> Result<(), Error> {
         screen_color_render_target_view,
         screen_depth_render_target_view,
     ).context("Could not create rendering context")?;
+
+    // ---------------------------------------------------------------------------------------------
+    // Audio subsystem initialization
+    //
+    let audio_device = cpal::default_output_device()
+        .ok_or_else(|| failure::err_msg("Could not create audio output device"))?;
+    let audio_format = audio_device
+        .default_output_format()
+        .context("Could not get audio devices default ouput format")?;
+    let sample_rate = audio_format.sample_rate.0;
+    let audio_channels = audio_format.channels;
+
+    let audio_event_loop = cpal::EventLoop::new();
+    let audio_stream = audio_event_loop
+        .build_output_stream(&audio_device, &audio_format)
+        .context("Could not create audio output stream")?;
+    audio_event_loop.play_stream(audio_stream);
+
+    info!(
+        "Initialized audio_device {:?} with output format {:?}",
+        audio_device.name(),
+        audio_format
+    );
+
+    use std::sync::{Arc, Mutex};
+    let audio_output_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let output_buffer = Arc::clone(&audio_output_buffer);
+
+    std::thread::spawn(move || {
+        audio_event_loop.run(move |_, data| match data {
+            cpal::StreamData::Output {
+                buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
+            } => {
+                let mut audio_buffer = output_buffer.lock().unwrap();
+                for (output, sample) in buffer.iter_mut().zip(audio_buffer.iter()) {
+                    let value = ((sample * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
+                    *output = value;
+                }
+                audio_buffer.clear();
+            }
+            cpal::StreamData::Output {
+                buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
+            } => {
+                let mut audio_buffer = output_buffer.lock().unwrap();
+                for (output, sample) in buffer.iter_mut().zip(audio_buffer.iter()) {
+                    let value = (sample * std::i16::MAX as f32) as i16;
+                    *output = value;
+                }
+                audio_buffer.clear();
+            }
+            cpal::StreamData::Output {
+                buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
+            } => {
+                let mut audio_buffer = output_buffer.lock().unwrap();
+
+                let mut write_count = 0;
+                let mut zero_count = 0;
+
+                let mut index = 0;
+                for output in buffer.iter_mut() {
+                    let value = if index < audio_buffer.len() {
+                        write_count += 1;
+                        audio_buffer[index]
+                    } else {
+                        zero_count += 1;
+                        0.0
+                    };
+                    *output = value;
+                    index += 1;
+                }
+
+                println!("zeros: {}", zero_count);
+                println!("non-zeros: {}", write_count);
+
+                let len = audio_buffer.len();
+                audio_buffer.drain(0..usize::min(index + 1, len));
+            }
+            _ => (),
+        });
+    });
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -389,6 +472,13 @@ fn main() -> Result<(), Error> {
         let timer_update = Timer::new();
         game_lib.update_and_draw(&input, &mut game_context);
         input.time_update = timer_update.elapsed_time() as f32;
+
+        {
+            let mut sound_output = game_context.get_sound_output();
+            dprintln!(sound_output.len());
+            let mut audio_buffer = audio_output_buffer.lock().unwrap();
+            audio_buffer.append(&mut sound_output);
+        }
 
         // Process Systemcommands
         for command in game_context.get_system_commands() {

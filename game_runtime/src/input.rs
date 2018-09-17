@@ -1,7 +1,6 @@
 // This is a really dirty hack to serialize/deserialize VirtualKeyCodes from winit and can be
 // removed if https://github.com/tomaka/winit/issues/304 is solved.
 
-use game_lib;
 use glutin;
 use std;
 use std::collections::HashMap;
