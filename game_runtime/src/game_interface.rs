@@ -1,4 +1,4 @@
-use game_lib::{GameContext, GameInput};
+use game_lib::{AudioContext, GameContext, GameInput};
 use libloading::Library;
 use std;
 
@@ -31,6 +31,22 @@ impl GameLib {
                     )
                 });
             f(input, game_state)
+        }
+    }
+
+    /// Forwards to the dynamic libraries' corresponding `get_audio_samples` function
+    pub fn process_audio(&self, input: &GameInput, gc: &mut GameContext, ac: &mut AudioContext) {
+        unsafe {
+            let f = self
+                .lib
+                .get::<fn(&GameInput, &mut GameContext, &mut AudioContext)>(b"process_audio\0")
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Could not load `process_audio` function from GameLib: {}",
+                        error
+                    )
+                });
+            f(input, gc, ac)
         }
     }
 

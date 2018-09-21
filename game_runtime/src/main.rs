@@ -53,7 +53,7 @@ BACKLOG(JaSc):
 #[macro_use]
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
+use game_lib::{AudioContext, GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -205,8 +205,8 @@ fn main() -> Result<(), Error> {
     let audio_format = audio_device
         .default_output_format()
         .context("Could not get audio devices default ouput format")?;
-    let sample_rate = audio_format.sample_rate.0;
-    let audio_channels = audio_format.channels;
+    let sample_rate = audio_format.sample_rate.0 as usize;
+    let audio_channels = audio_format.channels as usize;
 
     let audio_event_loop = cpal::EventLoop::new();
     let audio_stream = audio_event_loop
@@ -221,59 +221,69 @@ fn main() -> Result<(), Error> {
     );
 
     use std::sync::{Arc, Mutex};
-    let audio_output_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let output_buffer = Arc::clone(&audio_output_buffer);
+    let audio_context = Arc::new(Mutex::new(AudioContext::new(audio_channels, sample_rate)));
+    let audio_context_clone = Arc::clone(&audio_context);
 
     std::thread::spawn(move || {
-        audio_event_loop.run(move |_, data| match data {
-            cpal::StreamData::Output {
-                buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
-            } => {
-                let mut audio_buffer = output_buffer.lock().unwrap();
-                for (output, sample) in buffer.iter_mut().zip(audio_buffer.iter()) {
-                    let value = ((sample * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
-                    *output = value;
+        audio_event_loop.run(move |_, data| {
+            let mut audio_context = audio_context_clone.lock().unwrap();
+            let num_half_samples_available = if audio_context.samples_to_commit.len() > 0 {
+                audio_context.samples_to_commit.len()
+            } else {
+                warn!("No audio samples available for committing");
+                audio_context.samples_to_commit.push(0.0);
+                audio_context.samples_to_commit.push(0.0);
+                audio_context.samples_to_commit.len()
+            };
+            let audio_samples = &mut audio_context.samples_to_commit;
+            let mut num_half_samples_committed = 0;
+
+            match data {
+                cpal::StreamData::Output {
+                    buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
+                } => {
+                    for output in buffer.iter_mut() {
+                        let value =
+                            audio_samples[num_half_samples_committed % num_half_samples_available];
+                        let value = ((value * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
+                        *output = value;
+                        num_half_samples_committed += 1;
+                    }
                 }
-                audio_buffer.clear();
-            }
-            cpal::StreamData::Output {
-                buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
-            } => {
-                let mut audio_buffer = output_buffer.lock().unwrap();
-                for (output, sample) in buffer.iter_mut().zip(audio_buffer.iter()) {
-                    let value = (sample * std::i16::MAX as f32) as i16;
-                    *output = value;
+                cpal::StreamData::Output {
+                    buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
+                } => {
+                    for output in buffer.iter_mut() {
+                        let value =
+                            audio_samples[num_half_samples_committed % num_half_samples_available];
+                        let value = (value * std::i16::MAX as f32) as i16;
+                        *output = value;
+                        num_half_samples_committed += 1;
+                    }
                 }
-                audio_buffer.clear();
-            }
-            cpal::StreamData::Output {
-                buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
-            } => {
-                let mut audio_buffer = output_buffer.lock().unwrap();
-
-                let mut write_count = 0;
-                let mut zero_count = 0;
-
-                let mut index = 0;
-                for output in buffer.iter_mut() {
-                    let value = if index < audio_buffer.len() {
-                        write_count += 1;
-                        audio_buffer[index]
-                    } else {
-                        zero_count += 1;
-                        0.0
-                    };
-                    *output = value;
-                    index += 1;
+                cpal::StreamData::Output {
+                    buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
+                } => {
+                    for output in buffer.iter_mut() {
+                        let value =
+                            audio_samples[num_half_samples_committed % num_half_samples_available];
+                        *output = value;
+                        num_half_samples_committed += 1;
+                    }
                 }
-
-                println!("zeros: {}", zero_count);
-                println!("non-zeros: {}", write_count);
-
-                let len = audio_buffer.len();
-                audio_buffer.drain(0..usize::min(index + 1, len));
+                _ => (),
             }
-            _ => (),
+            if num_half_samples_committed <= num_half_samples_available {
+                audio_samples.drain(0..num_half_samples_committed);
+            } else {
+                warn!(
+                    "Audio lagged behind and skipped {} samples",
+                    num_half_samples_committed - num_half_samples_available
+                );
+                audio_samples.clear();
+            }
+
+            audio_context.current_sample_index += num_half_samples_committed / 2;
         });
     });
 
@@ -473,12 +483,12 @@ fn main() -> Result<(), Error> {
         game_lib.update_and_draw(&input, &mut game_context);
         input.time_update = timer_update.elapsed_time() as f32;
 
+        let timer_audio = Timer::new();
         {
-            let mut sound_output = game_context.get_sound_output();
-            dprintln!(sound_output.len());
-            let mut audio_buffer = audio_output_buffer.lock().unwrap();
-            audio_buffer.append(&mut sound_output);
+            let mut audio_context = audio_context.lock().unwrap();
+            game_lib.process_audio(&input, &mut game_context, &mut audio_context);
         }
+        input.time_audio = timer_audio.elapsed_time() as f32;
 
         // Process Systemcommands
         for command in game_context.get_system_commands() {

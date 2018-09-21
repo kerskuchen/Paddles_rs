@@ -60,20 +60,15 @@ pub struct GameContext<'game_context> {
     menu_scene: MenuScene,
     debug_scene: DebugScene,
 
+    current_audio_sample_index: usize,
+
     drawcontext: DrawContext<'game_context>,
     system_commands: Vec<SystemCommand>,
-
-    debug_sine_time: f64,
-    sound_output: Vec<f32>,
 }
 
 impl<'game_context> GameContext<'game_context> {
     pub fn get_draw_commands(&mut self) -> Vec<DrawCommand> {
         std::mem::replace(&mut self.drawcontext.draw_commands, Vec::new())
-    }
-
-    pub fn get_sound_output(&mut self) -> Vec<f32> {
-        std::mem::replace(&mut self.sound_output, Vec::new())
     }
 
     pub fn get_system_commands(&mut self) -> Vec<SystemCommand> {
@@ -98,8 +93,11 @@ pub struct GameInput {
     pub time_delta: f32,
     pub time_update: f32,
     pub time_draw: f32,
+    pub time_audio: f32,
 
     pub screen_dim: Vec2,
+
+    pub current_audio_sample_index: usize,
 
     /// Regular buttons
     pub buttons: HashMap<InputAction, GameButton>,
@@ -319,23 +317,6 @@ pub fn update_and_draw<'game_context>(
     }
     gc.globals.debug_game_paused = input.is_pressed("debug_pause_game_toggle");
 
-    // Test sound output
-    const SOUND_SAMPLE_RATE_HZ: usize = 44100;
-    let sample_length = 1.0 / SOUND_SAMPLE_RATE_HZ as f32;
-    let num_stereo_sound_samples_to_write =
-        (input.time_delta * SOUND_SAMPLE_RATE_HZ as f32) as usize;
-    const NOTE_A_HZ: f32 = 440.0;
-
-    for _ in 0..num_stereo_sound_samples_to_write {
-        let sine_amplitude =
-            0.5 * f32::sin(NOTE_A_HZ * gc.debug_sine_time as f32 * 2.0 * std::f32::consts::PI);
-        gc.debug_sine_time += sample_length as f64;
-
-        // Stereo
-        gc.sound_output.push(sine_amplitude);
-        gc.sound_output.push(sine_amplitude);
-    }
-
     // ---------------------------------------------------------------------------------------------
     // Mouse input and camera
     //
@@ -407,6 +388,75 @@ pub fn update_and_draw<'game_context>(
     }
     let transform = gc.globals.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
+}
+
+//==================================================================================================
+// AudioContext
+//==================================================================================================
+//
+#[derive(Default)]
+pub struct AudioContext {
+    pub previous_sample_index: usize,
+    pub current_sample_index: usize,
+    pub samples_to_commit: Vec<f32>,
+
+    pub num_channels: usize,
+    pub sample_rate_hz: usize,
+}
+
+impl AudioContext {
+    pub fn new(num_channels: usize, sample_rate_hz: usize) -> AudioContext {
+        let samples_to_commit = vec![0.0; 2048];
+        AudioContext {
+            samples_to_commit,
+            num_channels,
+            sample_rate_hz,
+            ..Default::default()
+        }
+    }
+}
+
+//==================================================================================================
+// Audio
+//==================================================================================================
+//
+pub fn process_audio<'game_context>(
+    input: &GameInput,
+    gc: &'game_context mut GameContext<'game_context>,
+    ac: &mut AudioContext,
+) {
+    println!("previous sample index : {}", ac.previous_sample_index);
+    println!("current sample index  : {}", ac.current_sample_index);
+    println!(
+        "commited samples:       {}",
+        ac.current_sample_index - ac.previous_sample_index
+    );
+    println!("uncommited samples:     {}", ac.samples_to_commit.len());
+    ac.previous_sample_index = ac.current_sample_index;
+    // NOTE: We clear the entire vector as we want to overwrite the uncommited samples anyway,
+    //       if there where any.
+    ac.samples_to_commit.clear();
+
+    // Test sound output
+    const NOTE_A_HZ: f64 = 440.0;
+
+    let sample_rate_hz = ac.sample_rate_hz;
+    let sample_length_sec: f64 = 1.0 / sample_rate_hz as f64;
+    let samples_buffer_len = sample_rate_hz * 2 / 60; // ~ 2 Frames @60Hz
+
+    let num_sound_samples_to_commit = samples_buffer_len;
+    let mut debug_sine_time = ac.current_sample_index as f64 * sample_length_sec as f64;
+
+    for _ in 0..num_sound_samples_to_commit {
+        let sine_amplitude =
+            0.5 * f64::sin(NOTE_A_HZ * debug_sine_time * 2.0 * std::f64::consts::PI);
+
+        debug_sine_time += sample_length_sec as f64;
+
+        // Stereo
+        ac.samples_to_commit.push(sine_amplitude as f32);
+        ac.samples_to_commit.push(sine_amplitude as f32);
+    }
 }
 
 // =================================================================================================

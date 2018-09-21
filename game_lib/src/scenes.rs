@@ -110,8 +110,12 @@ impl Scene for DebugScene {
         let delta = pretty_format_duration_ms(f64::from(input.time_delta));
         let draw = pretty_format_duration_ms(f64::from(input.time_draw));
         let update = pretty_format_duration_ms(f64::from(input.time_update));
+        let audio = pretty_format_duration_ms(f64::from(input.time_audio));
         dc.debug_draw_text(
-            &format!("delta: {}\ndraw: {}\nupdate: {}\n", delta, draw, update),
+            &format!(
+                "delta: {}\ndraw: {}\nupdate: {}\naudio: {}\n",
+                delta, draw, update, audio
+            ),
             draw::COLOR_WHITE,
         );
         dc.debug_draw_text(

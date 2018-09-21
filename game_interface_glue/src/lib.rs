@@ -41,7 +41,7 @@
 //! [`game_runtime`]: ../game_runtime/index.html
 //!
 extern crate game_lib;
-use game_lib::{GameContext, GameInput};
+use game_lib::{AudioContext, GameContext, GameInput};
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]
@@ -50,4 +50,14 @@ pub fn update_and_draw<'game_context>(
     game_context: &'game_context mut GameContext<'game_context>,
 ) {
     game_lib::update_and_draw(input, game_context);
+}
+
+/// Forwards directly to [`game_lib::process_audio`]
+#[no_mangle]
+pub fn process_audio<'game_context>(
+    input: &GameInput,
+    game_context: &'game_context mut GameContext<'game_context>,
+    audio_context: &mut AudioContext,
+) {
+    game_lib::process_audio(input, game_context, audio_context);
 }
