@@ -57,7 +57,7 @@ pub fn update_and_draw<'game_context>(
 pub fn process_audio<'game_context>(
     input: &GameInput,
     game_context: &'game_context mut GameContext<'game_context>,
-    audio_context: &mut AudioContext,
+    audio_output_buffer: &mut Vec<f32>,
 ) {
-    game_lib::process_audio(input, game_context, audio_context);
+    game_lib::process_audio(input, game_context, audio_output_buffer);
 }

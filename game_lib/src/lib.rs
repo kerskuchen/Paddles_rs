@@ -4,6 +4,11 @@ pub extern crate cgmath;
 extern crate lodepng;
 extern crate rgb;
 
+extern crate hound;
+extern crate lewton;
+extern crate sample;
+extern crate time_calc;
+
 #[macro_use]
 extern crate log;
 extern crate fern;
@@ -60,7 +65,7 @@ pub struct GameContext<'game_context> {
     menu_scene: MenuScene,
     debug_scene: DebugScene,
 
-    current_audio_sample_index: usize,
+    audio_context: AudioContext,
 
     drawcontext: DrawContext<'game_context>,
     system_commands: Vec<SystemCommand>,
@@ -75,8 +80,14 @@ impl<'game_context> GameContext<'game_context> {
         std::mem::replace(&mut self.system_commands, Vec::new())
     }
 
-    pub fn new() -> GameContext<'game_context> {
-        Default::default()
+    pub fn new(
+        num_audio_channels: usize,
+        audio_sample_rate_hz: usize,
+    ) -> GameContext<'game_context> {
+        GameContext {
+            audio_context: AudioContext::new(num_audio_channels, audio_sample_rate_hz),
+            ..Default::default()
+        }
     }
 }
 
@@ -302,6 +313,7 @@ pub fn update_and_draw<'game_context>(
             (CANVAS_WIDTH as u16, CANVAS_HEIGHT as u16)
         };
         gc.drawcontext.reinitialize(canvas_dim.0, canvas_dim.1);
+        gc.audio_context.reinitialize();
     }
 
     if !gc.is_initialized {
@@ -394,26 +406,52 @@ pub fn update_and_draw<'game_context>(
 // AudioContext
 //==================================================================================================
 //
+const AUDIO_SAMPLE_RATE_HZ: usize = 44100;
+const AUDIO_CHANNELS: usize = 2;
+
 #[derive(Default)]
 pub struct AudioContext {
-    pub previous_sample_index: usize,
-    pub current_sample_index: usize,
-    pub samples_to_commit: Vec<f32>,
+    next_uncommitted_frame_index: usize,
 
     pub num_channels: usize,
     pub sample_rate_hz: usize,
+
+    pub pongi_test_sound_samples: Vec<f32>,
+    pub pongi_test_music_samples: Vec<f32>,
 }
 
 impl AudioContext {
     pub fn new(num_channels: usize, sample_rate_hz: usize) -> AudioContext {
-        let samples_to_commit = vec![0.0; 2048];
+        if num_channels != AUDIO_CHANNELS || sample_rate_hz != AUDIO_SAMPLE_RATE_HZ {
+            unimplemented!();
+        }
+
         AudioContext {
-            samples_to_commit,
             num_channels,
             sample_rate_hz,
             ..Default::default()
         }
     }
+
+    pub fn reinitialize(&mut self) {
+        let reader =
+            hound::WavReader::open("data/pongi_blip.wav").expect("Could not load test sound");
+        let num_samples = reader.len();
+
+        let samples: Vec<_> = reader
+            .into_samples::<i16>()
+            .filter_map(Result::ok)
+            .map(integer_sample_to_float)
+            .collect();
+
+        debug_assert!(samples.len() == num_samples as usize);
+
+        self.pongi_test_sound_samples = samples;
+    }
+}
+
+fn integer_sample_to_float(sample: i16) -> f32 {
+    sample as f32 / std::i16::MAX as f32
 }
 
 //==================================================================================================
@@ -423,42 +461,106 @@ impl AudioContext {
 pub fn process_audio<'game_context>(
     input: &GameInput,
     gc: &'game_context mut GameContext<'game_context>,
-    ac: &mut AudioContext,
+    audio_output_buffer: &mut Vec<f32>,
 ) {
-    println!("previous sample index : {}", ac.previous_sample_index);
-    println!("current sample index  : {}", ac.current_sample_index);
-    println!(
-        "commited samples:       {}",
-        ac.current_sample_index - ac.previous_sample_index
-    );
-    println!("uncommited samples:     {}", ac.samples_to_commit.len());
-    ac.previous_sample_index = ac.current_sample_index;
+    let ac = &mut gc.audio_context;
+
+    let sample_rate_hz = ac.sample_rate_hz;
+    let sample_length_sec: f64 = 1.0 / sample_rate_hz as f64;
+    let samples_buffer_len = ac.num_channels * sample_rate_hz * 4 / 60; // ~ 4 Frames @60Hz
+
+    // Update audio_output_buffer
+    let num_committed_frames = (samples_buffer_len - audio_output_buffer.len()) / ac.num_channels;
+    ac.next_uncommitted_frame_index += num_committed_frames;
     // NOTE: We clear the entire vector as we want to overwrite the uncommited samples anyway,
     //       if there where any.
-    ac.samples_to_commit.clear();
+    audio_output_buffer.clear();
 
     // Test sound output
     const NOTE_A_HZ: f64 = 440.0;
 
-    let sample_rate_hz = ac.sample_rate_hz;
-    let sample_length_sec: f64 = 1.0 / sample_rate_hz as f64;
-    let samples_buffer_len = sample_rate_hz * 2 / 60; // ~ 2 Frames @60Hz
-
-    let num_sound_samples_to_commit = samples_buffer_len;
-    let mut debug_sine_time = ac.current_sample_index as f64 * sample_length_sec as f64;
+    let num_sound_samples_to_commit = samples_buffer_len / 2;
+    let mut debug_sine_time = ac.next_uncommitted_frame_index as f64 * sample_length_sec as f64;
 
     for _ in 0..num_sound_samples_to_commit {
         let sine_amplitude =
-            0.5 * f64::sin(NOTE_A_HZ * debug_sine_time * 2.0 * std::f64::consts::PI);
+            0.2 * f64::sin(NOTE_A_HZ * debug_sine_time * 2.0 * std::f64::consts::PI);
 
         debug_sine_time += sample_length_sec as f64;
 
         // Stereo
-        ac.samples_to_commit.push(sine_amplitude as f32);
-        ac.samples_to_commit.push(sine_amplitude as f32);
+        audio_output_buffer.push(sine_amplitude as f32);
+        audio_output_buffer.push(sine_amplitude as f32);
     }
 }
 
+fn lalaa() {
+    use time_calc::{
+        Bars, Beats, Bpm, DivType, Division, Measure, Ms, Ppqn, SampleHz, Samples, Ticks, TimeSig,
+    };
+
+    // "Samples per second" is used to convert between samples and milliseconds.
+    const SAMPLE_HZ: SampleHz = 44_100.0;
+    // "Parts per quarter note" is used to calculate Ticks; a high resolution musical time measurement.
+    const PPQN: Ppqn = 16;
+
+    println!("time_calc demonstration!");
+
+    // Out `Bars` type is a simplified version of a Measure.
+    assert!(Bars(1).measure() == Measure(1, Division::Bar, DivType::Whole));
+    // The same goes for out `Beats` type.
+    assert!(Beats(1).measure() == Measure(1, Division::Beat, DivType::Whole));
+
+    // We can use "parts per quarter note" to convert to ticks.
+    println!("Parts per quarter note: {}", PPQN);
+    println!("Duration of a beat in ticks: {}", Beats(1).ticks(PPQN));
+    println!(
+        "Duration of 38_400 ticks in beats: {}",
+        Ticks(32).beats(PPQN)
+    );
+
+    // We can use "beats per minute" to convert from musical time to milliseconds.
+    let bpm: Bpm = 120.0;
+    println!(
+        "Duration of a beat at 120 beats per minute: {} milliseconds.",
+        Beats(1).ms(bpm)
+    );
+
+    // And we can use "samples per second" to convert our duration to samples.
+    println!("Samples per second: {}", SAMPLE_HZ);
+    println!(
+        "Duration of a beat at 120bpm in samples: {}",
+        Beats(1).samples(bpm, SAMPLE_HZ)
+    );
+
+    // We also need to know the "time signature" if we are to convert from "Bars".
+    // This is because different time signatures can have a different duration in "Beats".
+    let beats_per_bar = TimeSig { top: 4, bottom: 4 }.beats_per_bar();
+    println!(
+        "Duration of a bar in `Beats` with a 4/4 Time Signature: {}",
+        beats_per_bar
+    );
+
+    let time_sig = TimeSig { top: 4, bottom: 4 };
+    println!(
+        "Duration of a bar at 120bpm, 44_100 sample_hz and 4/4 Time Sig in samples: {}",
+        Bars(1).samples(bpm, time_sig, SAMPLE_HZ)
+    );
+
+    // We can also convert back the other way! Here's an example from Ms -> Beats.
+    println!(
+        "1 minute as a duration in beats: {}",
+        Ms(60_000.0).beats(bpm)
+    );
+
+    // Here's an example from Samples -> Bars.
+    println!(
+        "176_400 samples as a duration in bars: {}",
+        Samples(176_400).bars(bpm, time_sig, SAMPLE_HZ)
+    );
+
+    println!("Great Success!");
+}
 // =================================================================================================
 // TODO(JaSc): Find a better place for the following functions
 // =================================================================================================

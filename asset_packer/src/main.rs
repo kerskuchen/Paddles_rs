@@ -110,5 +110,11 @@ fn main() -> Result<(), Error> {
 
     std::fs::copy("assets/key_mapping_debug.txt", "data/key_mapping_debug.txt")
         .context("Could not copy debug keymapping file")?;
+
+    std::fs::copy("assets/sounds/pongi_blip.wav", "data/pongi_blip.wav")
+        .context("Could not copy test sound file")?;
+
+    std::fs::copy("assets/music/test_beat.ogg", "data/test_beat.ogg")
+        .context("Could not copy test music file")?;
     Ok(())
 }

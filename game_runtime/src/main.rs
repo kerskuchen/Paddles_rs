@@ -53,7 +53,7 @@ BACKLOG(JaSc):
 #[macro_use]
 extern crate game_lib;
 extern crate libloading;
-use game_lib::{AudioContext, GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
+use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -200,13 +200,13 @@ fn main() -> Result<(), Error> {
     // ---------------------------------------------------------------------------------------------
     // Audio subsystem initialization
     //
+
+    // Init device and audio stream
     let audio_device = cpal::default_output_device()
         .ok_or_else(|| failure::err_msg("Could not create audio output device"))?;
     let audio_format = audio_device
         .default_output_format()
         .context("Could not get audio devices default ouput format")?;
-    let sample_rate = audio_format.sample_rate.0 as usize;
-    let audio_channels = audio_format.channels as usize;
 
     let audio_event_loop = cpal::EventLoop::new();
     let audio_stream = audio_event_loop
@@ -214,6 +214,8 @@ fn main() -> Result<(), Error> {
         .context("Could not create audio output stream")?;
     audio_event_loop.play_stream(audio_stream);
 
+    let audio_sample_rate = audio_format.sample_rate.0 as usize;
+    let num_audio_channels = audio_format.channels as usize;
     info!(
         "Initialized audio_device {:?} with output format {:?}",
         audio_device.name(),
@@ -221,69 +223,63 @@ fn main() -> Result<(), Error> {
     );
 
     use std::sync::{Arc, Mutex};
-    let audio_context = Arc::new(Mutex::new(AudioContext::new(audio_channels, sample_rate)));
-    let audio_context_clone = Arc::clone(&audio_context);
+    let audio_output_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let audio_output_buffer_clone = Arc::clone(&audio_output_buffer);
 
+    // Audio stream thread
+    use std::ops::DerefMut;
     std::thread::spawn(move || {
         audio_event_loop.run(move |_, data| {
-            let mut audio_context = audio_context_clone.lock().unwrap();
-            let num_half_samples_available = if audio_context.samples_to_commit.len() > 0 {
-                audio_context.samples_to_commit.len()
-            } else {
-                warn!("No audio samples available for committing");
-                audio_context.samples_to_commit.push(0.0);
-                audio_context.samples_to_commit.push(0.0);
-                audio_context.samples_to_commit.len()
-            };
-            let audio_samples = &mut audio_context.samples_to_commit;
-            let mut num_half_samples_committed = 0;
+            let mut samples = audio_output_buffer_clone.lock().unwrap();
 
-            match data {
+            let (num_samples_committed, num_samples_required) = match data {
+                cpal::StreamData::Output {
+                    buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
+                } => {
+                    let mut num_samples_committed = 0;
+                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
+                        *output = *value;
+                        num_samples_committed += 1;
+                    }
+                    let num_samples_required = buffer.deref_mut().len();
+                    (num_samples_committed, num_samples_required)
+                }
                 cpal::StreamData::Output {
                     buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
                 } => {
-                    for output in buffer.iter_mut() {
-                        let value =
-                            audio_samples[num_half_samples_committed % num_half_samples_available];
-                        let value = ((value * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
+                    let mut num_samples_committed = 0;
+                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
+                        let value = ((*value * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
                         *output = value;
-                        num_half_samples_committed += 1;
+                        num_samples_committed += 1;
                     }
+                    let num_samples_required = buffer.deref_mut().len();
+                    (num_samples_committed, num_samples_required)
                 }
                 cpal::StreamData::Output {
                     buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
                 } => {
-                    for output in buffer.iter_mut() {
-                        let value =
-                            audio_samples[num_half_samples_committed % num_half_samples_available];
+                    let mut num_samples_committed = 0;
+                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
                         let value = (value * std::i16::MAX as f32) as i16;
                         *output = value;
-                        num_half_samples_committed += 1;
+                        num_samples_committed += 1;
                     }
+                    let num_samples_required = buffer.deref_mut().len();
+                    (num_samples_committed, num_samples_required)
                 }
-                cpal::StreamData::Output {
-                    buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
-                } => {
-                    for output in buffer.iter_mut() {
-                        let value =
-                            audio_samples[num_half_samples_committed % num_half_samples_available];
-                        *output = value;
-                        num_half_samples_committed += 1;
-                    }
-                }
-                _ => (),
-            }
-            if num_half_samples_committed <= num_half_samples_available {
-                audio_samples.drain(0..num_half_samples_committed);
-            } else {
+                _ => (0, 0),
+            };
+
+            if num_samples_committed < num_samples_required {
                 warn!(
                     "Audio lagged behind and skipped {} samples",
-                    num_half_samples_committed - num_half_samples_available
+                    num_samples_required - num_samples_committed
                 );
-                audio_samples.clear();
+                samples.clear();
+            } else {
+                samples.drain(0..num_samples_committed);
             }
-
-            audio_context.current_sample_index += num_half_samples_committed / 2;
         });
     });
 
@@ -327,7 +323,7 @@ fn main() -> Result<(), Error> {
 
     // Gamelib loading and timing
     let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
-    let mut game_context = GameContext::new();
+    let mut game_context = GameContext::new(num_audio_channels, audio_sample_rate);
 
     let timer_startup = Timer::new();
     let mut timer_delta = Timer::new();
@@ -485,8 +481,8 @@ fn main() -> Result<(), Error> {
 
         let timer_audio = Timer::new();
         {
-            let mut audio_context = audio_context.lock().unwrap();
-            game_lib.process_audio(&input, &mut game_context, &mut audio_context);
+            let mut audio_output_buffer = audio_output_buffer.lock().unwrap();
+            game_lib.process_audio(&input, &mut game_context, &mut audio_output_buffer);
         }
         input.time_audio = timer_audio.elapsed_time() as f32;
 
