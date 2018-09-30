@@ -58,6 +58,7 @@ pub trait Scene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
+        ac: &mut AudioContext,
         system_commands: &mut Vec<SystemCommand>,
     );
     fn update_and_draw_previous_scene(&self) -> bool {
@@ -79,8 +80,13 @@ impl Scene for DebugScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
+        ac: &mut AudioContext,
         _system_commands: &mut Vec<SystemCommand>,
     ) {
+        if input.had_press_event("debug_play_sound") {
+            ac.play_debug_sound(audio::SoundStartTime::OnNextBeat);
+        }
+
         // Draw cursor
         let mut cursor_color = Color::new(0.0, 0.0, 0.0, 1.0);
         if input.mouse_button_left.is_pressed {
@@ -223,6 +229,7 @@ impl Scene for GameplayScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
+        ac: &mut AudioContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
         if globals.restart_game {
@@ -602,6 +609,7 @@ impl Scene for MenuScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
+        ac: &mut AudioContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);

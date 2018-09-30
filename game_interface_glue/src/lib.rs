@@ -41,7 +41,7 @@
 //! [`game_runtime`]: ../game_runtime/index.html
 //!
 extern crate game_lib;
-use game_lib::{AudioContext, GameContext, GameInput};
+use game_lib::{GameContext, GameInput};
 
 /// Forwards directly to [`game_lib::update_and_draw`]
 #[no_mangle]

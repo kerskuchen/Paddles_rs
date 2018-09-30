@@ -21,5 +21,8 @@
         Space: [
             "debug_pause_game_toggle",
         ],
+        B: [
+            "debug_play_sound",
+        ],
     },
 )

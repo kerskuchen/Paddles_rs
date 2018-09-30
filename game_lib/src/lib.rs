@@ -21,6 +21,7 @@ extern crate serde;
 
 #[macro_use]
 pub mod utility;
+mod audio;
 pub mod collision;
 pub mod draw;
 pub mod gui;
@@ -29,6 +30,7 @@ mod scenes;
 
 pub type ResourcePath = String;
 
+use audio::*;
 pub use collision::*;
 pub use draw::*;
 pub use math::*;
@@ -385,73 +387,37 @@ pub fn update_and_draw<'game_context>(
     // ---------------------------------------------------------------------------------------------
     // Update and draw scenes
     //
+    let mut ac = &mut gc.audio_context;
     let mut dc = &mut gc.drawcontext;
     dc.start_drawing();
     {
         //_do_collision_tests(dc, new_mouse_pos_world);
-        gc.gameplay_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
+        gc.gameplay_scene.update_and_draw(
+            input,
+            &mut gc.globals,
+            &mut dc,
+            &mut ac,
+            &mut gc.system_commands,
+        );
 
-        gc.menu_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
+        gc.menu_scene.update_and_draw(
+            input,
+            &mut gc.globals,
+            &mut dc,
+            &mut ac,
+            &mut gc.system_commands,
+        );
 
-        gc.debug_scene
-            .update_and_draw(input, &mut gc.globals, &mut dc, &mut gc.system_commands);
+        gc.debug_scene.update_and_draw(
+            input,
+            &mut gc.globals,
+            &mut dc,
+            &mut ac,
+            &mut gc.system_commands,
+        );
     }
     let transform = gc.globals.cam.proj_view_matrix();
     dc.finish_drawing(transform, canvas_rect, canvas_blit_rect);
-}
-
-//==================================================================================================
-// AudioContext
-//==================================================================================================
-//
-const AUDIO_SAMPLE_RATE_HZ: usize = 44100;
-const AUDIO_CHANNELS: usize = 2;
-
-#[derive(Default)]
-pub struct AudioContext {
-    next_uncommitted_frame_index: usize,
-
-    pub num_channels: usize,
-    pub sample_rate_hz: usize,
-
-    pub pongi_test_sound_samples: Vec<f32>,
-    pub pongi_test_music_samples: Vec<f32>,
-}
-
-impl AudioContext {
-    pub fn new(num_channels: usize, sample_rate_hz: usize) -> AudioContext {
-        if num_channels != AUDIO_CHANNELS || sample_rate_hz != AUDIO_SAMPLE_RATE_HZ {
-            unimplemented!();
-        }
-
-        AudioContext {
-            num_channels,
-            sample_rate_hz,
-            ..Default::default()
-        }
-    }
-
-    pub fn reinitialize(&mut self) {
-        let reader =
-            hound::WavReader::open("data/pongi_blip.wav").expect("Could not load test sound");
-        let num_samples = reader.len();
-
-        let samples: Vec<_> = reader
-            .into_samples::<i16>()
-            .filter_map(Result::ok)
-            .map(integer_sample_to_float)
-            .collect();
-
-        debug_assert!(samples.len() == num_samples as usize);
-
-        self.pongi_test_sound_samples = samples;
-    }
-}
-
-fn integer_sample_to_float(sample: i16) -> f32 {
-    sample as f32 / std::i16::MAX as f32
 }
 
 //==================================================================================================
@@ -464,34 +430,7 @@ pub fn process_audio<'game_context>(
     audio_output_buffer: &mut Vec<f32>,
 ) {
     let ac = &mut gc.audio_context;
-
-    let sample_rate_hz = ac.sample_rate_hz;
-    let sample_length_sec: f64 = 1.0 / sample_rate_hz as f64;
-    let samples_buffer_len = ac.num_channels * sample_rate_hz * 4 / 60; // ~ 4 Frames @60Hz
-
-    // Update audio_output_buffer
-    let num_committed_frames = (samples_buffer_len - audio_output_buffer.len()) / ac.num_channels;
-    ac.next_uncommitted_frame_index += num_committed_frames;
-    // NOTE: We clear the entire vector as we want to overwrite the uncommited samples anyway,
-    //       if there where any.
-    audio_output_buffer.clear();
-
-    // Test sound output
-    const NOTE_A_HZ: f64 = 440.0;
-
-    let num_sound_samples_to_commit = samples_buffer_len / 2;
-    let mut debug_sine_time = ac.next_uncommitted_frame_index as f64 * sample_length_sec as f64;
-
-    for _ in 0..num_sound_samples_to_commit {
-        let sine_amplitude =
-            0.2 * f64::sin(NOTE_A_HZ * debug_sine_time * 2.0 * std::f64::consts::PI);
-
-        debug_sine_time += sample_length_sec as f64;
-
-        // Stereo
-        audio_output_buffer.push(sine_amplitude as f32);
-        audio_output_buffer.push(sine_amplitude as f32);
-    }
+    ac.fill_buffer(audio_output_buffer);
 }
 
 fn lalaa() {
