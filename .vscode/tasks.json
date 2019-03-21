@@ -15,9 +15,6 @@
             "problemMatcher": [
                 "$rustc"
             ],
-            "dependsOn": [
-                "Rust: cargo build",
-            ]
         },
         {
             "type": "shell",
@@ -41,7 +38,7 @@
                 "-d",
                 "0.0",
                 "-x",
-                "build -p game_lib -p game_interface_glue",
+                "build -p game_lib",
             ],
             "problemMatcher": [
                 "$rustc"
@@ -55,8 +52,6 @@
                 "build",
                 "-p",
                 "game_lib",
-                "-p",
-                "game_interface_glue",
             ],
             "problemMatcher": [
                 "$rustc"

@@ -20,3 +20,6 @@ time_calc = "0.13"
 lewton = "0.9"
 hound = "3.4"
 sample = "0.10"
+
+[lib]
+crate-type = ["rlib","dylib"]

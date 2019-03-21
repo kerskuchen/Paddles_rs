@@ -7,15 +7,15 @@ use game_lib::{
 use crate::OptionHelper;
 
 extern crate gfx;
-use gfx::*;
 use gfx::traits::FactoryExt;
+use gfx::*;
 use std::collections::HashMap;
 
 use failure;
 use failure::{Error, ResultExt};
 
-use std;
 use log::*;
+use std;
 
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::DepthStencil;
@@ -287,7 +287,8 @@ where
             screen_color_render_target_view,
             screen_depth_render_target_view,
             None,
-        ).context(format!(
+        )
+        .context(format!(
             "Could not create framebuffer {:?}",
             framebuffer_name
         ))?;
@@ -539,10 +540,9 @@ where
     fn create_framebuffer(&mut self, framebuffer_info: &FramebufferInfo) -> Result<(), Error> {
         debug!("Creating framebuffer for {:?}", framebuffer_info);
 
-        let framebuffer = Framebuffer::new(&mut self.factory, framebuffer_info).context(format!(
-            "Could not create framebuffer {:?}",
-            framebuffer_info
-        ))?;
+        let framebuffer = Framebuffer::new(&mut self.factory, framebuffer_info).context(
+            format!("Could not create framebuffer {:?}", framebuffer_info),
+        )?;
 
         self.framebuffers
             .insert(framebuffer_info.clone(), framebuffer)

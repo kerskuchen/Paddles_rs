@@ -31,6 +31,8 @@ TODO(JaSc): (Bigger things for vacations)
     the platform layer. We also would need to re-upload all textures to the graphics context.
 
 BACKLOG(JaSc):
+  - Remove gfx-rs as it is too overkill for our purposes
+  - Move 'Keycode' into game_lib and pass complete input from the platform layer into game_lib
   - The following are things to remember to extract out of the old C project in the long term
     x Debug macro to print a variable and it's name quickly
     x Be able to conveniently do debug printing on screen
@@ -65,8 +67,8 @@ use failure::{self, Error, ResultExt};
 
 use cpal;
 
-use log::*;
 use fern;
+use log::*;
 
 use gfx;
 use gfx_window_sdl;
@@ -122,59 +124,75 @@ fn main() -> Result<(), Error> {
     //             If we don't do that we cannot click on 'x' or resize because our mouse will
     //             get dragged to the window center instantly.
     const MONITOR_ID: usize = 0;
-    const FULLSCREEN_MODE: bool = true;
+    const FULLSCREEN_MODE: bool = false;
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
-    let sdl_context = sdl2::init().unwrap();
-    let mut events = sdl_context.event_pump().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
+    let sdl_context = sdl2::init().expect("Could not initialize SDL2");
+    let mut events = sdl_context
+        .event_pump()
+        .expect("Could not retrieve SDL2 event pump");
+    let video_subsystem = sdl_context
+        .video()
+        .expect("Could init SDL2 video subsystem");
 
-// TODO: Re-enable this
-
-//    //
-//    info!("Getting monitor and its properties");
-//    //
-//    let mut events_loop = glutin::EventsLoop::new();
-//    let monitor = events_loop
-//        .get_available_monitors()
-//        .nth(MONITOR_ID)
-//        .ok_or_else(|| failure::err_msg(format!("No monitor with id {} found", MONITOR_ID)))?;
-//
-//    let monitor_logical_dimensions = monitor
-//        .get_dimensions()
-//        .to_logical(monitor.get_hidpi_factor());
-//
-//    info!(
-//        "Found monitor {} with logical dimensions: {:?}",
-//        MONITOR_ID,
-//        (
-//            monitor_logical_dimensions.width,
-//            monitor_logical_dimensions.height
-//        )
-//    );
+    // TODO: Re-enable this
+    let screen_width = 1024;
+    let screen_heigth = 768;
+    //    //
+    //    info!("Getting monitor and its properties");
+    //    //
+    //    let mut events_loop = glutin::EventsLoop::new();
+    //    let monitor = events_loop
+    //        .get_available_monitors()
+    //        .nth(MONITOR_ID)
+    //        .ok_or_else(|| failure::err_msg(format!("No monitor with id {} found", MONITOR_ID)))?;
+    //
+    //    let monitor_logical_dimensions = monitor
+    //        .get_dimensions()
+    //        .to_logical(monitor.get_hidpi_factor());
+    //
+    //    info!(
+    //        "Found monitor {} with logical dimensions: {:?}",
+    //        MONITOR_ID,
+    //        (
+    //            monitor_logical_dimensions.width,
+    //            monitor_logical_dimensions.height
+    //        )
+    //    );
 
     //
     info!("Creating window and drawing context");
     //
     // Configure OpenGl
-    video_subsystem.gl_attr().set_context_profile(sdl2::video::GLProfile::Core);
-    video_subsystem.gl_attr().set_context_version(3, 2);
-    video_subsystem.gl_set_swap_interval(sdl2::video::SwapInterval::VSync).unwrap();
+    let mut window_builder = video_subsystem.window("Paddles", screen_width, screen_heigth);
 
-    let mut window_builder = video_subsystem.window("Paddles", 1024, 768);
-
-    if FULLSCREEN_MODE{
+    if FULLSCREEN_MODE {
         window_builder.fullscreen_desktop().input_grabbed();
-        sdl_context.mouse().show_cursor(false);
     } else {
         window_builder.resizable().position_centered();
     }
 
-    let (window, _gl_context, mut device, mut factory, 
+    let (
+        window,
+        _gl_context,
+        mut device,
+        mut factory,
         screen_color_render_target_view,
         screen_depth_render_target_view,
-    ) = gfx_window_sdl::init::<gfx::format::Rgba8, gfx::format::DepthStencil>(&video_subsystem, window_builder).unwrap();
+    ) = gfx_window_sdl::init::<gfx::format::Rgba8, gfx::format::DepthStencil>(
+        &video_subsystem,
+        window_builder,
+    )
+    .unwrap();
+
+    video_subsystem
+        .gl_attr()
+        .set_context_profile(sdl2::video::GLProfile::Core);
+    video_subsystem.gl_attr().set_context_version(3, 2);
+    video_subsystem
+        .gl_set_swap_interval(sdl2::video::SwapInterval::VSync)
+        .unwrap();
 
     let encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
@@ -186,91 +204,102 @@ fn main() -> Result<(), Error> {
     )
     .context("Could not create rendering context")?;
 
+    gfx_window_sdl::update_views(
+        &window,
+        &mut rc.screen_framebuffer.color_render_target_view,
+        &mut rc.screen_framebuffer.depth_render_target_view,
+    );
+    rc.update_screen_dimensions(screen_width as u16, screen_heigth as u16);
+    let mut screen_dimensions = Vec2::new(screen_width as f32, screen_heigth as f32);
+
+    info!("4 window and drawing context");
     // ---------------------------------------------------------------------------------------------
     // Audio subsystem initialization
     //
 
-    // Init device and audio stream
-    let audio_device = cpal::default_output_device()
-        .ok_or_else(|| failure::err_msg("Could not create audio output device"))?;
-    let audio_format = audio_device
-        .default_output_format()
-        .context("Could not get audio devices default ouput format")?;
+    // TODO: Audio
 
-    let audio_event_loop = cpal::EventLoop::new();
-    let audio_stream = audio_event_loop
-        .build_output_stream(&audio_device, &audio_format)
-        .context("Could not create audio output stream")?;
-    audio_event_loop.play_stream(audio_stream);
-
-    let audio_sample_rate = audio_format.sample_rate.0 as usize;
-    let num_audio_channels = audio_format.channels as usize;
-    info!(
-        "Initialized audio_device {:?} with output format {:?}",
-        audio_device.name(),
-        audio_format
-    );
-
-    use std::sync::{Arc, Mutex};
-    let audio_output_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
-    let audio_output_buffer_clone = Arc::clone(&audio_output_buffer);
-
-    // Audio stream thread
-    use std::ops::DerefMut;
-    std::thread::spawn(move || {
-        audio_event_loop.run(move |_, data| {
-            let mut samples = audio_output_buffer_clone.lock().unwrap();
-
-            let (num_samples_committed, num_samples_required) = match data {
-                cpal::StreamData::Output {
-                    buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
-                } => {
-                    let mut num_samples_committed = 0;
-                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
-                        *output = *value;
-                        num_samples_committed += 1;
-                    }
-                    let num_samples_required = buffer.deref_mut().len();
-                    (num_samples_committed, num_samples_required)
-                }
-                cpal::StreamData::Output {
-                    buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
-                } => {
-                    let mut num_samples_committed = 0;
-                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
-                        let value = ((*value * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
-                        *output = value;
-                        num_samples_committed += 1;
-                    }
-                    let num_samples_required = buffer.deref_mut().len();
-                    (num_samples_committed, num_samples_required)
-                }
-                cpal::StreamData::Output {
-                    buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
-                } => {
-                    let mut num_samples_committed = 0;
-                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
-                        let value = (value * std::i16::MAX as f32) as i16;
-                        *output = value;
-                        num_samples_committed += 1;
-                    }
-                    let num_samples_required = buffer.deref_mut().len();
-                    (num_samples_committed, num_samples_required)
-                }
-                _ => (0, 0),
-            };
-
-            if num_samples_committed < num_samples_required {
-                warn!(
-                    "Audio lagged behind and skipped {} samples",
-                    num_samples_required - num_samples_committed
-                );
-                samples.clear();
-            } else {
-                samples.drain(0..num_samples_committed);
-            }
-        });
-    });
+    //    // Init device and audio stream
+    //    let audio_device = cpal::default_output_device()
+    //        .ok_or_else(|| failure::err_msg("Could not create audio output device"))?;
+    //    let audio_format = audio_device
+    //        .default_output_format()
+    //        .context("Could not get audio devices default ouput format")?;
+    //
+    //    let audio_event_loop = cpal::EventLoop::new();
+    //    let audio_stream = audio_event_loop
+    //        .build_output_stream(&audio_device, &audio_format)
+    //        .context("Could not create audio output stream")?;
+    //    audio_event_loop.play_stream(audio_stream);
+    //
+    //    let audio_sample_rate = audio_format.sample_rate.0 as usize;
+    //    let num_audio_channels = audio_format.channels as usize;
+    //    info!(
+    //        "Initialized audio_device {:?} with output format {:?}",
+    //        audio_device.name(),
+    //        audio_format
+    //    );
+    //
+    //    use std::sync::{Arc, Mutex};
+    //    let audio_output_buffer = Arc::new(Mutex::new(Vec::<f32>::new()));
+    //    let audio_output_buffer_clone = Arc::clone(&audio_output_buffer);
+    //
+    //    // Audio stream thread
+    //    use std::ops::DerefMut;
+    //    std::thread::spawn(move || {
+    //        audio_event_loop.run(move |_, data| {
+    //            let mut samples = audio_output_buffer_clone.lock().unwrap();
+    //
+    //            let (num_samples_committed, num_samples_required) = match data {
+    //                cpal::StreamData::Output {
+    //                    buffer: cpal::UnknownTypeOutputBuffer::F32(mut buffer),
+    //                } => {
+    //                    let mut num_samples_committed = 0;
+    //                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
+    //                        *output = *value;
+    //                        num_samples_committed += 1;
+    //                    }
+    //                    let num_samples_required = buffer.deref_mut().len();
+    //                    (num_samples_committed, num_samples_required)
+    //                }
+    //                cpal::StreamData::Output {
+    //                    buffer: cpal::UnknownTypeOutputBuffer::U16(mut buffer),
+    //                } => {
+    //                    let mut num_samples_committed = 0;
+    //                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
+    //                        let value = ((*value * 0.5 + 0.5) * std::u16::MAX as f32) as u16;
+    //                        *output = value;
+    //                        num_samples_committed += 1;
+    //                    }
+    //                    let num_samples_required = buffer.deref_mut().len();
+    //                    (num_samples_committed, num_samples_required)
+    //                }
+    //                cpal::StreamData::Output {
+    //                    buffer: cpal::UnknownTypeOutputBuffer::I16(mut buffer),
+    //                } => {
+    //                    let mut num_samples_committed = 0;
+    //                    for (output, value) in buffer.iter_mut().zip(samples.iter()) {
+    //                        let value = (value * std::i16::MAX as f32) as i16;
+    //                        *output = value;
+    //                        num_samples_committed += 1;
+    //                    }
+    //                    let num_samples_required = buffer.deref_mut().len();
+    //                    (num_samples_committed, num_samples_required)
+    //                }
+    //                _ => (0, 0),
+    //            };
+    //
+    //            if num_samples_committed < num_samples_required {
+    //                warn!(
+    //                    "Audio lagged behind and skipped {} samples",
+    //                    num_samples_required - num_samples_committed
+    //                );
+    //                samples.clear();
+    //            } else {
+    //                samples.drain(0..num_samples_committed);
+    //            }
+    //        });
+    //    });
 
     // ---------------------------------------------------------------------------------------------
     // Main loop
@@ -280,8 +309,6 @@ fn main() -> Result<(), Error> {
     let mut is_running = true;
     let mut mouse_pos_screen = Point::zero();
     let mut mouse_delta_screen = Vec2::zero();
-    let mut screen_dimensions = Vec2::zero();
-    let mut ready_to_modify_cursor = false;
     let mut window_has_focus = true;
     let mut relative_mouse_mode_enabled = false;
 
@@ -314,8 +341,10 @@ fn main() -> Result<(), Error> {
     };
 
     // Gamelib loading and timing
-    let mut game_lib = GameLib::new("target/debug/", "game_interface_glue");
-    let mut game_context = GameContext::new(num_audio_channels, audio_sample_rate);
+    let mut game_lib = GameLib::new("target/debug/", "game_lib");
+    // TODO: Audio
+    //let mut game_context = GameContext::new(num_audio_channels, audio_sample_rate);
+    let mut game_context = GameContext::new(2, 48000);
 
     let timer_startup = Timer::new();
     let mut timer_delta = Timer::new();
@@ -333,116 +362,93 @@ fn main() -> Result<(), Error> {
             }
         }
 
-
-    use sdl2::event::Event;
-    use sdl2::keyboard::Keycode;
-    for event in events.poll_iter(){
-                match event {
-                    Event::Quit{..} => is_running = false,
-                    _ => {},
-// TODO: Reimplement those
-//
-//                    Event::KeyboardInput {
-//                        //device_id,
-//                        input:
-//                            KeyboardInput {
-//                                //scancode,
-//                                state,
-//                                virtual_keycode: Some(key),
-//                                //modifiers,
-//                                ..
-//                            },
-//                        ..
-//                    } => {
-//                        if let Some(input_actions) =
-//                            key_mapping.get(&input::convert_glutin_keycode(key))
-//                        {
-//                            for action in input_actions {
-//                                input.process_button_event(
-//                                    &action,
-//                                    state == glutin::ElementState::Pressed,
-//                                );
-//                            }
-//                        }
-//                    }
-//                    WindowEvent::Focused(has_focus) => {
-//                        info!("Window has focus: {}", has_focus);
-//                        window_has_focus = has_focus;
-//                        // NOTE: We need to grab/ungrab and hide/unhide mouse cursor when
-//                        //       ALT-TABBING in and out or the user cannot use their computer
-//                        //       correctly in a multi-monitor setup while running our app.
-//                        if ready_to_modify_cursor {
-//                            if FULLSCREEN_MODE {
-//                                window.grab_cursor(has_focus).unwrap();
-//                            }
-//                            if relative_mouse_mode_enabled {
-//                                window.hide_cursor(has_focus);
-//                            }
-//                        }
-//                    }
-//                    WindowEvent::Resized(new_dim) => {
-//                        window.resize(new_dim.to_physical(window.get_hidpi_factor()));
-//                        gfx_window_glutin::update_views(
-//                            &window,
-//                            &mut rc.screen_framebuffer.color_render_target_view,
-//                            &mut rc.screen_framebuffer.depth_render_target_view,
-//                        );
-//                        rc.update_screen_dimensions(new_dim.width as u16, new_dim.height as u16);
-//                        screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
-//
-//                        // Grab and/or hide mouse cursor in window
-//                        // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
-//                        //       make sure that our resized window now spans the full screen before
-//                        //       we allow grabbing the mouse cursor.
-//                        // TODO(JaSc): Remove workaround when upstream is fixed
-//                        if FULLSCREEN_MODE && new_dim == monitor_logical_dimensions {
-//                            // Our window now has its final size, we can safely grab the cursor now
-//                            info!("Mouse cursor grabbed");
-//                            ready_to_modify_cursor = true;
-//                            window.grab_cursor(true).unwrap();
-//                        }
-//                        if relative_mouse_mode_enabled && ready_to_modify_cursor {
-//                            window.hide_cursor(true);
-//                        }
-//                    }
-//                    WindowEvent::CursorMoved { position, .. } => {
-//                        // NOTE: mouse_pos_screen is in the following interval:
-//                        //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
-//                        //       where (0,0) is the top left of the screen
-//                        let pos = Point::new(position.x as f32, position.y as f32);
-//                        if relative_mouse_mode_enabled {
-//                            // NOTE: We do not use '+=' as we only want to save the last delta
-//                            //       that we registered during the last frame.
-//                            mouse_delta_screen = pos - screen_dimensions / 2.0;
-//                        } else {
-//                            mouse_delta_screen += pos - mouse_pos_screen;
-//                            mouse_pos_screen = pos;
-//                        }
-//                    }
-//                    WindowEvent::MouseWheel { delta, .. } => {
-//                        input.mouse_wheel_delta += match delta {
-//                            glutin::MouseScrollDelta::LineDelta(_, y) => y as i32,
-//                            glutin::MouseScrollDelta::PixelDelta(pos) => pos.y as i32,
-//                        };
-//                    }
-//                    WindowEvent::MouseInput { state, button, .. } => {
-//                        use glutin::ElementState;
-//                        use glutin::MouseButton;
-//
-//                        let is_pressed = match state {
-//                            ElementState::Pressed => true,
-//                            ElementState::Released => false,
-//                        };
-//                        match button {
-//                            MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
-//                            MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
-//                            MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
-//                            _ => {}
-//                        }
-//                    }
-//                    _ => (),
+        use sdl2::event::Event;
+        use sdl2::event::WindowEvent;
+        for event in events.poll_iter() {
+            match event {
+                Event::Quit { .. } => is_running = false,
+                Event::KeyDown {
+                    keycode: Some(keycode),
+                    repeat: false,
+                    ..
+                } => {
+                    if let Some(input_actions) =
+                        key_mapping.get(&input::convert_sdl_keycode_to_our_format(keycode))
+                    {
+                        for action in input_actions {
+                            input.process_button_event(&action, true);
+                        }
+                    }
                 }
-}
+                Event::KeyUp {
+                    keycode: Some(keycode),
+                    repeat: false,
+                    ..
+                } => {
+                    if let Some(input_actions) =
+                        key_mapping.get(&input::convert_sdl_keycode_to_our_format(keycode))
+                    {
+                        for action in input_actions {
+                            input.process_button_event(&action, false);
+                        }
+                    }
+                }
+                Event::Window { win_event, .. } => match win_event {
+                    WindowEvent::FocusGained => {
+                        info!("Window gained focus");
+                        window_has_focus = true;
+                    }
+                    WindowEvent::FocusLost => {
+                        info!("Window lost focus");
+                        window_has_focus = false;
+                    }
+                    WindowEvent::Resized(width, height) => {
+                        info!("Window resized: {}x{}", width, height);
+                        gfx_window_sdl::update_views(
+                            &window,
+                            &mut rc.screen_framebuffer.color_render_target_view,
+                            &mut rc.screen_framebuffer.depth_render_target_view,
+                        );
+                        rc.update_screen_dimensions(width as u16, height as u16);
+                        screen_dimensions = Vec2::new(width as f32, height as f32);
+                    }
+                    _ => {}
+                },
+                Event::MouseMotion {
+                    x, y, xrel, yrel, ..
+                } => {
+                    // NOTE: mouse_pos_screen is in the following interval:
+                    //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
+                    //       where (0,0) is the top left of the screen
+                    mouse_pos_screen = Point::new(x as f32, y as f32);
+                    mouse_delta_screen = Vec2::new(xrel as f32, yrel as f32);
+                }
+                Event::MouseWheel { y, .. } => {
+                    input.mouse_wheel_delta += y;
+                }
+                Event::MouseButtonDown { mouse_btn, .. } => {
+                    let is_pressed = true;
+                    use sdl2::mouse::MouseButton;
+                    match mouse_btn {
+                        MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
+                        MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
+                        MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
+                        _ => {}
+                    }
+                }
+                Event::MouseButtonUp { mouse_btn, .. } => {
+                    let is_pressed = false;
+                    use sdl2::mouse::MouseButton;
+                    match mouse_btn {
+                        MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
+                        MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
+                        MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
+                        _ => {}
+                    }
+                }
+                _ => (),
+            }
+        }
 
         if relative_mouse_mode_enabled && window_has_focus {
             mouse_pos_screen += mouse_delta_screen;
@@ -451,15 +457,15 @@ fn main() -> Result<(), Error> {
                 screen_dimensions.y - 1.0,
             ));
 
-// TODO: Check if we need this in SDL
-//
-//             // TODO(JaSc): Maybe we need to set this more frequently?
-//             window
-//                 .set_cursor_position(glutin::dpi::LogicalPosition::new(
-//                     f64::from(screen_dimensions.x) / 2.0,
-//                     f64::from(screen_dimensions.y) / 2.0,
-//                 ))
-//                 .unwrap();
+            // TODO: Check if we need this in SDL
+            //
+            //             // TODO(JaSc): Maybe we need to set this more frequently?
+            //             window
+            //                 .set_cursor_position(glutin::dpi::LogicalPosition::new(
+            //                     f64::from(screen_dimensions.x) / 2.0,
+            //                     f64::from(screen_dimensions.y) / 2.0,
+            //                 ))
+            //                 .unwrap();
         }
 
         // Prepare input and update game
@@ -478,8 +484,9 @@ fn main() -> Result<(), Error> {
 
         let timer_audio = Timer::new();
         {
-            let mut audio_output_buffer = audio_output_buffer.lock().unwrap();
-            game_lib.process_audio(&input, &mut game_context, &mut audio_output_buffer);
+            // TODO: AUDIO
+            //let mut audio_output_buffer = audio_output_buffer.lock().unwrap();
+            //game_lib.process_audio(&input, &mut game_context, &mut audio_output_buffer);
         }
         input.time_audio = timer_audio.elapsed_time() as f32;
 
@@ -487,16 +494,8 @@ fn main() -> Result<(), Error> {
         for command in game_context.get_system_commands() {
             match command {
                 SystemCommand::EnableRelativeMouseMovementCapture(do_enable) => {
-                    if ready_to_modify_cursor {
-                        // TODO: Reimplement this
-                        // window.hide_cursor(do_enable && window_has_focus);
-                    } else {
-                        unimplemented!();
-                        // TODO(JaSc): We need to remember to hide the cursor once we can modify it.
-                        //             Or we could just wait for
-                        //             https://github.com/tomaka/winit/issues/574 to be fixed
-                        //             and just drop the 'ready_to_modify_cursor' concept altogether
-                    }
+                    // TODO: Reimplement this
+                    // window.hide_cursor(do_enable && window_has_focus);
                     relative_mouse_mode_enabled = do_enable;
                 }
                 SystemCommand::ShutdownGame => is_running = false,
@@ -512,7 +511,7 @@ fn main() -> Result<(), Error> {
         // Flush and flip buffers
         rc.encoder.flush(&mut device);
 
-window.gl_swap_window();
+        window.gl_swap_window();
         device.cleanup();
 
         // Reset input

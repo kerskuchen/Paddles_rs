@@ -1,9 +1,9 @@
 (
     key_mapping: {
-        Add: [
+        KpPlus: [
             "debug_time_speedup",
         ],
-        Subtract: [
+        KpMinus: [
             "debug_time_slowdown",
         ],
         F1: [

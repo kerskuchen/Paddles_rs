@@ -44,6 +44,30 @@ pub enum SystemCommand {
 }
 
 //==================================================================================================
+// External calls
+//==================================================================================================
+//
+
+/// Forwards directly to [`game_lib::update_and_draw`]
+#[no_mangle]
+pub fn update_and_draw<'game_context>(
+    input: &GameInput,
+    game_context: &'game_context mut GameContext<'game_context>,
+) {
+    update_and_draw_internal(input, game_context);
+}
+
+/// Forwards directly to [`game_lib::process_audio`]
+#[no_mangle]
+pub fn process_audio<'game_context>(
+    input: &GameInput,
+    game_context: &'game_context mut GameContext<'game_context>,
+    audio_output_buffer: &mut Vec<f32>,
+) {
+    process_audio_internal(input, game_context, audio_output_buffer);
+}
+
+//==================================================================================================
 // GameContext
 //==================================================================================================
 //
@@ -264,7 +288,7 @@ impl GameButton {
 
 // TODO(JaSc): Maybe we additionally want something like SystemCommands that tell the platform
 //             layer to create framebuffers / go fullscreen / turn on vsync / upload textures
-pub fn update_and_draw<'game_context>(
+pub fn update_and_draw_internal<'game_context>(
     input: &GameInput,
     gc: &'game_context mut GameContext<'game_context>,
 ) {
@@ -358,6 +382,7 @@ pub fn update_and_draw<'game_context>(
     // Camera movement
     if input.mouse_button_right.is_pressed {
         gc.globals.cam.pan(new_mouse_delta_canvas);
+
     }
 
     if input.mouse_button_middle.is_pressed {
@@ -422,7 +447,7 @@ pub fn update_and_draw<'game_context>(
 // Audio
 //==================================================================================================
 //
-pub fn process_audio<'game_context>(
+pub fn process_audio_internal<'game_context>(
     _input: &GameInput,
     gc: &'game_context mut GameContext<'game_context>,
     audio_output_buffer: &mut Vec<f32>,

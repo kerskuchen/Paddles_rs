@@ -19,7 +19,7 @@
         Return: [
             "ui_accept",
         ],
-        NumpadEnter: [
+        KpEnter: [
             "ui_accept",
         ],
         Escape: [
