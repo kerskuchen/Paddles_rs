@@ -5,7 +5,8 @@ use std;
 // AudioContext
 //==================================================================================================
 //
-const AUDIO_SAMPLE_RATE_HZ: usize = 44100;
+// TODO: Set this back to 44100 when we finished the update to SDL2
+const AUDIO_SAMPLE_RATE_HZ: usize = 48000;
 const AUDIO_CHANNELS: usize = 2;
 
 pub enum SoundStartTime {
@@ -107,7 +108,8 @@ impl AudioContext {
                 ..usize::min(
                     audio_output_buffer.len() / self.num_channels,
                     self.pongi_test_sound_samples.len(),
-                ) {
+                )
+            {
                 audio_output_buffer[2 * (index - vec_start_index) + 0] =
                     self.pongi_test_sound_samples[index];
                 audio_output_buffer[2 * (index - vec_start_index) + 1] =
