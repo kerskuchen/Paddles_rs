@@ -1073,8 +1073,8 @@ impl Default for Camera {
         Camera {
             frustum: Default::default(),
             zoom_level: 1.0,
-            z_near: ::DEFAULT_WORLD_ZNEAR,
-            z_far: ::DEFAULT_WORLD_ZFAR,
+            z_near: crate::DEFAULT_WORLD_ZNEAR,
+            z_far: crate::DEFAULT_WORLD_ZFAR,
         }
     }
 }

@@ -1,6 +1,8 @@
-name = "pongi"
+name = "paddles_rs"
 version = "0.1.0"
 authors = ["Jakob Schwab <j.schwab@mail.de>"]
+
+edition = "2018"
 
 [workspace]
 members = [

@@ -30,11 +30,11 @@ mod scenes;
 
 pub type ResourcePath = String;
 
-use audio::*;
-pub use collision::*;
-pub use draw::*;
-pub use math::*;
-use scenes::*;
+use crate::audio::*;
+pub use crate::collision::*;
+pub use crate::draw::*;
+pub use crate::math::*;
+use crate::scenes::*;
 use std::collections::HashMap;
 
 //==================================================================================================
@@ -425,7 +425,7 @@ pub fn update_and_draw<'game_context>(
 //==================================================================================================
 //
 pub fn process_audio<'game_context>(
-    input: &GameInput,
+    _input: &GameInput,
     gc: &'game_context mut GameContext<'game_context>,
     audio_output_buffer: &mut Vec<f32>,
 ) {

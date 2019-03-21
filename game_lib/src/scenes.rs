@@ -1,5 +1,5 @@
-pub use gui::{GuiContext, ScreenFader};
-use *;
+pub use crate::gui::{GuiContext, ScreenFader};
+use crate::*;
 
 const PONGI_RADIUS: f32 = 7.5;
 const PONGI_BASE_SPEED: f32 = 15.0 * UNIT_SIZE;
@@ -229,7 +229,7 @@ impl Scene for GameplayScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
-        ac: &mut AudioContext,
+        _ac: &mut AudioContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
         if globals.restart_game {
@@ -609,7 +609,7 @@ impl Scene for MenuScene {
         input: &GameInput,
         globals: &mut Globals,
         dc: &mut DrawContext,
-        ac: &mut AudioContext,
+        _ac: &mut AudioContext,
         system_commands: &mut Vec<SystemCommand>,
     ) {
         let canvas_rect = Rect::from_width_height(CANVAS_WIDTH, CANVAS_HEIGHT);

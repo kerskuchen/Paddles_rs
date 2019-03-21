@@ -1,8 +1,8 @@
 use game_lib::{ResourcePath, Sprite, Vec2};
 
-use common;
-use common::AtlasPacker;
-use common::*;
+use crate::common;
+use crate::common::AtlasPacker;
+use crate::common::*;
 
 use std::collections::HashMap;
 

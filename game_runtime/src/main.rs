@@ -1,19 +1,19 @@
 #![feature(nll)]
 /*
 TODO(JaSc):
-  x Pixel perfect renderer 
+  x Pixel perfect renderer
     x Render to offscreen buffer and blit to main screen
-    x Static world camera 
-    x Transformation screen <-> canvas <-> world 
+    x Static world camera
+    x Transformation screen <-> canvas <-> world
   x Atlas packer
   x Font packer
   x Atlas textures and sprite/quad/line-batching
-  x Bitmap text rendering 
+  x Bitmap text rendering
     x Worldspace/Screenspace placement
     x Depth clearing after switching from worldspace -> screenspace -> debugspace
     x Define and standardize fixed depth ranges for worldspace/screenspace/debugspace
   x Game input + keyboard/mouse-support
-    x Change absolute/relative mouse position mode with system commands depending on being 
+    x Change absolute/relative mouse position mode with system commands depending on being
       in-menu/in-game
   - Gamestate + logic + timing
   - Audio playback
@@ -22,12 +22,12 @@ TODO(JaSc):
 
 TODO(JaSc): (Bigger things for vacations)
   x Throw out generalized coordinate system and replace by simple pixel-based coordinate system
-  x Make framebuffer handling client side. For this we need to create some new draw commands and 
+  x Make framebuffer handling client side. For this we need to create some new draw commands and
     restructure the platform layer a little
-  - Make it possible for debug overlays like intersections to draw to world-space as well as 
+  - Make it possible for debug overlays like intersections to draw to world-space as well as
     canvas-space to make i.e. arrow-heads uniformly sized regardless of arrow-size/zoom-level
   - Allow do draw lines with arbitrary thickness
-  - Add system commands from client to platform that can change settings like vsync without 
+  - Add system commands from client to platform that can change settings like vsync without
     restart. This requires some major codeflow refactoring but would allow us to better modularize
     the platform layer. We also would need to re-upload all textures to the graphics context.
 
@@ -50,7 +50,6 @@ BACKLOG(JaSc):
     - Disable hot reloading when making a publish build
 */
 
-#[macro_use]
 extern crate game_lib;
 extern crate libloading;
 use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
@@ -60,9 +59,9 @@ mod graphics;
 mod input;
 mod timer;
 
-use game_interface::GameLib;
-use graphics::{ColorFormat, DepthFormat, RenderingContext};
-use timer::Timer;
+use crate::game_interface::GameLib;
+use crate::graphics::{ColorFormat, DepthFormat, RenderingContext};
+use crate::timer::Timer;
 
 extern crate failure;
 use failure::{Error, ResultExt};
@@ -165,7 +164,7 @@ fn main() -> Result<(), Error> {
     let fullscreen_monitor = if FULLSCREEN_MODE { Some(monitor) } else { None };
     let window_builder = glutin::WindowBuilder::new()
         .with_resizable(!FULLSCREEN_MODE)
-        // TODO(JaSc): Allow cursor grabbing in windowed mode when 
+        // TODO(JaSc): Allow cursor grabbing in windowed mode when
         //             https://github.com/tomaka/winit/issues/574
         //             is fixed. Grabbing the cursor in windowed mode and ALT-TABBING in and out
         //             is currently broken.
@@ -195,7 +194,8 @@ fn main() -> Result<(), Error> {
         encoder,
         screen_color_render_target_view,
         screen_depth_render_target_view,
-    ).context("Could not create rendering context")?;
+    )
+    .context("Could not create rendering context")?;
 
     // ---------------------------------------------------------------------------------------------
     // Audio subsystem initialization
@@ -301,13 +301,16 @@ fn main() -> Result<(), Error> {
     let key_mapping = {
         let mut key_mapping = game_lib::utility::deserialize_from_ron_file::<input::Keymapping>(
             "data/key_mapping.txt",
-        ).key_mapping;
+        )
+        .key_mapping;
 
         // Add debug keymapping if it exist
         if std::path::Path::new("data/key_mapping_debug.txt").exists() {
-            let debug_key_mapping = game_lib::utility::deserialize_from_ron_file::<input::Keymapping>(
-                "data/key_mapping_debug.txt",
-            ).key_mapping;
+            let debug_key_mapping =
+                game_lib::utility::deserialize_from_ron_file::<input::Keymapping>(
+                    "data/key_mapping_debug.txt",
+                )
+                .key_mapping;
             key_mapping.extend(debug_key_mapping);
         }
 

@@ -4,7 +4,7 @@ use game_lib::{
     Pixel, Rect, TextureArrayInfo, Vertex, VertexIndex,
 };
 
-use OptionHelper;
+use crate::OptionHelper;
 
 use gfx;
 use gfx::traits::FactoryExt;

@@ -1,5 +1,5 @@
-use math::{CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, Vec2, WorldPoint};
-use utility;
+use crate::math::{CanvasPoint, Color, Line, Mat4, Mat4Helper, Point, Rect, Vec2, WorldPoint};
+use crate::utility;
 
 use lodepng;
 use rgb;
@@ -925,9 +925,9 @@ impl PolygonMesh {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct AtlasMeta {
     pub num_atlas_textures: usize,
-    pub fonts: HashMap<::ResourcePath, Font>,
-    pub animations: HashMap<::ResourcePath, Animation>,
-    pub sprites: HashMap<::ResourcePath, Sprite>,
+    pub fonts: HashMap<crate::ResourcePath, Font>,
+    pub animations: HashMap<crate::ResourcePath, Animation>,
+    pub sprites: HashMap<crate::ResourcePath, Sprite>,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]

@@ -1,5 +1,5 @@
-use common::AtlasPacker;
-use common::*;
+use crate::common::AtlasPacker;
+use crate::common::*;
 use game_lib::{Font, Glyph, ResourcePath, Vec2};
 
 use std;

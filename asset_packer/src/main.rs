@@ -37,7 +37,7 @@ const ATLAS_TEXTURE_SIZE: u32 = 64;
 const LOG_LEVEL: log::LevelFilter = log::LevelFilter::Info;
 
 use bincode::serialize;
-use common::AtlasPacker;
+use crate::common::AtlasPacker;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;

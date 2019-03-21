@@ -1,13 +1,13 @@
 /// Immediate mode gui that is heavily inspired by the tutorials of
 /// Jari Komppa of http://sol.gfxile.net/imgui/index.html
 ///
-use draw;
-use draw::{DrawContext, DrawSpace};
-use math;
-use math::{CanvasPoint, Rect};
+use crate::draw;
+use crate::draw::{DrawContext, DrawSpace};
+use crate::math;
+use crate::math::{CanvasPoint, Rect};
 use std;
-use utility::CountdownTimer;
-use *;
+use crate::utility::CountdownTimer;
+use crate::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GuiAction {
