@@ -6,7 +6,8 @@ use game_lib::{
 
 use crate::OptionHelper;
 
-use gfx;
+extern crate gfx;
+use gfx::*;
 use gfx::traits::FactoryExt;
 use std::collections::HashMap;
 
@@ -14,6 +15,7 @@ use failure;
 use failure::{Error, ResultExt};
 
 use std;
+use log::*;
 
 pub type ColorFormat = gfx::format::Rgba8;
 pub type DepthFormat = gfx::format::DepthStencil;

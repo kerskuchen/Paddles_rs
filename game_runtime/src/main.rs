@@ -1,4 +1,3 @@
-#![feature(nll)]
 /*
 TODO(JaSc):
   x Pixel perfect renderer
@@ -50,9 +49,8 @@ BACKLOG(JaSc):
     - Disable hot reloading when making a publish build
 */
 
-extern crate game_lib;
 extern crate libloading;
-use game_lib::{GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
+use game_lib::{self, GameContext, GameInput, Point, Rect, SystemCommand, Vec2};
 
 mod game_interface;
 mod graphics;
@@ -63,26 +61,18 @@ use crate::game_interface::GameLib;
 use crate::graphics::{ColorFormat, DepthFormat, RenderingContext};
 use crate::timer::Timer;
 
-extern crate failure;
-use failure::{Error, ResultExt};
+use failure::{self, Error, ResultExt};
 
-extern crate cpal;
+use cpal;
 
-#[macro_use]
-extern crate log;
-extern crate fern;
-extern crate rand;
+use log::*;
+use fern;
 
-#[macro_use]
-extern crate serde_derive;
-extern crate serde;
+use gfx;
+use gfx_window_sdl;
+use sdl2;
 
-#[macro_use]
-extern crate gfx;
-extern crate gfx_window_glutin;
-extern crate glutin;
 use gfx::Device;
-use glutin::GlContext;
 
 pub trait OptionHelper {
     fn none_or(self, err: Error) -> Result<(), Error>;
@@ -136,56 +126,55 @@ fn main() -> Result<(), Error> {
     const GL_VERSION_MAJOR: u8 = 3;
     const GL_VERSION_MINOR: u8 = 2;
 
-    //
-    info!("Getting monitor and its properties");
-    //
-    let mut events_loop = glutin::EventsLoop::new();
-    let monitor = events_loop
-        .get_available_monitors()
-        .nth(MONITOR_ID)
-        .ok_or_else(|| failure::err_msg(format!("No monitor with id {} found", MONITOR_ID)))?;
+    let sdl_context = sdl2::init().unwrap();
+    let mut events = sdl_context.event_pump().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
 
-    let monitor_logical_dimensions = monitor
-        .get_dimensions()
-        .to_logical(monitor.get_hidpi_factor());
+// TODO: Re-enable this
 
-    info!(
-        "Found monitor {} with logical dimensions: {:?}",
-        MONITOR_ID,
-        (
-            monitor_logical_dimensions.width,
-            monitor_logical_dimensions.height
-        )
-    );
+//    //
+//    info!("Getting monitor and its properties");
+//    //
+//    let mut events_loop = glutin::EventsLoop::new();
+//    let monitor = events_loop
+//        .get_available_monitors()
+//        .nth(MONITOR_ID)
+//        .ok_or_else(|| failure::err_msg(format!("No monitor with id {} found", MONITOR_ID)))?;
+//
+//    let monitor_logical_dimensions = monitor
+//        .get_dimensions()
+//        .to_logical(monitor.get_hidpi_factor());
+//
+//    info!(
+//        "Found monitor {} with logical dimensions: {:?}",
+//        MONITOR_ID,
+//        (
+//            monitor_logical_dimensions.width,
+//            monitor_logical_dimensions.height
+//        )
+//    );
 
     //
     info!("Creating window and drawing context");
     //
-    let fullscreen_monitor = if FULLSCREEN_MODE { Some(monitor) } else { None };
-    let window_builder = glutin::WindowBuilder::new()
-        .with_resizable(!FULLSCREEN_MODE)
-        // TODO(JaSc): Allow cursor grabbing in windowed mode when
-        //             https://github.com/tomaka/winit/issues/574
-        //             is fixed. Grabbing the cursor in windowed mode and ALT-TABBING in and out
-        //             is currently broken.
-        .with_fullscreen(fullscreen_monitor)
-        .with_title("Pongi".to_string());
+    // Configure OpenGl
+    video_subsystem.gl_attr().set_context_profile(sdl2::video::GLProfile::Core);
+    video_subsystem.gl_attr().set_context_version(3, 2);
+    video_subsystem.gl_set_swap_interval(sdl2::video::SwapInterval::VSync).unwrap();
 
-    let context = glutin::ContextBuilder::new()
-        .with_gl(glutin::GlRequest::Specific(
-            glutin::Api::OpenGl,
-            (GL_VERSION_MAJOR, GL_VERSION_MINOR),
-        ))
-        // TODO(JaSc): Find out why CPU load is so high even though we use vsync
-        .with_vsync(true);
+    let mut window_builder = video_subsystem.window("Paddles", 1024, 768);
 
-    let (
-        window,
-        mut device,
-        mut factory,
+    if FULLSCREEN_MODE{
+        window_builder.fullscreen_desktop().input_grabbed();
+        sdl_context.mouse().show_cursor(false);
+    } else {
+        window_builder.resizable().position_centered();
+    }
+
+    let (window, _gl_context, mut device, mut factory, 
         screen_color_render_target_view,
         screen_depth_render_target_view,
-    ) = gfx_window_glutin::init::<ColorFormat, DepthFormat>(window_builder, context, &events_loop);
+    ) = gfx_window_sdl::init::<gfx::format::Rgba8, gfx::format::DepthStencil>(&video_subsystem, window_builder).unwrap();
 
     let encoder: gfx::Encoder<_, _> = factory.create_command_buffer().into();
 
@@ -344,113 +333,116 @@ fn main() -> Result<(), Error> {
             }
         }
 
-        use glutin::{Event, KeyboardInput, WindowEvent};
-        events_loop.poll_events(|event| {
-            if let Event::WindowEvent { event, .. } = event {
+
+    use sdl2::event::Event;
+    use sdl2::keyboard::Keycode;
+    for event in events.poll_iter(){
                 match event {
-                    WindowEvent::CloseRequested => is_running = false,
-                    WindowEvent::KeyboardInput {
-                        //device_id,
-                        input:
-                            KeyboardInput {
-                                //scancode,
-                                state,
-                                virtual_keycode: Some(key),
-                                //modifiers,
-                                ..
-                            },
-                        ..
-                    } => {
-                        if let Some(input_actions) =
-                            key_mapping.get(&input::convert_glutin_keycode(key))
-                        {
-                            for action in input_actions {
-                                input.process_button_event(
-                                    &action,
-                                    state == glutin::ElementState::Pressed,
-                                );
-                            }
-                        }
-                    }
-                    WindowEvent::Focused(has_focus) => {
-                        info!("Window has focus: {}", has_focus);
-                        window_has_focus = has_focus;
-                        // NOTE: We need to grab/ungrab and hide/unhide mouse cursor when
-                        //       ALT-TABBING in and out or the user cannot use their computer
-                        //       correctly in a multi-monitor setup while running our app.
-                        if ready_to_modify_cursor {
-                            if FULLSCREEN_MODE {
-                                window.grab_cursor(has_focus).unwrap();
-                            }
-                            if relative_mouse_mode_enabled {
-                                window.hide_cursor(has_focus);
-                            }
-                        }
-                    }
-                    WindowEvent::Resized(new_dim) => {
-                        window.resize(new_dim.to_physical(window.get_hidpi_factor()));
-                        gfx_window_glutin::update_views(
-                            &window,
-                            &mut rc.screen_framebuffer.color_render_target_view,
-                            &mut rc.screen_framebuffer.depth_render_target_view,
-                        );
-                        rc.update_screen_dimensions(new_dim.width as u16, new_dim.height as u16);
-                        screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
-
-                        // Grab and/or hide mouse cursor in window
-                        // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
-                        //       make sure that our resized window now spans the full screen before
-                        //       we allow grabbing the mouse cursor.
-                        // TODO(JaSc): Remove workaround when upstream is fixed
-                        if FULLSCREEN_MODE && new_dim == monitor_logical_dimensions {
-                            // Our window now has its final size, we can safely grab the cursor now
-                            info!("Mouse cursor grabbed");
-                            ready_to_modify_cursor = true;
-                            window.grab_cursor(true).unwrap();
-                        }
-                        if relative_mouse_mode_enabled && ready_to_modify_cursor {
-                            window.hide_cursor(true);
-                        }
-                    }
-                    WindowEvent::CursorMoved { position, .. } => {
-                        // NOTE: mouse_pos_screen is in the following interval:
-                        //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
-                        //       where (0,0) is the top left of the screen
-                        let pos = Point::new(position.x as f32, position.y as f32);
-                        if relative_mouse_mode_enabled {
-                            // NOTE: We do not use '+=' as we only want to save the last delta
-                            //       that we registered during the last frame.
-                            mouse_delta_screen = pos - screen_dimensions / 2.0;
-                        } else {
-                            mouse_delta_screen += pos - mouse_pos_screen;
-                            mouse_pos_screen = pos;
-                        }
-                    }
-                    WindowEvent::MouseWheel { delta, .. } => {
-                        input.mouse_wheel_delta += match delta {
-                            glutin::MouseScrollDelta::LineDelta(_, y) => y as i32,
-                            glutin::MouseScrollDelta::PixelDelta(pos) => pos.y as i32,
-                        };
-                    }
-                    WindowEvent::MouseInput { state, button, .. } => {
-                        use glutin::ElementState;
-                        use glutin::MouseButton;
-
-                        let is_pressed = match state {
-                            ElementState::Pressed => true,
-                            ElementState::Released => false,
-                        };
-                        match button {
-                            MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
-                            MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
-                            MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
-                            _ => {}
-                        }
-                    }
-                    _ => (),
+                    Event::Quit{..} => is_running = false,
+                    _ => {},
+// TODO: Reimplement those
+//
+//                    Event::KeyboardInput {
+//                        //device_id,
+//                        input:
+//                            KeyboardInput {
+//                                //scancode,
+//                                state,
+//                                virtual_keycode: Some(key),
+//                                //modifiers,
+//                                ..
+//                            },
+//                        ..
+//                    } => {
+//                        if let Some(input_actions) =
+//                            key_mapping.get(&input::convert_glutin_keycode(key))
+//                        {
+//                            for action in input_actions {
+//                                input.process_button_event(
+//                                    &action,
+//                                    state == glutin::ElementState::Pressed,
+//                                );
+//                            }
+//                        }
+//                    }
+//                    WindowEvent::Focused(has_focus) => {
+//                        info!("Window has focus: {}", has_focus);
+//                        window_has_focus = has_focus;
+//                        // NOTE: We need to grab/ungrab and hide/unhide mouse cursor when
+//                        //       ALT-TABBING in and out or the user cannot use their computer
+//                        //       correctly in a multi-monitor setup while running our app.
+//                        if ready_to_modify_cursor {
+//                            if FULLSCREEN_MODE {
+//                                window.grab_cursor(has_focus).unwrap();
+//                            }
+//                            if relative_mouse_mode_enabled {
+//                                window.hide_cursor(has_focus);
+//                            }
+//                        }
+//                    }
+//                    WindowEvent::Resized(new_dim) => {
+//                        window.resize(new_dim.to_physical(window.get_hidpi_factor()));
+//                        gfx_window_glutin::update_views(
+//                            &window,
+//                            &mut rc.screen_framebuffer.color_render_target_view,
+//                            &mut rc.screen_framebuffer.depth_render_target_view,
+//                        );
+//                        rc.update_screen_dimensions(new_dim.width as u16, new_dim.height as u16);
+//                        screen_dimensions = Vec2::new(new_dim.width as f32, new_dim.height as f32);
+//
+//                        // Grab and/or hide mouse cursor in window
+//                        // NOTE: Due to https://github.com/tomaka/winit/issues/574 we need to first
+//                        //       make sure that our resized window now spans the full screen before
+//                        //       we allow grabbing the mouse cursor.
+//                        // TODO(JaSc): Remove workaround when upstream is fixed
+//                        if FULLSCREEN_MODE && new_dim == monitor_logical_dimensions {
+//                            // Our window now has its final size, we can safely grab the cursor now
+//                            info!("Mouse cursor grabbed");
+//                            ready_to_modify_cursor = true;
+//                            window.grab_cursor(true).unwrap();
+//                        }
+//                        if relative_mouse_mode_enabled && ready_to_modify_cursor {
+//                            window.hide_cursor(true);
+//                        }
+//                    }
+//                    WindowEvent::CursorMoved { position, .. } => {
+//                        // NOTE: mouse_pos_screen is in the following interval:
+//                        //       [0 .. screen_width - 1] x [0 .. screen_height - 1]
+//                        //       where (0,0) is the top left of the screen
+//                        let pos = Point::new(position.x as f32, position.y as f32);
+//                        if relative_mouse_mode_enabled {
+//                            // NOTE: We do not use '+=' as we only want to save the last delta
+//                            //       that we registered during the last frame.
+//                            mouse_delta_screen = pos - screen_dimensions / 2.0;
+//                        } else {
+//                            mouse_delta_screen += pos - mouse_pos_screen;
+//                            mouse_pos_screen = pos;
+//                        }
+//                    }
+//                    WindowEvent::MouseWheel { delta, .. } => {
+//                        input.mouse_wheel_delta += match delta {
+//                            glutin::MouseScrollDelta::LineDelta(_, y) => y as i32,
+//                            glutin::MouseScrollDelta::PixelDelta(pos) => pos.y as i32,
+//                        };
+//                    }
+//                    WindowEvent::MouseInput { state, button, .. } => {
+//                        use glutin::ElementState;
+//                        use glutin::MouseButton;
+//
+//                        let is_pressed = match state {
+//                            ElementState::Pressed => true,
+//                            ElementState::Released => false,
+//                        };
+//                        match button {
+//                            MouseButton::Left => input.mouse_button_left.set_state(is_pressed),
+//                            MouseButton::Middle => input.mouse_button_middle.set_state(is_pressed),
+//                            MouseButton::Right => input.mouse_button_right.set_state(is_pressed),
+//                            _ => {}
+//                        }
+//                    }
+//                    _ => (),
                 }
-            }
-        });
+}
 
         if relative_mouse_mode_enabled && window_has_focus {
             mouse_pos_screen += mouse_delta_screen;
@@ -459,13 +451,15 @@ fn main() -> Result<(), Error> {
                 screen_dimensions.y - 1.0,
             ));
 
-            // TODO(JaSc): Maybe we need to set this more frequently?
-            window
-                .set_cursor_position(glutin::dpi::LogicalPosition::new(
-                    f64::from(screen_dimensions.x) / 2.0,
-                    f64::from(screen_dimensions.y) / 2.0,
-                ))
-                .unwrap();
+// TODO: Check if we need this in SDL
+//
+//             // TODO(JaSc): Maybe we need to set this more frequently?
+//             window
+//                 .set_cursor_position(glutin::dpi::LogicalPosition::new(
+//                     f64::from(screen_dimensions.x) / 2.0,
+//                     f64::from(screen_dimensions.y) / 2.0,
+//                 ))
+//                 .unwrap();
         }
 
         // Prepare input and update game
@@ -494,7 +488,8 @@ fn main() -> Result<(), Error> {
             match command {
                 SystemCommand::EnableRelativeMouseMovementCapture(do_enable) => {
                     if ready_to_modify_cursor {
-                        window.hide_cursor(do_enable && window_has_focus);
+                        // TODO: Reimplement this
+                        // window.hide_cursor(do_enable && window_has_focus);
                     } else {
                         unimplemented!();
                         // TODO(JaSc): We need to remember to hide the cursor once we can modify it.
@@ -516,9 +511,8 @@ fn main() -> Result<(), Error> {
 
         // Flush and flip buffers
         rc.encoder.flush(&mut device);
-        window
-            .swap_buffers()
-            .context("Could not to swap framebuffers")?;
+
+window.gl_swap_window();
         device.cleanup();
 
         // Reset input

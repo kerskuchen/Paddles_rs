@@ -2,6 +2,8 @@ use game_lib::{GameContext, GameInput};
 use libloading::Library;
 use std;
 
+use log::*;
+
 // TODO(JaSc): Use std::path::Paths instead of Strings for better readability
 
 /// This helper struct provides convenience methods to load and hot-reload the game's

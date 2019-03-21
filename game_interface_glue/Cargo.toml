@@ -3,6 +3,8 @@ name = "game_interface_glue"
 version = "0.1.0"
 authors = ["Jakob Schwab <j.schwab@mail.de>"]
 
+edition = "2018"
+
 [dependencies]
 
 [dependencies.game_lib]

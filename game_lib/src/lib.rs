@@ -1,5 +1,3 @@
-#![feature(nll)]
-
 pub extern crate cgmath;
 extern crate lodepng;
 extern crate rgb;
